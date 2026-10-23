@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Especificación del API · REST, WebSocket 20 Hz y Tool Calling</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1280px; width: 100%; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2.5rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 1280px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">API Contract · OpenAPI 3.1 + WebSocket + Tool Declarations</p>
+    <h1>Flujo de Contratos entre Gemini 3.8 Live, Cliente Web y Rust Bridge</h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="api-flow-title api-flow-desc">
+        <title id="api-flow-title">Flujo del Contrato de API REST, WebSocket y Gemini Tool Calling</title>
+        <desc id="api-flow-desc">Relación entre las declaraciones de herramientas NON_BLOCKING de Gemini 3.8 Live, los endpoints HTTP REST y el stream WebSocket a 20 Hz del puente en Rust.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+          </marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/>
+          </marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- Zones -->
+        <rect x="40" y="40" width="352" height="428" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.12)" stroke-width="0.8"/>
+        <rect x="56" y="44" width="212" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="162" y="55" fill="#7a8399" font-size="8" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">1 · GEMINI LIVE TOOLS</text>
+
+        <rect x="464" y="40" width="352" height="428" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.12)" stroke-width="0.8"/>
+        <rect x="480" y="44" width="212" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="586" y="55" fill="#7a8399" font-size="8" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">2 · CLIENTE WEB (TS)</text>
+
+        <rect x="888" y="40" width="352" height="428" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.12)" stroke-width="0.8"/>
+        <rect x="904" y="44" width="212" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="1010" y="55" fill="#7a8399" font-size="8" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">3 · RUST BRIDGE (:9000)</text>
+
+        <!-- Connectors -->
+        <line x1="368" y1="160" x2="488" y2="160" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+        <rect x="384" y="132" width="88" height="20" rx="4" fill="#f5f5f5"/>
+        <text x="428" y="146" fill="#2e5aa8" font-size="11" font-family="'Geist Mono', monospace" text-anchor="middle">TOOL CALL</text>
+
+        <line x1="488" y1="360" x2="368" y2="360" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+        <rect x="384" y="332" width="88" height="20" rx="4" fill="#f5f5f5"/>
+        <text x="428" y="346" fill="#4f5d75" font-size="11" font-family="'Geist Mono', monospace" text-anchor="middle">SILENT OK</text>
+
+        <line x1="792" y1="160" x2="912" y2="160" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+        <rect x="808" y="132" width="88" height="20" rx="4" fill="#f5f5f5"/>
+        <text x="852" y="146" fill="#eb6c36" font-size="11" font-family="'Geist Mono', monospace" text-anchor="middle">POST JSON</text>
+
+        <line x1="912" y1="360" x2="792" y2="360" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+        <rect x="808" y="332" width="88" height="20" rx="4" fill="#f5f5f5"/>
+        <text x="852" y="346" fill="#4f5d75" font-size="11" font-family="'Geist Mono', monospace" text-anchor="middle">WS 20 HZ</text>
+
+        <!-- Column 1 Nodes -->
+        <rect x="64" y="84" width="304" height="176" rx="6" fill="#ffffff" stroke="#2e5aa8" stroke-width="1.2"/>
+        <text x="80" y="116" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">EMBODIED_TOOLS</text>
+        <text x="80" y="144" fill="#2e5aa8" font-size="12" font-family="'Geist Mono', monospace">gemini-3.8-live FunctionCalls</text>
+        <text x="80" y="172" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">• express_verdict (Demo A)</text>
+        <text x="80" y="196" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">• release_deploy_key (Demo B)</text>
+        <text x="80" y="220" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">• point_at_service_totem (Demo C)</text>
+        <text x="80" y="244" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">• play_radio_sequence (Demo D)</text>
+
+        <rect x="64" y="284" width="304" height="156" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="80" y="316" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">ToolResponse Asíncrono</text>
+        <text x="80" y="344" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">sendToolResponse({ status: &quot;ok&quot; })</text>
+        <text x="80" y="372" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Inyecta confirmación física y</text>
+        <text x="80" y="396" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">latencia en ms sin cortar el</text>
+        <text x="80" y="420" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">audio o clip musical activo.</text>
+
+        <!-- Column 2 Nodes -->
+        <rect x="488" y="84" width="304" height="176" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="504" y="116" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">Comandos HTTP REST</text>
+        <text x="504" y="144" fill="#eb6c36" font-size="12" font-family="'Geist Mono', monospace">POST /gesture   POST /cmd_vel</text>
+        <text x="504" y="168" fill="#eb6c36" font-size="12" font-family="'Geist Mono', monospace">POST /arm       POST /servo/jog</text>
+        <text x="504" y="192" fill="#eb6c36" font-size="12" font-family="'Geist Mono', monospace">POST /hud       POST /stop</text>
+        <text x="504" y="216" fill="#eb6c36" font-size="12" font-family="'Geist Mono', monospace">POST /rgb       POST /buzzer</text>
+        <text x="504" y="242" fill="#4f5d75" font-size="11" font-family="'Geist Mono', monospace">POST /scene/reset · /simulate/lidar</text>
+
+        <rect x="488" y="284" width="304" height="156" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="504" y="316" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">Streams de Telemetría</text>
+        <text x="504" y="344" fill="#2e5aa8" font-size="12" font-family="'Geist Mono', monospace">WS  /ws (TelemetryState 20 Hz)</text>
+        <text x="504" y="368" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">GET /status (Snapshot JSON)</text>
+        <text x="504" y="392" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">GET /camera/frame (JPEG / SVG)</text>
+        <text x="504" y="416" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Reconexión automática (2,000 ms)</text>
+
+        <!-- Column 3 Nodes -->
+        <rect x="912" y="84" width="304" height="176" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+        <text x="928" y="116" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">Validación y Guardrails</text>
+        <text x="928" y="144" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">linear_x, y ∈ [-0.25, 0.25] m/s</text>
+        <text x="928" y="168" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">angular_z   ∈ [-1.20, 1.20] rad/s</text>
+        <text x="928" y="192" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">servo 2 ∈ [220..780] (LiDAR)</text>
+        <text x="928" y="216" fill="#eb6c36" font-size="12" font-family="'Geist Mono', monospace">front_m &lt; 0.28m ⇒ linear_x = 0</text>
+        <text x="928" y="242" fill="#4f5d75" font-size="11" font-family="'Geist Mono', monospace">HTTP 200 OK / 422 Unprocessable</text>
+
+        <rect x="912" y="284" width="304" height="156" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+        <text x="928" y="316" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">Esquema TelemetryState</text>
+        <text x="928" y="344" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">servos / target_servos (1..5, 10)</text>
+        <text x="928" y="368" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">odometry: { x_m, y_m, yaw_rad }</text>
+        <text x="928" y="392" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">lidar: { front_m, obstacle_alert }</text>
+        <text x="928" y="416" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">active_gesture, mood, hud_headline</text>
+
+        <!-- Legend -->
+        <line x1="40" y1="496" x2="1240" y2="496" stroke="rgba(45,49,66,0.12)" stroke-width="0.8"/>
+        <text x="40" y="528" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">ESPECIFICACIÓN</text>
+        <text x="160" y="528" fill="#4f5d75" font-size="11" font-family="'Geist Mono', monospace">Incluye esquemas JSON formales, códigos de estado HTTP y especificación OpenAPI 3.1.0 completa en docs/openapi.yaml.</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

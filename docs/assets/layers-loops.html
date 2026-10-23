@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Capas del Sistema y Loops en Tiempo Real</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1280px; width: 100%; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2.5rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 1280px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · Desacoplamiento Temporal</p>
+    <h1>4 Capas del Sistema y Loops en Tiempo Real</h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="layers-loops-title layers-loops-desc">
+        <title id="layers-loops-title">Capas del Sistema y Loops Concurrentes en Tiempo Real</title>
+        <desc id="layers-loops-desc">Desacoplamiento entre la inferencia multimodal en la nube (~300 ms), la interfaz web (60 FPS), el puente determinista en Rust (40 Hz) y el bus serial del robot (1 Mbps).</desc>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- Left Zone: 4 Layers -->
+        <rect x="40" y="36" width="712" height="436" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.12)" stroke-width="0.8"/>
+        <rect x="56" y="40" width="232" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="172" y="51" fill="#7a8399" font-size="8" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">ARQUITECTURA DE 4 CAPAS</text>
+
+        <!-- Right Zone: Real-Time Loops -->
+        <rect x="784" y="36" width="456" height="436" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.12)" stroke-width="0.8"/>
+        <rect x="800" y="40" width="248" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="924" y="51" fill="#7a8399" font-size="8" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">LOOPS DETERMINISTAS Y SEGURIDAD</text>
+
+        <!-- Layer 4 -->
+        <rect x="64" y="72" width="664" height="84" rx="6" fill="#ffffff" stroke="#2e5aa8" stroke-width="1.2"/>
+        <rect x="80" y="88" width="136" height="16" rx="2" fill="none" stroke="rgba(46,90,168,0.50)" stroke-width="0.8"/>
+        <text x="148" y="99" fill="#2e5aa8" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CAPA 4 · CLOUD AI</text>
+        <text x="236" y="102" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">Gemini 3.8 Live (WebSocket BidiGenerateContent)</text>
+        <text x="236" y="126" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Audio PCM 16/24 kHz + Visión JPEG 1 Hz + Tools NON_BLOCKING</text>
+        <text x="236" y="144" fill="#2e5aa8" font-size="11" font-family="'Geist Mono', monospace">Escala temporal: ~250 – 450 ms</text>
+
+        <!-- Layer 3 -->
+        <rect x="64" y="172" width="664" height="84" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <rect x="80" y="188" width="136" height="16" rx="2" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+        <text x="148" y="199" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CAPA 3 · WEB UI</text>
+        <text x="236" y="202" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">Next.js 16 + Three.js URDF + Bumblebee Radio</text>
+        <text x="236" y="226" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Clon 3D reactivo, supresión acústica de eco y rostro táctil /face</text>
+        <text x="236" y="244" fill="#4f5d75" font-size="11" font-family="'Geist Mono', monospace">Escala temporal: 60 FPS (16.6 ms)</text>
+
+        <!-- Layer 2 -->
+        <rect x="64" y="272" width="664" height="84" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+        <rect x="80" y="288" width="136" height="16" rx="2" fill="none" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+        <text x="148" y="299" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CAPA 2 · RUST BRIDGE</text>
+        <text x="236" y="302" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">Puente Axum Determinista (rosorin-bridge :9000)</text>
+        <text x="236" y="326" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Clamping de pulsos (120..880), reflejo LiDAR y deadman watchdog</text>
+        <text x="236" y="344" fill="#eb6c36" font-size="11" font-family="'Geist Mono', monospace">Escala temporal: Loop 40 Hz (25 ms) · WS 20 Hz (50 ms)</text>
+
+        <!-- Layer 1 -->
+        <rect x="64" y="372" width="664" height="84" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+        <rect x="80" y="388" width="136" height="16" rx="2" fill="none" stroke="rgba(79,93,117,0.40)" stroke-width="0.8"/>
+        <text x="148" y="399" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CAPA 1 · HARDWARE</text>
+        <text x="236" y="402" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">STM32F407 + 4 Mecanum + 6 Servos + Sensores ROS 2</text>
+        <text x="236" y="426" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Tramas binarias AA 55 en /dev/ttyACM0 + LiDAR MS200 + Cámara</text>
+        <text x="236" y="444" fill="#4f5d75" font-size="11" font-family="'Geist Mono', monospace">Escala temporal: UART 1,000,000 bps (&lt; 2 ms)</text>
+
+        <!-- Right Cards: 4 Loops -->
+        <rect x="808" y="72" width="408" height="84" rx="6" fill="#ffffff" stroke="#eb6c36" stroke-width="1.2"/>
+        <text x="828" y="100" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">1. Loop Físico y Serial (40 Hz / 25 ms)</text>
+        <text x="828" y="124" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Integra odometría, interpola servos y aplica</text>
+        <text x="828" y="144" fill="#eb6c36" font-size="12" font-family="'Geist Mono', monospace">Dead-Man Switch si expira cmd_until (600 ms)</text>
+
+        <rect x="808" y="172" width="408" height="84" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="828" y="200" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">2. Broadcast de Telemetría (20 Hz / 50 ms)</text>
+        <text x="828" y="224" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Emite RobotState JSON por WebSocket (/ws)</text>
+        <text x="828" y="244" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Sincroniza /robot, /face, /hud y /demos/*</text>
+
+        <rect x="808" y="272" width="408" height="84" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="828" y="300" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">3. Escudo LiDAR Anti-Colisión (10 Hz)</text>
+        <text x="828" y="324" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Filtra sombra del brazo (±35° &lt; 0.18 m)</text>
+        <text x="828" y="344" fill="#eb6c36" font-size="12" font-family="'Geist Mono', monospace">Frena avance vx &gt; 0 si min_front_m &lt; 0.25 m</text>
+
+        <rect x="808" y="372" width="408" height="84" rx="6" fill="#ffffff" stroke="#2e5aa8" stroke-width="1.2"/>
+        <text x="828" y="400" fill="#2d3142" font-size="15" font-weight="600" font-family="'Geist', sans-serif">4. Ventana Anti-Eco Acústico y Mecánico</text>
+        <text x="828" y="424" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Bloquea PCM del mic mientras el robot habla,</text>
+        <text x="828" y="444" fill="#2e5aa8" font-size="12" font-family="'Geist Mono', monospace">reproduce canciones o mueve servos (+1.2 s)</text>
+
+        <!-- Bottom Rule -->
+        <line x1="40" y1="496" x2="1240" y2="496" stroke="rgba(45,49,66,0.12)" stroke-width="0.8"/>
+        <text x="40" y="528" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">PRINCIPIO</text>
+        <text x="128" y="528" fill="#4f5d75" font-size="11" font-family="'Geist Mono', monospace">Ninguna latencia de red o inferencia en la nube puede dejar un motor encendido ni violar los límites mecánicos en la Capa 1.</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

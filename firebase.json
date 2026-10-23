@@ -1,0 +1,30 @@
+{
+  "hosting": {
+    "site": "jsconfmx26",
+    "public": "web/out",
+    "cleanUrls": true,
+    "trailingSlash": false,
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/slides",
+        "destination": "/slides/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(html|json)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
+    ]
+  }
+}

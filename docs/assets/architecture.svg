@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="rosorin-arch-title rosorin-arch-desc" id="architecture-root">
+        <title id="rosorin-arch-title">Arquitectura End-to-End de ROSOrin Pro con Gemini 3.8 Live</title>
+        <desc id="rosorin-arch-desc">Flujo de voz bidireccional PCM, llamadas a herramientas no bloqueantes y telemetría a 20 Hz entre el cliente web en Next.js, Gemini 3.8 Live, el puente en Rust a 40 Hz y el robot Hiwonder ROSOrin Pro.</desc>
+        <defs>
+      <style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Noto+Serif:ital@0;1&amp;family=Noto+Sans+KR:wght@400;500;600&amp;family=Noto+Serif+KR:wght@400&amp;family=Noto+Sans+TC:wght@400;500;600&amp;family=Noto+Serif+TC:wght@400&amp;display=swap');
+      #architecture-root { --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', 'Noto Serif KR', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace; }
+      #architecture-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #architecture-root .diagram-container { width: 100%; overflow-x: auto; }
+      #architecture-root .diagram-container { overflow-x: visible; }</style>
+          <marker id="architecture-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+          </marker>
+          <marker id="architecture-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/>
+          </marker>
+          <marker id="architecture-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+          </marker>
+        </defs>
+
+        <!-- Clean paper background -->
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- 1. ZONES (drawn before arrows and nodes) -->
+        <!-- Zone 1: Cliente Web (:3000) -->
+        <rect x="40" y="48" width="352" height="560" rx="8" fill="#2d3142" fill-opacity="0.02" stroke="#2d3142" stroke-opacity="0.12" stroke-width="0.8"/>
+        <rect x="56" y="52" width="164" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="138" y="63" fill="#7a8399" font-size="8" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">CLIENTE WEB (:3000)</text>
+
+        <!-- Zone 2: IA y Bridge (:9000) -->
+        <rect x="464" y="48" width="352" height="560" rx="8" fill="#2d3142" fill-opacity="0.02" stroke="#2d3142" stroke-opacity="0.12" stroke-width="0.8"/>
+        <rect x="480" y="52" width="164" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="562" y="63" fill="#7a8399" font-size="8" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">IA Y BRIDGE (:9000)</text>
+
+        <!-- Zone 3: ROSOrin Pro -->
+        <rect x="888" y="48" width="352" height="560" rx="8" fill="#2d3142" fill-opacity="0.02" stroke="#2d3142" stroke-opacity="0.12" stroke-width="0.8"/>
+        <rect x="904" y="52" width="176" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="992" y="63" fill="#7a8399" font-size="8" font-weight="500" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.14em">ROSORIN PRO (ROBOT)</text>
+
+        <!-- 2. ARROWS & LABELS (drawn before nodes) -->
+        <!-- Connector 1: Web Audio -> Gemini Live (PCM 16 KHZ) -->
+        <line x1="368" y1="148" x2="488" y2="148" stroke="#2e5aa8" stroke-width="1.2" marker-end="url(#architecture-arrow-link)"/>
+        <rect x="380" y="120" width="96" height="20" rx="4" fill="#f5f5f5"/>
+        <text x="428" y="134" fill="#2e5aa8" font-size="12" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PCM 16 KHZ</text>
+
+        <!-- Connector 2: Gemini Live -> Web Audio (24 KHZ + TOOL) -->
+        <line x1="488" y1="200" x2="368" y2="200" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#architecture-arrow-accent)"/>
+        <rect x="376" y="208" width="104" height="20" rx="4" fill="#f5f5f5"/>
+        <text x="428" y="222" fill="#eb6c36" font-size="12" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">24 KHZ+TOOL</text>
+
+        <!-- Connector 3: Web UI -> robot-bridge (REST/WS) -->
+        <path d="M 368,248 H 400 Q 408,248 408,256 V 428 Q 408,436 416,436 H 488" fill="none" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#architecture-arrow-accent)"/>
+        <rect x="416" y="332" width="68" height="20" rx="4" fill="#f5f5f5"/>
+        <text x="450" y="346" fill="#eb6c36" font-size="12" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">REST/WS</text>
+
+        <!-- Connector 4: robot-bridge -> Clon 3D (WS 20 HZ) -->
+        <line x1="488" y1="508" x2="368" y2="508" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#architecture-arrow)"/>
+        <rect x="388" y="480" width="80" height="20" rx="4" fill="#f5f5f5"/>
+        <text x="428" y="494" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">WS 20 HZ</text>
+
+        <!-- Connector 5: robot-bridge -> ROS 2 Humble (IPC / ROS2) -->
+        <path d="M 792,444 H 824 Q 832,444 832,436 V 188 Q 832,180 840,180 H 912" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#architecture-arrow)"/>
+        <rect x="800" y="152" width="84" height="20" rx="4" fill="#f5f5f5"/>
+        <text x="842" y="166" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ROS 2 IPC</text>
+
+        <!-- Connector 6: ROS 2 Humble -> robot-bridge (LIDAR / CAM) -->
+        <path d="M 912,236 H 860 Q 852,236 852,244 V 500 Q 852,508 844,508 H 792" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#architecture-arrow)"/>
+        <rect x="804" y="516" width="96" height="20" rx="4" fill="#f5f5f5"/>
+        <text x="852" y="530" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">LIDAR / CAM</text>
+
+        <!-- Connector 7: ROS 2 Humble -> STM32 (UART 1 MBPS) -->
+        <line x1="1064" y1="276" x2="1064" y2="384" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#architecture-arrow-accent)"/>
+        <rect x="1072" y="320" width="104" height="20" rx="4" fill="#f5f5f5"/>
+        <text x="1124" y="334" fill="#eb6c36" font-size="12" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">UART 1 MBPS</text>
+
+        <!-- 3. NODES -->
+        <!-- Node 1: Controles y Voz Web -->
+        <rect x="64" y="96" width="304" height="180" rx="6" fill="#f5f5f5"/>
+        <rect x="64" y="96" width="304" height="180" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <rect x="80" y="112" width="96" height="16" rx="2" fill="none" stroke="#2d3142" stroke-opacity="0.40" stroke-width="0.8"/>
+        <text x="128" y="123" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">NEXT.JS + TS</text>
+        <text x="80" y="156" fill="#2d3142" font-size="16" font-weight="600" font-family="'Geist', sans-serif">Controles y Voz Web</text>
+        <text x="80" y="188" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Web Audio PCM 16/24 kHz</text>
+        <text x="80" y="212" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Noise Gate 1.2s + Barge-In</text>
+        <text x="80" y="236" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Rostro táctil (/face)</text>
+
+        <!-- Node 2: Clon 3D (URDF/STL) -->
+        <rect x="64" y="384" width="304" height="180" rx="6" fill="#f5f5f5"/>
+        <rect x="64" y="384" width="304" height="180" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <rect x="80" y="400" width="108" height="16" rx="2" fill="none" stroke="#2d3142" stroke-opacity="0.40" stroke-width="0.8"/>
+        <text x="134" y="411" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">THREE.JS 60 FPS</text>
+        <text x="80" y="444" fill="#2d3142" font-size="16" font-weight="600" font-family="'Geist', sans-serif">Clon 3D (URDF/STL)</text>
+        <text x="80" y="476" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">16 mallas CAD (.stl)</text>
+        <text x="80" y="500" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Cinemática J1..J5 + Pinza</text>
+        <text x="80" y="524" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Espejo en vivo a 20 Hz</text>
+
+        <!-- Node 3: Gemini Live API (WSS) [Focal 1] -->
+        <rect x="488" y="96" width="304" height="180" rx="6" fill="#f5f5f5"/>
+        <rect x="488" y="96" width="304" height="180" rx="6" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.2"/>
+        <rect x="504" y="112" width="112" height="16" rx="2" fill="none" stroke="#eb6c36" stroke-opacity="0.50" stroke-width="0.8"/>
+        <text x="560" y="123" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">GEMINI-3.8-LIVE</text>
+        <text x="504" y="156" fill="#2d3142" font-size="16" font-weight="600" font-family="'Geist', sans-serif">Gemini Live API (WSS)</text>
+        <text x="504" y="188" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Voz nativa 24 kHz (~350 ms)</text>
+        <text x="504" y="212" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Visión JPEG 1 FPS</text>
+        <text x="504" y="236" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Tools NON_BLOCKING</text>
+
+        <!-- Node 4: API robot-bridge (40 Hz) [Focal 2] -->
+        <rect x="488" y="384" width="304" height="180" rx="6" fill="#f5f5f5"/>
+        <rect x="488" y="384" width="304" height="180" rx="6" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.2"/>
+        <rect x="504" y="400" width="120" height="16" rx="2" fill="none" stroke="#eb6c36" stroke-opacity="0.50" stroke-width="0.8"/>
+        <text x="564" y="411" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">RUST · AXUM :9000</text>
+        <text x="504" y="444" fill="#2d3142" font-size="16" font-weight="600" font-family="'Geist', sans-serif">API robot-bridge (40 Hz)</text>
+        <text x="504" y="476" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Loop 40 Hz + WS 20 Hz</text>
+        <text x="504" y="500" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Clamp 120..880 + Watchdog</text>
+        <text x="504" y="524" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">--backend mock | ros2</text>
+
+        <!-- Node 5: ROS 2 Humble -->
+        <rect x="912" y="96" width="304" height="180" rx="6" fill="#f5f5f5"/>
+        <rect x="912" y="96" width="304" height="180" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <rect x="928" y="112" width="120" height="16" rx="2" fill="none" stroke="#2d3142" stroke-opacity="0.40" stroke-width="0.8"/>
+        <text x="988" y="123" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">JETSON ORIN NANO</text>
+        <text x="928" y="156" fill="#2d3142" font-size="16" font-weight="600" font-family="'Geist', sans-serif">ROS 2 Humble</text>
+        <text x="928" y="188" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">/cmd_vel · /odom</text>
+        <text x="928" y="212" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">/scan (LiDAR MS200)</text>
+        <text x="928" y="236" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">/depth_cam/rgb0/image_raw</text>
+
+        <!-- Node 6: 6 Servos + 4 Mecanum -->
+        <rect x="912" y="384" width="304" height="180" rx="6" fill="#f5f5f5"/>
+        <rect x="912" y="384" width="304" height="180" rx="6" fill="#2d3142" fill-opacity="0.05" stroke="#4f5d75" stroke-width="1"/>
+        <rect x="928" y="400" width="112" height="16" rx="2" fill="none" stroke="#4f5d75" stroke-opacity="0.40" stroke-width="0.8"/>
+        <text x="984" y="411" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STM32 /DEV/RRC</text>
+        <text x="928" y="444" fill="#2d3142" font-size="16" font-weight="600" font-family="'Geist', sans-serif">6 Servos + 4 Mecanum</text>
+        <text x="928" y="476" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Brazo IDs 1..5 + Pinza 10</text>
+        <text x="928" y="500" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">UART 1 Mbps (0xAA 0x55)</text>
+        <text x="928" y="524" fill="#4f5d75" font-size="12" font-family="'Geist Mono', monospace">Freno LiDAR (&lt; 0.28 m)</text>
+
+        <!-- 4. LEGEND STRIP AT BOTTOM -->
+        <line x1="40" y1="648" x2="1240" y2="648" stroke="#2d3142" stroke-opacity="0.12" stroke-width="0.8"/>
+        <text x="40" y="680" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEYENDA</text>
+
+        <line x1="128" y1="676" x2="160" y2="676" stroke="#eb6c36" stroke-width="1.2"/>
+        <text x="172" y="680" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">Voz 24 kHz, Tool Calls y UART</text>
+
+        <line x1="416" y1="676" x2="448" y2="676" stroke="#2e5aa8" stroke-width="1.2"/>
+        <text x="460" y="680" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">Audio Micrófono 16 kHz (WSS)</text>
+
+        <line x1="700" y1="676" x2="732" y2="676" stroke="#4f5d75" stroke-width="1.2"/>
+        <text x="744" y="680" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">Comandos ROS 2 Humble</text>
+
+        <line x1="948" y1="676" x2="980" y2="676" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4"/>
+        <text x="992" y="680" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace">Telemetría 20 Hz, LiDAR y Cámara</text>
+      </svg>
