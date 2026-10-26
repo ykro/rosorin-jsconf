@@ -1,17 +1,21 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { stopAllActiveConversations, type StopReason } from '@/lib/gemini-live';
 import { stopActiveBumblebeeSession } from '@/lib/bumblebee-radio';
 import type { RobotLink } from '@/lib/use-robot-telemetry';
+import { shouldIgnoreShortcut } from '@/lib/keyboard';
 import { BridgeAlerts, BridgeSettingsPanel } from './BridgeControls';
 
 function stopAllSessions(reason: StopReason) {
   stopAllActiveConversations(reason);
   stopActiveBumblebeeSession(reason);
 }
+
+/** Dedicated E-stop key. Not used by any stage shortcut (keyboard.ts, 3D viewer, /robot). */
+export const ESTOP_KEY = 'Escape';
 
 interface TopNavProps {
   /** Robot link from useRobotTelemetry(); omit on pages without telemetry. */
@@ -28,6 +32,37 @@ export function TopNav({ robot, liteMode: propLite }: TopNavProps) {
   const [panelOpen, setPanelOpen] = useState(false);
   const closePanel = useCallback(() => setPanelOpen(false), []);
   const bridge = robot?.bridge;
+  const [stopState, setStopState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const showStop = Boolean(robot && bridge?.enabled);
+
+  const emergencyStop = robot?.emergencyStop;
+  const handleEmergencyStop = useCallback(async () => {
+    if (!emergencyStop) return;
+    setStopState({ busy: true, error: null });
+    const result = await emergencyStop();
+    setStopState({ busy: false, error: result.ok ? null : result.message });
+  }, [emergencyStop]);
+
+  // Escape = E-stop (closes the settings panel first if it is open). Ignored while
+  // typing or with modifiers, like every other stage shortcut.
+  const panelOpenRef = useRef(panelOpen);
+  useEffect(() => {
+    panelOpenRef.current = panelOpen;
+  }, [panelOpen]);
+  useEffect(() => {
+    if (!showStop) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== ESTOP_KEY || e.repeat || shouldIgnoreShortcut(e)) return;
+      e.preventDefault();
+      if (panelOpenRef.current) {
+        setPanelOpen(false);
+        return;
+      }
+      void handleEmergencyStop();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showStop, handleEmergencyStop]);
 
   // Switching tabs stops the conversation on purpose: otherwise the robot keeps
   // listening (and answering) while the presenter talks over the slides. The
@@ -158,6 +193,27 @@ export function TopNav({ robot, liteMode: propLite }: TopNavProps) {
           </div>
 
           <div className="relative flex shrink-0 items-center gap-2">
+            {showStop && (
+              <>
+                {stopState.error && (
+                  <span role="alert" className="max-w-[220px] truncate text-xs font-semibold text-[#A50E0E]" title={stopState.error}>
+                    {stopState.error}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void handleEmergencyStop()}
+                  disabled={stopState.busy}
+                  aria-label="Paro de emergencia del robot (tecla Escape)"
+                  aria-keyshortcuts={ESTOP_KEY}
+                  title="Paro de emergencia (Esc)"
+                  className="flex items-center gap-1.5 rounded-xl bg-[#D93025] px-3 py-1.5 text-xs font-extrabold text-white hover:bg-[#B3261E] disabled:opacity-50"
+                >
+                  PARO
+                  <kbd className="rounded bg-white/20 px-1 font-mono text-[10px] font-bold">Esc</kbd>
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={() => setPanelOpen((v) => !v)}

@@ -51,7 +51,13 @@ export type BridgeErrorCode =
   | 'rate_limited'
   | 'invalid_request'
   | 'not_found'
-  | 'http';
+  | 'http'
+  // Movement refused by the bridge safety layer (HTTP 200 with `blocked`): the robot did not move.
+  | MotionBlockReason
+  | 'blocked';
+
+/** `blocked` field of the bridge's movement responses (null or absent: executed). */
+export type MotionBlockReason = 'lidar_stale' | 'braked' | 'worker_dead';
 
 /** Outcome of a robot action, as reported to the UI and to Gemini tool responses. */
 export interface RobotActionResult {

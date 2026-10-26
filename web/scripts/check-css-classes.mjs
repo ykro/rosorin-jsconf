@@ -3,7 +3,9 @@
  * There is no Tailwind in this project: every utility class used in JSX is
  * hand-written in src/app/globals.css. This script makes sure that:
  *   1. every class used in `className` (and in `*Class` / `color` props holding
- *      class lists) under src/**\/*.tsx has a matching selector in globals.css;
+ *      class lists) under src/**\/*.tsx has a matching selector in globals.css,
+ *      and so does every other string literal that looks like a class list
+ *      (e.g. `const pillTone = cond ? 'border-[#34A853] bg-[#E6F4EA]' : …`);
  *   2. every arbitrary-color class (`bg-[#RRGGBB]`, `text-[#...]/50`, ...) in
  *      globals.css declares the same color its name promises.
  *
@@ -118,7 +120,63 @@ function lineOf(src, index) {
   return src.slice(0, index).split('\n').length;
 }
 
-function collectUsedClasses(files) {
+/** Every string literal of a source file (static text of templates included). */
+function allStringLiterals(src) {
+  const out = [];
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    // Skip comments so apostrophes in prose do not open fake strings.
+    if (ch === '/' && src[i + 1] === '/') {
+      const nl = src.indexOf('\n', i);
+      i = nl === -1 ? src.length : nl;
+      continue;
+    }
+    if (ch === '/' && src[i + 1] === '*') {
+      const end = src.indexOf('*/', i + 2);
+      i = end === -1 ? src.length : end + 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = skipString(src, i);
+      out.push({ index: i, pieces: stringLiteralsIn(src.slice(i, end)) });
+      i = end;
+      continue;
+    }
+    i += 1;
+  }
+  return out;
+}
+
+const STYLE_KEY =
+  /^(?:[a-z]+[A-Z][A-Za-z]*|display|position|overflow|cursor|float|visibility|transition|animation|background|border|outline|margin|padding|font|width|height)$/;
+
+/** Utility "families" (first segment: bg, text, border, rounded…) defined in globals.css. */
+function utilityPrefixes(rules) {
+  const prefixes = new Set();
+  for (const cls of rules.keys()) {
+    const base = cls.replace(/^(?:[a-z0-9-]+:)+/, '').replace(/^-/, '');
+    const head = base.split(/[-[]/)[0];
+    if (head) prefixes.add(head);
+  }
+  return prefixes;
+}
+
+/** A literal is a class list when every token is class-shaped and from a known utility family. */
+function looksLikeClassList(text, prefixes) {
+  const raw = text.trim().split(/\s+/).filter(Boolean);
+  if (!raw.length) return false;
+  const toks = tokensOf(text);
+  if (toks.length !== raw.length) return false;
+  if (!toks.some((t) => t.includes('-') || t.includes('['))) return false;
+  return toks.every((t) => {
+    const base = t.replace(/^(?:[a-z0-9-]+:)+/, '').replace(/^-/, '');
+    const outsideBrackets = base.replace(/\[[^\]]*\]/g, '');
+    return prefixes.has(base.split(/[-[]/)[0]) && outsideBrackets === outsideBrackets.toLowerCase();
+  });
+}
+
+function collectUsedClasses(files, prefixes) {
   /** @type {Map<string, string[]>} class -> locations */
   const used = new Map();
   const add = (cls, loc) => {
@@ -159,6 +217,18 @@ function collectUsedClasses(files) {
       if (!looksLikeClassList) continue;
       const loc = `${rel}:${lineOf(src, m.index)}`;
       for (const t of toks) add(t, loc);
+    }
+
+    // 3. Any other string literal shaped like a class list (constants, ternaries, maps…).
+    for (const lit of allStringLiterals(src)) {
+      for (const piece of lit.pieces) {
+        if (!looksLikeClassList(piece, prefixes)) continue;
+        // Inline style values (`justifyContent: 'space-between'`) are CSS, not classes.
+        const key = /(\w+)\s*:\s*$/.exec(src.slice(Math.max(0, lit.index - 40), lit.index))?.[1];
+        if (key && STYLE_KEY.test(key) && !/class/i.test(key)) continue;
+        const loc = `${rel}:${lineOf(src, lit.index)}`;
+        for (const t of tokensOf(piece)) add(t, loc);
+      }
     }
   }
   return used;
@@ -203,8 +273,8 @@ function declaredColors(body) {
 }
 
 const files = walk(SRC);
-const used = collectUsedClasses(files);
 const rules = parseCss(readFileSync(CSS_FILE, 'utf8'));
+const used = collectUsedClasses(files, utilityPrefixes(rules));
 
 let problems = 0;
 

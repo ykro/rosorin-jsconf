@@ -60,8 +60,12 @@ class LidarSectorTests(unittest.TestCase):
 
     def test_only_shadow_rays_report_closest_filtered(self):
         scan = make_scan({d: 0.08 for d in range(-10, 11)})
-        sectors = worker.compute_lidar_sectors(scan, 0.12, 35.0)
+        # Legacy rule in isolation (no blind-sector check)
+        sectors = worker.compute_lidar_sectors(scan, 0.12, 35.0, 0.06, 0.0)
         self.assertAlmostEqual(sectors["front_m"], 0.08)
+        # With the default blind-sector check (21/91 echoes) it blocks even harder
+        sectors = worker.compute_lidar_sectors(scan, 0.12, 35.0)
+        self.assertLess(sectors["front_m"], BRAKE_M)
 
     def test_shadow_never_reports_other_sectors_max(self):
         points = {d: 0.10 for d in range(-20, 21)}  # all front rays filtered
@@ -70,24 +74,100 @@ class LidarSectorTests(unittest.TestCase):
         self.assertAlmostEqual(sectors["front_m"], 0.10)
 
     def test_sector_mapping_rep103(self):
-        scan = make_scan({0: 1.1, 90: 0.5, -90: 0.6, 180: 0.7})
+        scan = make_scan({0: 1.1, 90: 0.5, -90: 0.6, 180: 0.7}, default=3.0)
         sectors = worker.compute_lidar_sectors(scan, 0.12, 35.0)
         self.assertAlmostEqual(sectors["front_m"], 1.1)
         self.assertAlmostEqual(sectors["left_m"], 0.5)
         self.assertAlmostEqual(sectors["right_m"], 0.6)
         self.assertAlmostEqual(sectors["back_m"], 0.7)
 
-    def test_no_returns_reports_open(self):
+    def test_no_returns_reports_blocked(self):
+        # Every ray inf: nothing seen is NOT "open" (fails closed)
         sectors = worker.compute_lidar_sectors(make_scan({}), 0.12, 35.0)
-        self.assertEqual(sectors["front_m"], 4.0)
         self.assertEqual(sectors["event"], "lidar")
+        for name in ("front_m", "left_m", "right_m", "back_m"):
+            self.assertEqual(sectors[name], 0.0)
+        self.assertEqual(sectors["blind"], ["front", "left", "right", "back"])
+
+    def test_sector_with_only_invalid_rays_is_blind(self):
+        for bad in (math.inf, -math.inf, math.nan, 0.0, 0.01):
+            points = {d: bad for d in range(-45, 46)}
+            sectors = worker.compute_lidar_sectors(make_scan(points, default=2.0))
+            self.assertEqual(sectors["front_m"], 0.0, bad)
+            self.assertLess(sectors["front_m"], BRAKE_M)
+            self.assertEqual(sectors["blind"], ["front"], bad)
+            self.assertAlmostEqual(sectors["left_m"], 2.0)
+
+    def test_sparse_echoes_below_fraction_are_blind(self):
+        # 9 of 91 front rays (~10%) see a far wall: below the 25% default -> blind
+        points = {d: 3.0 for d in range(-45, 46, 10)}
+        sectors = worker.compute_lidar_sectors(make_scan(points), 0.12, 35.0, 0.06, 0.25)
+        self.assertEqual(sectors["front_m"], 0.0)
+        # Half of them valid -> real distance
+        points = {d: 3.0 for d in range(-45, 46, 2)}
+        sectors = worker.compute_lidar_sectors(make_scan(points), 0.12, 35.0, 0.06, 0.25)
+        self.assertAlmostEqual(sectors["front_m"], 3.0)
+        self.assertNotIn("front", sectors["blind"])
+
+    def test_min_valid_fraction_zero_restores_open(self):
+        sectors = worker.compute_lidar_sectors(make_scan({}), 0.12, 35.0, 0.06, 0.0)
+        self.assertEqual(sectors["front_m"], worker.LIDAR_OPEN_M)
+        self.assertEqual(sectors["blind"], [])
+
+    def test_pole_inside_shadow_cone_blocks_with_default_band(self):
+        # Wall at 1 m everywhere in front, pole at 0.10 m at ±5 deg (inside the shadow cone):
+        # with the default band (0.06-0.09 m) the pole is NOT the arm and blocks.
+        points = {d: 1.0 for d in range(-45, 46)}
+        points.update({d: 0.10 for d in range(-5, 6)})
+        sectors = worker.compute_lidar_sectors(make_scan(points, default=2.0))
+        self.assertAlmostEqual(sectors["front_m"], 0.10)
+        self.assertLess(sectors["front_m"], BRAKE_M)
+
+    def test_echo_closer_than_shadow_band_blocks(self):
+        # Calibrated band 0.08-0.12 m: an object at 0.06 m is closer than the arm can be -> blocks
+        points = {d: 1.0 for d in range(-45, 46)}
+        points.update({d: 0.10 for d in range(-10, 11)})  # arm, inside the band: ignored
+        points.update({d: 0.06 for d in range(20, 23)})  # obstacle under the band
+        sectors = worker.compute_lidar_sectors(make_scan(points, default=2.0), 0.12, 35.0, 0.08)
+        self.assertAlmostEqual(sectors["front_m"], 0.06)
+
+    def test_calibrated_arm_inside_band_is_still_ignored(self):
+        points = {d: 1.0 for d in range(-45, 46)}
+        points.update({d: 0.075 for d in range(-8, 9)})  # arm at 7.5 cm, default band 0.06-0.09
+        sectors = worker.compute_lidar_sectors(make_scan(points, default=2.0))
+        self.assertAlmostEqual(sectors["front_m"], 1.0)
 
     def test_env_defaults(self):
-        self.assertEqual(worker.ARM_SHADOW_MAX_M, float(os.environ.get("ARM_SHADOW_MAX_M", 0.12)))
+        self.assertEqual(worker.ARM_SHADOW_MIN_M, float(os.environ.get("ARM_SHADOW_MIN_M", 0.06)))
+        self.assertEqual(worker.ARM_SHADOW_MAX_M, float(os.environ.get("ARM_SHADOW_MAX_M", 0.09)))
         self.assertEqual(
             worker.ARM_SHADOW_HALF_ANGLE_DEG,
-            float(os.environ.get("ARM_SHADOW_HALF_ANGLE_DEG", 35.0)),
+            float(os.environ.get("ARM_SHADOW_HALF_ANGLE_DEG", 20.0)),
         )
+        self.assertEqual(
+            worker.LIDAR_MIN_VALID_FRACTION,
+            float(os.environ.get("LIDAR_MIN_VALID_FRACTION", 0.25)),
+        )
+
+
+class HeartbeatTests(unittest.TestCase):
+    def test_ping_is_echoed_as_pong(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertTrue(worker.reply_ping({"op": "ping", "seq": 41}))
+            self.assertFalse(worker.reply_ping({"op": "cmd_vel", "linear_x": 0.1}))
+        lines = buf.getvalue().splitlines()
+        self.assertEqual([json.loads(l) for l in lines], [{"event": "pong", "seq": 41}])
+
+    def test_board_command_loop_answers_ping_without_touching_hardware(self):
+        class NoBoard:
+            def __getattr__(self, name):
+                raise AssertionError(f"ping must not touch the board ({name})")
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            worker.handle_board_command(NoBoard(), {"op": "ping", "seq": 7}, {})
+        self.assertEqual(json.loads(buf.getvalue()), {"event": "pong", "seq": 7})
 
 
 class EmitTests(unittest.TestCase):

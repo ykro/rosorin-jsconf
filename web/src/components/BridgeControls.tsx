@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  bridgeHost,
   getBridgeToken,
   getStoredBridgeUrl,
   isBridgeEnabled,
@@ -102,6 +103,7 @@ interface BridgeSettingsPanelProps {
 
 /** Bridge URL, shared token and on/off switch (stored only in this browser). */
 export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: BridgeSettingsPanelProps) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [publicSite, setPublicSite] = useState(false);
   const [currentUrl, setCurrentUrl] = useState('');
@@ -119,16 +121,26 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
       setHasToken(Boolean(getBridgeToken()));
     };
     sync();
-    const unsubscribe = onBridgeConfigChange(sync);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
+    return onBridgeConfigChange(sync);
+  }, []);
+
+  // Initial focus inside the dialog; focus goes back to the opener on close.
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialogRef.current?.querySelector<HTMLElement>('button, input')?.focus();
     return () => {
-      unsubscribe();
-      window.removeEventListener('keydown', onKey);
+      if (opener?.isConnected) opener.focus();
     };
-  }, [onClose]);
+  }, []);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      // Handled here so the global E-stop shortcut (Escape) does not also fire.
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    }
+  };
 
   const statusText = !enabled
     ? 'Desconectado: solo simulador 3D'
@@ -145,8 +157,12 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
   const saveUrl = (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      setStoredBridgeUrl(urlDraft.trim() || null);
-      setNotice(urlDraft.trim() ? 'URL guardada.' : 'URL restablecida.');
+      const tokenCleared = setStoredBridgeUrl(urlDraft.trim() || null);
+      setNotice(
+        `${urlDraft.trim() ? 'URL guardada.' : 'URL restablecida.'}${
+          tokenCleared ? ' Cambiaste de host: se borró el token (pega el del nuevo bridge).' : ''
+        }`
+      );
     } catch (err) {
       setNotice(err instanceof Error ? err.message : String(err));
     }
@@ -168,8 +184,11 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
+      aria-modal="true"
       aria-label="Conexión con el robot"
+      onKeyDown={handleKeyDown}
       className="absolute right-0 top-12 z-50 w-[340px] rounded-2xl border border-[#DADCE0] bg-white p-4 text-left text-[#202124] shadow-lg"
     >
       <div className="flex items-center justify-between gap-2">
@@ -186,7 +205,10 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
       <p className="mt-1 text-xs text-[#5F6368]" role="status" aria-live="polite">
         {statusText}
       </p>
-      <p className="mt-1 truncate font-mono text-[11px] text-[#5F6368]">{currentUrl}</p>
+      <p className="mt-1 truncate text-[11px] text-[#5F6368]">
+        Host del bridge: <span className="font-mono font-bold text-[#202124]">{bridgeHost(currentUrl) || currentUrl}</span>
+        {hasToken ? ' · el token solo se envía a este host' : ''}
+      </p>
 
       <div className="mt-3 flex flex-wrap gap-2">
         <button
@@ -261,8 +283,9 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
           )}
         </div>
         <p className="text-[11px] text-[#5F6368]">
-          También puedes abrir cualquier página con <code className="font-mono">?token=…</code> (se guarda y se quita de la
-          barra) o <code className="font-mono">?token=reset</code> para borrarlo.
+          También puedes abrir cualquier página con <code className="font-mono">#token=…</code> (se guarda y se quita de la
+          barra; <code className="font-mono">?token=…</code> también funciona) o{' '}
+          <code className="font-mono">#token=reset</code> para borrarlo. Si cambias a otro host, el token se borra.
         </p>
       </form>
 

@@ -10,6 +10,7 @@ import type { LiveStatus } from '@/lib/live-connection';
 import {
   BUMBLEBEE_DANCE_LABELS,
   BumblebeeRadioSession,
+  type ClipUnavailableReason,
   type PlaybackStatus,
   type RadioTurnLog,
   type SongClip,
@@ -39,8 +40,10 @@ const DANCE_PRESETS = [
   { id: 'bumblebee_sad_droop', color: 'bg-[#5F6368] text-white' },
 ];
 
-const CLIP_UNAVAILABLE_NOTICE =
-  'Clip no disponible en esta versión pública: se reproduce un barrido de radio.';
+const CLIP_UNAVAILABLE_NOTICE: Record<ClipUnavailableReason, string> = {
+  missing: 'Clip no disponible en esta versión pública: se reproduce un barrido de radio.',
+  blocked: 'El navegador bloqueó el audio: toca la página una vez y vuelve a intentarlo.',
+};
 
 function dialLabel(playback: PlaybackStatus, connection: LiveStatus, micOpen: boolean): string {
   if (playback === 'playing') return 'AL AIRE · BAILANDO';
@@ -70,7 +73,7 @@ export default function BumblebeeDemoPage() {
   const [catalog, setCatalog] = useState<SongClip[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<LiveStatus>('idle');
   const [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>('idle');
-  const [clipUnavailable, setClipUnavailable] = useState(false);
+  const [clipUnavailable, setClipUnavailable] = useState<ClipUnavailableReason | null>(null);
   const [conversationActive, setConversationActive] = useState(false);
   const [userTranscript, setUserTranscript] = useState('');
   const [nowPlaying, setNowPlaying] = useState<SongClip | null>(null);
@@ -104,7 +107,7 @@ export default function BumblebeeDemoPage() {
       {
         onConnectionStatus: setConnectionStatus,
         onPlaybackStatus: setPlaybackStatus,
-        onClipUnavailable: (clip) => setClipUnavailable(Boolean(clip)),
+        onClipUnavailable: (clip, reason) => setClipUnavailable(clip ? (reason ?? 'missing') : null),
         onConversationActiveChange: (act) => setConversationActive(act),
         onUserTranscript: (txt) => setUserTranscript(txt),
         onNowPlaying: (clip, freq, cap) => {
@@ -195,7 +198,10 @@ export default function BumblebeeDemoPage() {
           {nowPlaying && (
             <button
               type="button"
-              onClick={() => sessionRef.current?.stopCurrentPlayback()}
+              onClick={() => {
+                sessionRef.current?.stopCurrentPlayback();
+                setClipUnavailable(null);
+              }}
               className="rounded-xl border-2 border-[#202124] bg-[#202124] px-4 py-3.5 text-xs font-bold text-white hover:bg-[#3C4043]"
             >
               Cortar
@@ -264,7 +270,7 @@ export default function BumblebeeDemoPage() {
                   role="status"
                   className="mt-2 rounded-lg border border-[#FBBC04] bg-[#FBBC04]/15 px-2.5 py-1.5 text-[11px] font-semibold text-[#FDE293]"
                 >
-                  {CLIP_UNAVAILABLE_NOTICE}
+                  {CLIP_UNAVAILABLE_NOTICE[clipUnavailable]}
                 </p>
               )}
             </div>

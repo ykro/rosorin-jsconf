@@ -17,3 +17,7 @@ web/public/songs/clips/*.mp3
 __pycache__/
 *.pyc
 .bridge-token
+# Local-only helper scripts (never committed)
+*.local.sh
+.bridge-token.*
+ensayo-*.log

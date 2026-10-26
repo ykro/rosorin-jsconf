@@ -9,7 +9,7 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start --port 3000",
-    "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --test src/lib/__tests__/*.test.ts",
+    "test": "node --experimental-strip-types --experimental-test-module-mocks --import ./src/lib/__tests__/register-ts-resolve.mjs --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --test src/lib/__tests__/*.test.ts",
     "lint": "eslint src scripts",
     "check:css": "node scripts/check-css-classes.mjs",
     "gen:gestures": "node scripts/gen-gestures.mjs",

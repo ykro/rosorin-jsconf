@@ -16,6 +16,7 @@ import { PcmPlayer } from './pcm-player';
 import { TurnAudioGate } from './live-turn-gate';
 import { sanitizeTranscriptChunk } from './transcript-filter';
 import { clampChassisDurationMs, cleanToolText, pickEnum, wrapUntrusted } from './tool-args';
+import { TOOL_DISABLED_RESPONSE, ToolFreeTurnGuard, toolErrorHint } from './tool-policy';
 
 export type { RobotActionHandler } from './types';
 export type { LiveStatus } from './live-connection';
@@ -186,20 +187,6 @@ const BARGE_IN_LEVEL = 0.36;
 const NOISE_FLOOR_LEVEL = 0.09;
 const POST_MOTION_GATE_MS = 1200;
 
-function toolErrorHint(result: RobotActionResult): string | undefined {
-  switch (result.code) {
-    case 'estop_latched':
-      return 'The emergency stop is engaged. Tell the audience in Spanish that the robot is in emergency stop until someone releases it. Do not retry any movement.';
-    case 'unauthorized':
-      return 'The robot bridge rejected the token. Say in Spanish that the robot is not authorized right now and continue without moving.';
-    case 'timeout':
-    case 'network':
-      return 'The robot did not answer. Mention it briefly in Spanish and continue the conversation.';
-    default:
-      return undefined;
-  }
-}
-
 export class EmbodiedGeminiLiveSession {
   private readonly bridge: RobotActionHandler;
   private readonly hudClient = new RobotBridgeClient();
@@ -208,6 +195,8 @@ export class EmbodiedGeminiLiveSession {
   private readonly mic = new MicCapture();
   private readonly player: PcmPlayer;
   private readonly gate = new TurnAudioGate();
+  /** Turns sent with "do NOT call any tool" (untrusted GitHub data): tool calls are refused in code. */
+  private readonly toolGuard = new ToolFreeTurnGuard();
   private readonly cancelledToolCallIds = new Set<string>();
   private motionSuppressUntil = 0;
   private currentTurnText = '';
@@ -240,6 +229,7 @@ export class EmbodiedGeminiLiveSession {
       onStatus: (status) => this.callbacks.onStatus(status),
       onSessionOpened: () => {
         this.gate.reset();
+        this.toolGuard.reset();
         this.currentTurnText = '';
         this.currentUserTurnText = '';
       },
@@ -298,6 +288,7 @@ export class EmbodiedGeminiLiveSession {
     if (!this.conversationActive) return false; // stopped while connecting
     if (!connected) {
       this.conversationActive = false;
+      this.live.close(); // no background retry may revive a conversation that already failed
       this.callbacks.onMicWarning?.(CONNECT_FAILED_WARNING);
       return false;
     }
@@ -387,6 +378,7 @@ export class EmbodiedGeminiLiveSession {
       this.flushPlayback();
       this.currentTurnText = '';
       this.gate.onServerInterrupted();
+      this.toolGuard.onTurnEnd();
     }
 
     const outText = sc?.outputTranscription?.text;
@@ -410,6 +402,7 @@ export class EmbodiedGeminiLiveSession {
       const data = part.inlineData?.data;
       if (!data || !part.inlineData?.mimeType?.startsWith('audio/')) continue;
       if (!this.gate.acceptAudioChunk()) continue;
+      this.toolGuard.onModelOutput();
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
       this.player.playBase64Pcm16(data);
     }
@@ -420,21 +413,42 @@ export class EmbodiedGeminiLiveSession {
     }
 
     if (msg.toolCall?.functionCalls?.length) {
-      void this.handleToolCalls(msg.toolCall.functionCalls);
+      this.toolGuard.onModelOutput();
+      void this.handleToolCalls(msg.toolCall.functionCalls, this.toolGuard.toolsAllowed);
+    }
+
+    if (sc?.generationComplete) {
+      this.gate.onGenerationComplete();
     }
 
     if (sc?.turnComplete) {
       this.currentTurnText = '';
       this.currentUserTurnText = '';
       this.gate.onTurnComplete();
+      this.toolGuard.onTurnEnd();
     }
   }
 
-  private async handleToolCalls(calls: FunctionCall[]) {
+  private async handleToolCalls(calls: FunctionCall[], toolsAllowed: boolean) {
     const responses: FunctionResponse[] = [];
     for (const fc of calls) {
       if (fc.id && this.cancelledToolCallIds.has(fc.id)) {
         this.cancelledToolCallIds.delete(fc.id);
+        continue;
+      }
+      if (!toolsAllowed) {
+        // The app already executed the action for this turn and the data may be
+        // untrusted: refuse without touching the robot, whatever the model asked.
+        console.warn(`[gemini-live] Tool call ${fc.name ?? '?'} rechazada: turno sin herramientas.`);
+        this.callbacks.onToolCall?.({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: new Date().toLocaleTimeString(),
+          name: fc.name ?? '?',
+          args: fc.args ?? {},
+          latencyMs: 0,
+          resultSummary: 'error(tool_disabled) · Rechazada: en este turno la app ya ejecutó la acción.',
+        });
+        responses.push({ id: fc.id, name: fc.name, response: { ...TOOL_DISABLED_RESPONSE } });
         continue;
       }
       const result = await this.executeEmbodiedTool(fc.name ?? '', fc.args ?? {});
@@ -477,7 +491,10 @@ export class EmbodiedGeminiLiveSession {
     return true;
   }
 
+  /** Sends a client turn whose answer must not call tools (the app already ran the action). */
   private sendTurn(text: string) {
+    this.gate.beginClientTurn();
+    this.toolGuard.begin();
     if (!this.live.sendClientContent({ turns: [{ role: 'user', parts: [{ text }] }], turnComplete: true })) {
       this.callbacks.onMicWarning?.('No se pudo enviar el mensaje a Gemini Live: la sesión se cerró.');
     }

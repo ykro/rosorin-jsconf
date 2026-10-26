@@ -118,6 +118,8 @@ button {
 .max-w-4xl { max-width: 56rem; }
 .max-w-3xl { max-width: 48rem; }
 .max-w-2xl { max-width: 42rem; }
+.max-w-sm { max-width: 24rem; }
+.max-w-\[220px\] { max-width: 220px; }
 .mx-auto { margin-left: auto; margin-right: auto; }
 .my-auto { margin-top: auto; margin-bottom: auto; }
 
@@ -342,6 +344,7 @@ button {
 .border-\[\#202124\] { border-color: #202124; }
 .border-\[\#1A73E8\] { border-color: #1A73E8; }
 .border-\[\#1E8E3E\] { border-color: #1E8E3E; }
+.border-\[\#34A853\] { border-color: #34A853; }
 .border-\[\#D93025\] { border-color: #D93025; }
 .border-\[\#F9AB00\] { border-color: #F9AB00; }
 
@@ -429,6 +432,7 @@ button {
 .inline-block { display: inline-block; }
 .fixed { position: fixed; }
 .inset-x-0 { left: 0; right: 0; }
+.inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
 .top-12 { top: 3rem; }
 .top-16 { top: 4rem; }
 .right-0 { right: 0; }

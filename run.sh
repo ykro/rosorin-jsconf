@@ -13,6 +13,11 @@ ASSUME_YES="${ASSUME_YES:-0}"
 WEB_LAN="${WEB_LAN:-0}"
 TOKEN_FILE="$ROOT_DIR/.bridge-token"
 
+# Salvaguardas compartidas con iniciar-robot.sh (token, ESTOP_LOCK, servicios de fábrica, curl).
+ROSORIN_LOG_TAG="[run.sh]"
+# shellcheck source=robot-bridge/scripts/robot-common.sh
+source "$ROOT_DIR/robot-bridge/scripts/robot-common.sh"
+
 usage() {
   cat <<EOF
 Uso: ./run.sh [OPCIONES]
@@ -41,7 +46,9 @@ Variables de entorno:
 Seguridad:
   - Con hardware (ros2/serial) o --bridge-only el puente escucha en 0.0.0.0 y exige token.
   - En --mock el puente escucha solo en 127.0.0.1.
-  - La URL de la web se imprime con ?token=...; la web lo guarda y lo quita de la barra.
+  - La URL de la web se imprime con #token=... (fragmento: no llega al servidor ni a sus logs);
+    la web lo guarda y lo quita de la barra. Los curl internos pasan el token por stdin, no en argv.
+  - Si existe ~/.openclaw/workspace/ESTOP_LOCK (paro de emergencia de otra app) no arranca con hardware.
 EOF
 }
 
@@ -161,27 +168,6 @@ confirm_install() {
   esac
 }
 
-# Lee BRIDGE_TOKEN del entorno o de .bridge-token; si no existe, lo genera (permisos 600).
-ensure_bridge_token() {
-  if [ -n "${BRIDGE_TOKEN:-}" ]; then
-    return 0
-  fi
-  if [ -s "$TOKEN_FILE" ]; then
-    BRIDGE_TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
-    return 0
-  fi
-  local generated=""
-  if command -v openssl >/dev/null 2>&1; then
-    generated="$(openssl rand -hex 16)"
-  else
-    generated="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-  fi
-  (umask 077 && printf '%s\n' "$generated" > "$TOKEN_FILE")
-  chmod 600 "$TOKEN_FILE"
-  BRIDGE_TOKEN="$generated"
-  echo "[run.sh] Token del puente generado en $TOKEN_FILE (cópialo a tu laptop para usar --robot-ip)."
-}
-
 # 1. Cargar entorno ROS 2 Humble + ros2_ws + mission_ws si estamos en el Jetson Orin Nano (ROSOrin Pro)
 if [ -f "/opt/ros/humble/setup.bash" ]; then
   set +u
@@ -234,6 +220,7 @@ if [ -n "$REMOTE_ROBOT_IP" ]; then
 [run.sh] Falta el token del puente del robot ($REMOTE_ROBOT_IP).
   El robot lo guarda en <repo>/.bridge-token al correr ./run.sh. Para traerlo:
     scp <usuario>@$REMOTE_ROBOT_IP:<ruta-del-repo>/.bridge-token "$TOKEN_FILE" && chmod 600 "$TOKEN_FILE"
+    # o, más corto:  ./traer-token.sh <usuario>@$REMOTE_ROBOT_IP [ruta-del-repo-en-el-robot]
   o expórtalo a mano:  BRIDGE_TOKEN=<token> ./run.sh --robot-ip $REMOTE_ROBOT_IP
 EOF
     exit 1
@@ -241,7 +228,7 @@ EOF
   BRIDGE_BIND_HOST=""
 elif [ "$ROBOT_BACKEND" != "mock" ] || [ "$BRIDGE_ONLY" = true ]; then
   # El puente corre en el robot y debe ser alcanzable desde la laptop: 0.0.0.0 + token obligatorio.
-  ensure_bridge_token
+  rosorin_ensure_bridge_token "$TOKEN_FILE"
   BRIDGE_BIND_HOST="0.0.0.0"
 else
   # Mock en la laptop: solo loopback (token opcional vía BRIDGE_TOKEN).
@@ -250,32 +237,15 @@ fi
 export BRIDGE_TOKEN="${BRIDGE_TOKEN:-}"
 
 curl_bridge() {
-  # Uso: curl_bridge <ruta>  → POST con el token en header (nunca en la URL)
-  curl -s -m 2 -X POST -H "x-bridge-token: ${BRIDGE_TOKEN}" "http://${BRIDGE_HOST_TARGET}:${BRIDGE_PORT}$1"
+  # Uso: curl_bridge <ruta>  → POST con el token en header leído de stdin (nunca en la URL ni en argv)
+  rosorin_curl_with_token -s -m 2 -X POST "http://${BRIDGE_HOST_TARGET}:${BRIDGE_PORT}$1"
 }
 
-# 4. En el robot físico: detener button_scan.service y start_app_node.service,
-#    que acaparan /dev/rrc (/dev/ttyACM0) e impiden mover los servos y ruedas.
-#    No se toca wifi.service (perderíamos la red del escenario) y no se borra
-#    ~/.openclaw/workspace/ESTOP_LOCK: es el candado de paro de emergencia de otra app
-#    (p. ej. el botón físico); si existe, alguien pidió detener el robot y no lo anulamos.
-ESTOP_LOCK_FILE="$HOME/.openclaw/workspace/ESTOP_LOCK"
-pause_factory_services() {
-  if [ -e "$ESTOP_LOCK_FILE" ]; then
-    echo "[run.sh] Hay un paro de emergencia activo de otra app: $ESTOP_LOCK_FILE" >&2
-    echo "[run.sh] Revisa por qué se activó y libéralo desde esa app (o bórralo tú a conciencia) antes de mover el robot." >&2
-    exit 1
-  fi
-  echo "[run.sh] Liberando /dev/rrc: deteniendo temporalmente button_scan.service y start_app_node.service..."
-  echo "[run.sh] Ojo: mientras corre el puente, el botón físico de fábrica no actúa; usa POST /stop o el botón de paro de la web."
-  sudo systemctl stop button_scan.service start_app_node.service 2>/dev/null || true
-  pkill -f "[b]utton_scan.py" 2>/dev/null || true
-  pkill -f "[r]os_robot_controller" 2>/dev/null || true
-  sleep 0.5
-}
-
+# 4. En el robot físico: abortar si hay un paro de emergencia de otra app
+#    (~/.openclaw/workspace/ESTOP_LOCK, nunca se borra aquí) y detener button_scan.service y
+#    start_app_node.service, que acaparan /dev/rrc. Ver robot-bridge/scripts/robot-common.sh.
 if [ -z "$REMOTE_ROBOT_IP" ] && [ "$ROBOT_BACKEND" != "mock" ]; then
-  pause_factory_services
+  rosorin_pause_factory_services || exit 1
 fi
 
 # 5. Asegurar que cargo (Rust) esté en PATH (solo si vamos a compilar el puente aquí)
@@ -405,19 +375,21 @@ if [ -z "$REMOTE_ROBOT_IP" ] && [ "$ROBOT_BACKEND" != "mock" ]; then
   export NEXT_PUBLIC_LITE_MODE="1"
 fi
 
-# El token viaja en la URL una sola vez: la web lo guarda en localStorage y lo quita de la barra.
-WEB_QUERY=""
-if [ -n "$BRIDGE_TOKEN" ]; then
-  WEB_QUERY="?token=${BRIDGE_TOKEN}"
-fi
+# El token viaja una sola vez en el fragmento (#token=): el navegador no lo manda al servidor de
+# Next ni queda en sus logs; la web lo guarda en localStorage y lo quita de la barra.
+# Formato: http://localhost:3000/#token=<t>  ·  con robot: http://localhost:3000/?bridge=http://IP:9000#token=<t>
+WEB_PATH="/"
 if [ -n "$REMOTE_ROBOT_IP" ]; then
-  WEB_QUERY="${WEB_QUERY:+${WEB_QUERY}&}bridge=${BRIDGE_PUBLIC_URL}"
-  WEB_QUERY="?${WEB_QUERY#\?}"
+  WEB_PATH="/?bridge=${BRIDGE_PUBLIC_URL}"
+fi
+WEB_FRAGMENT=""
+if [ -n "$BRIDGE_TOKEN" ]; then
+  WEB_FRAGMENT="#token=${BRIDGE_TOKEN}"
 fi
 
 echo "================================================================"
-echo " Abre esta URL (incluye el token del puente):"
-echo "   http://localhost:${WEB_PORT}/${WEB_QUERY}"
+echo " Abre esta URL (incluye el token del puente; no la proyectes):"
+echo "   http://localhost:${WEB_PORT}${WEB_PATH}${WEB_FRAGMENT}"
 echo " Hub Ligero (Sin 3D) : http://localhost:${WEB_PORT}/robot"
 echo " Bridge Hardware     : ${BRIDGE_PUBLIC_URL}"
 if [ "$WEB_LAN" = "1" ]; then

@@ -12,6 +12,9 @@ If `/dev/rrc` is owned by another ROS 2 node, it falls back to publishing ROS 2 
 
 Protocol: one JSON command per line on stdin, one JSON event per line on stdout.
 On stdin EOF (bridge died or exited) the motors are set to 0.
+Heartbeat: `{"op":"ping","seq":N}` is answered with `{"event":"pong","seq":N}` from the same
+thread that executes the commands, so a worker that stops reading stdin is detected by the bridge
+(connected=false, chassis blocked) even if the LiDAR thread keeps publishing.
 
 This module is importable without ROS 2 / the Board (see `test_ros2_worker.py`):
 hardware is only touched from `main()`.
@@ -38,11 +41,25 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-# Arm shadow filter: returns closer than ARM_SHADOW_MAX_M within ±ARM_SHADOW_HALF_ANGLE_DEG of the
-# front are assumed to be the robot's own arm. Conservative defaults; calibrate on the robot with
-# `ros2 topic echo /scan` (ARM_SHADOW_MAX_M=0 disables the filter).
-ARM_SHADOW_MAX_M = _env_float("ARM_SHADOW_MAX_M", 0.12)
-ARM_SHADOW_HALF_ANGLE_DEG = _env_float("ARM_SHADOW_HALF_ANGLE_DEG", 35.0)
+# Arm shadow filter: returns between ARM_SHADOW_MIN_M and ARM_SHADOW_MAX_M within
+# ±ARM_SHADOW_HALF_ANGLE_DEG of the front are assumed to be the robot's own arm, and only while the
+# sector has other valid echoes. Anything closer than ARM_SHADOW_MIN_M is never filtered (nothing of
+# the arm can be that close, so it is an obstacle) and anything farther than ARM_SHADOW_MAX_M is a
+# normal echo. Narrow, uncalibrated defaults that fail closed: if the real arm shows up outside the
+# band the front simply blocks. Calibrate on the robot with `ros2 topic echo /scan`: set MIN/MAX to the
+# arm's measured range ±1 cm and the half angle to its measured width (ARM_SHADOW_MAX_M=0 disables).
+ARM_SHADOW_MIN_M = _env_float("ARM_SHADOW_MIN_M", 0.06)
+ARM_SHADOW_MAX_M = _env_float("ARM_SHADOW_MAX_M", 0.09)
+ARM_SHADOW_HALF_ANGLE_DEG = _env_float("ARM_SHADOW_HALF_ANGLE_DEG", 20.0)
+
+# A sector where fewer than this fraction of its rays returned a valid echo (finite, within
+# [range_min, range_max]) is blind: it is reported as 0.0 m, which the bridge treats as an obstacle
+# (fail closed). A sector with no valid echo at all is always blind, unless this is set to 0, which
+# restores the old "no echo = open (4.0 m)" behaviour (only for a calibrated stage where a sector
+# truly faces >12 m of empty space).
+LIDAR_MIN_VALID_FRACTION = _env_float("LIDAR_MIN_VALID_FRACTION", 0.25)
+LIDAR_OPEN_M = 4.0
+LIDAR_BLIND_M = 0.0
 
 # Several threads (camera, LiDAR, battery, main) write JSON lines: serialize them.
 _stdout_lock = threading.Lock()
@@ -107,8 +124,26 @@ def zero_board_motors(board):
         pass
 
 
+def reply_ping(cmd: dict) -> bool:
+    """Heartbeat: echoes `{"op":"ping","seq":N}` as `{"event":"pong","seq":N}`.
+
+    Must be called from the thread that executes the commands (the stdin loop): the pong then
+    proves that every command queued before the ping was consumed.
+    """
+    if cmd.get("op") != "ping":
+        return False
+    try:
+        seq = int(cmd.get("seq", 0))
+    except (TypeError, ValueError):
+        return True
+    emit({"event": "pong", "seq": seq})
+    return True
+
+
 def handle_board_command(board, cmd: dict, vel_state: dict):
     op = cmd.get("op")
+    if reply_ping(cmd):
+        return
     if op == "arm":
         dur_s = max(0.12, min(5.0, float(cmd.get("duration_s", 0.4))))
         positions = []
@@ -183,25 +218,40 @@ def board_watchdog_loop(board, vel_state: dict):
             zero_board_motors(board)
 
 
-def compute_lidar_sectors(msg, shadow_max_m=None, shadow_half_angle_deg=None) -> dict:
+def compute_lidar_sectors(
+    msg,
+    shadow_max_m=None,
+    shadow_half_angle_deg=None,
+    shadow_min_m=None,
+    min_valid_fraction=None,
+) -> dict:
     """
     Computes (front_m, left_m, right_m, back_m) from a ROS 2 sensor_msgs/LaserScan message
-    (REP-103: angle 0 = front, positive = left).
+    (REP-103: angle 0 = front, positive = left). Fails closed in both blind spots:
 
-    Fails closed around the 6-DOF arm shadow: returns closer than `shadow_max_m` within
-    ±`shadow_half_angle_deg` of the front are ignored only while the sector still has other
-    valid rays; if every valid ray of a sector was filtered, the closest filtered ray is
-    reported (blocking) instead of an "open" value. A sector without any valid return
-    reports 4.0 m.
+    - Blind sector: if fewer than `min_valid_fraction` of the sector's rays have a valid echo
+      (finite, within [range_min, range_max]; 0/inf/NaN/too close do not count), or none at all,
+      the sector reports 0.0 m (blocking) and is listed in `blind`.
+    - Arm shadow: echoes between `shadow_min_m` and `shadow_max_m` within ±`shadow_half_angle_deg`
+      of the front are ignored only while the sector still has other valid echoes; if every valid
+      ray of a sector was filtered, the closest filtered ray is reported (blocking). Echoes closer
+      than `shadow_min_m` or farther than `shadow_max_m` are never filtered, so an obstacle right
+      in front of the arm still blocks.
     """
     if shadow_max_m is None:
         shadow_max_m = ARM_SHADOW_MAX_M
     if shadow_half_angle_deg is None:
         shadow_half_angle_deg = ARM_SHADOW_HALF_ANGLE_DEG
+    if shadow_min_m is None:
+        shadow_min_m = ARM_SHADOW_MIN_M
+    if min_valid_fraction is None:
+        min_valid_fraction = LIDAR_MIN_VALID_FRACTION
 
-    open_m = 4.0
-    valid = {"front": math.inf, "left": math.inf, "right": math.inf, "back": math.inf}
+    names = ("front", "left", "right", "back")
+    valid = {n: math.inf for n in names}
     shadow = dict(valid)
+    total = {n: 0 for n in names}
+    echoes = {n: 0 for n in names}
 
     r_min = max(0.05, float(getattr(msg, "range_min", 0.05)))
     r_max = min(12.0, float(getattr(msg, "range_max", 12.0)))
@@ -214,8 +264,6 @@ def compute_lidar_sectors(msg, shadow_max_m=None, shadow_half_angle_deg=None) ->
     for r in msg.ranges:
         curr_angle = math.atan2(math.sin(angle), math.cos(angle))
         angle += inc
-        if not math.isfinite(r) or r < r_min or r > r_max:
-            continue
 
         if abs(curr_angle) <= pi_4:
             sector = "front"
@@ -226,18 +274,32 @@ def compute_lidar_sectors(msg, shadow_max_m=None, shadow_half_angle_deg=None) ->
         else:
             sector = "back"
 
+        total[sector] += 1
+        if not math.isfinite(r) or r < r_min or r > r_max:
+            continue
+        echoes[sector] += 1
+
         # Possible 6-DOF arm base/gripper shadow mounted over the front bumper
-        if abs(curr_angle) <= arm_shadow_rad and r < shadow_max_m:
+        if abs(curr_angle) <= arm_shadow_rad and shadow_min_m <= r <= shadow_max_m:
             shadow[sector] = min(shadow[sector], r)
         else:
             valid[sector] = min(valid[sector], r)
 
+    def is_blind(name: str) -> bool:
+        if min_valid_fraction <= 0.0:
+            return False
+        if echoes[name] == 0:
+            return True
+        return echoes[name] / total[name] < min_valid_fraction
+
     def sector_value(name: str) -> float:
+        if is_blind(name):
+            return LIDAR_BLIND_M
         if math.isfinite(valid[name]):
             return valid[name]
         if math.isfinite(shadow[name]):
             return shadow[name]
-        return open_m
+        return LIDAR_OPEN_M
 
     return {
         "event": "lidar",
@@ -245,6 +307,8 @@ def compute_lidar_sectors(msg, shadow_max_m=None, shadow_half_angle_deg=None) ->
         "left_m": round(sector_value("left"), 3),
         "right_m": round(sector_value("right"), 3),
         "back_m": round(sector_value("back"), 3),
+        # Diagnostics only (the bridge ignores it): sectors reported as 0.0 for lack of echoes.
+        "blind": [n for n in names if is_blind(n)],
     }
 
 
@@ -315,9 +379,15 @@ def ros2_telemetry_subscriber():
                 sys.stderr.write(f"[ros2_worker] lidar scan parse error: {e}\n")
 
         node.create_subscription(LaserScan, "/scan", on_scan, qos_profile_sensor_data)
+        if LIDAR_MIN_VALID_FRACTION <= 0.0:
+            sys.stderr.write(
+                "[ros2_worker] ATENCIÓN: LIDAR_MIN_VALID_FRACTION=0, un sector sin ecos se reporta "
+                "abierto (4.0 m) en vez de bloqueado\n"
+            )
         sys.stderr.write(
             "[ros2_worker] Subscribed to /scan (arm shadow filter "
-            f"<{ARM_SHADOW_MAX_M} m within ±{ARM_SHADOW_HALF_ANGLE_DEG} deg)\n"
+            f"{ARM_SHADOW_MIN_M}-{ARM_SHADOW_MAX_M} m within ±{ARM_SHADOW_HALF_ANGLE_DEG} deg, "
+            f"blind sector below {LIDAR_MIN_VALID_FRACTION:.0%} valid echoes)\n"
         )
         spin_node(node)
     except Exception as exc:
@@ -397,6 +467,8 @@ def main():
             try:
                 cmd = json.loads(line)
                 op = cmd.get("op")
+                if reply_ping(cmd):
+                    continue
                 if op == "cmd_vel":
                     lx = max(-0.25, min(0.25, float(cmd.get("linear_x", 0.0))))
                     ly = max(-0.25, min(0.25, float(cmd.get("linear_y", 0.0))))

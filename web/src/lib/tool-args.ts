@@ -77,10 +77,17 @@ export function cleanIdList(value: unknown, max = 3): string[] {
 /**
  * Wraps untrusted external text (GitHub repos, PRs, issues) in a delimited block
  * the system prompt tells the model to treat as data only.
+ *
+ * Every angle bracket inside the data is escaped (NFKC folds look-alikes such
+ * as `＜` or `﹤` into `<`; `‹`, `⟨`, `〈`… are escaped as well), so no variant of a closing tag (`< /repo_data>`,
+ * `</repo_data foo>`, `</repo-data>`, `＜/repo_data＞`…) can end the block early.
  */
 export function wrapUntrusted(tag: string, text: string, maxChars = 1500): string {
   const safe = text
-    .replace(/<\/?[a-z_]+_data\s*>/gi, '[etiqueta eliminada]')
+    .normalize('NFKC')
+    .replace(/&/g, '&amp;')
+    .replace(/[<\u2039\u27E8\u3008\u276C\u276E\u02C2]/g, '&lt;')
+    .replace(/[>\u203A\u27E9\u3009\u276D\u276F\u02C3]/g, '&gt;')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, maxChars);

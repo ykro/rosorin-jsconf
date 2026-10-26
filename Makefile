@@ -2,8 +2,10 @@
 
 BRIDGE_PORT ?= 9000
 ROBOT_BACKEND ?= mock
-# Token del puente: del entorno o del archivo .bridge-token que genera ./run.sh en el robot
-BRIDGE_TOKEN ?= $(shell cat .bridge-token 2>/dev/null)
+# Token del puente: del entorno (o `make reset BRIDGE_TOKEN=...`) o del archivo .bridge-token que
+# genera ./run.sh en el robot. Se lee dentro del shell y viaja a curl por stdin (`-H @-`):
+# nunca aparece en argv (`ps`) ni en `make -n`.
+BRIDGE_CURL = printf 'x-bridge-token: %s\n' "$${BRIDGE_TOKEN:-$$(cat .bridge-token 2>/dev/null | tr -d '[:space:]')}" | curl -s -m 3 -H @-
 
 # Un solo comando: auto-detecta si estás en el ROSOrin Pro (ros2/serial) o en tu laptop (mock) y levanta todo
 up:
@@ -26,11 +28,11 @@ web:
 
 # Emergency stop: motores a 0, brazo congelado y E-stop enclavada (se libera con `make release`)
 reset:
-	@curl -s -X POST -H "x-bridge-token: $(BRIDGE_TOKEN)" http://localhost:$(BRIDGE_PORT)/stop | head -c 300; echo ""
+	@$(BRIDGE_CURL) -X POST http://localhost:$(BRIDGE_PORT)/stop | head -c 300; echo ""
 
 # Liberar la E-stop enclavada (POST /estop/release)
 release:
-	@curl -s -X POST -H "x-bridge-token: $(BRIDGE_TOKEN)" http://localhost:$(BRIDGE_PORT)/estop/release | head -c 300; echo ""
+	@$(BRIDGE_CURL) -X POST http://localhost:$(BRIDGE_PORT)/estop/release | head -c 300; echo ""
 
 # Run Rust unit tests, Python worker tests (sin rclpy) and TypeScript analyzer tests
 test:

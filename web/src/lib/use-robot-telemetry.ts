@@ -155,8 +155,12 @@ export function useRobotTelemetry() {
       }
     }, 500);
 
+    const choreoTimers = choreoTimersRef;
     return () => {
       clearInterval(watchdog);
+      // Pending steps of a local choreography must not update state after unmount.
+      for (const t of choreoTimers.current) clearTimeout(t);
+      choreoTimers.current = [];
       unsubscribe();
       window.removeEventListener(BRIDGE_AUTH_ERROR_EVENT, onAuthError);
       client?.disconnect();
@@ -330,14 +334,33 @@ export function useRobotTelemetry() {
     return sendToBridge('scene/reset', (c) => c.resetScene());
   }, [sendToBridge]);
 
-  /** Latches the E-stop on the bridge (`POST /stop`). */
-  const emergencyStop = useCallback(async () => {
-    const result = await sendToBridge('stop', (c) => c.emergencyStop());
-    if (result.ok && result.target === 'robot') {
+  /**
+   * Latches the E-stop on the bridge (`POST /stop`). Unlike other actions it is
+   * sent whenever the bridge is enabled, even if the telemetry WebSocket is down
+   * or the last request was a 401: the HTTP route may still be reachable.
+   */
+  const emergencyStop = useCallback(async (): Promise<RobotActionResult> => {
+    // The local twin stops too (pending choreography steps and chassis velocity).
+    for (const t of choreoTimersRef.current) clearTimeout(t);
+    choreoTimersRef.current = [];
+    setTelemetry((prev) => ({ ...prev, odometry: { ...prev.odometry, vx: 0, vy: 0, wz: 0 } }));
+
+    const client = bridgeRef.current;
+    if (!client || !isBridgeEnabled()) return SIMULATOR_ONLY;
+    try {
+      await client.emergencyStop();
       setBridge((prev) => ({ ...prev, estopLatched: true }));
+      return { ok: true, target: 'robot', message: 'Paro de emergencia enviado al robot.' };
+    } catch (err) {
+      const { code, message } = describeBridgeError(err);
+      console.warn(`[robot] stop falló (${code}): ${message}`);
+      if (code === 'estop_latched') {
+        setBridge((prev) => (prev.estopLatched ? prev : { ...prev, estopLatched: true }));
+        return { ok: true, target: 'robot', message: 'El paro de emergencia ya estaba activo.' };
+      }
+      return { ok: false, target: 'robot', code, message };
     }
-    return result;
-  }, [sendToBridge]);
+  }, []);
 
   /** Releases a latched E-stop (`POST /estop/release`). */
   const releaseEstop = useCallback(async () => {

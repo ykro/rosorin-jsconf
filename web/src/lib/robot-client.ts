@@ -1,5 +1,6 @@
 import type {
   BridgeErrorCode,
+  MotionBlockReason,
   RobotActionHandler,
   RobotActionResult,
   TelemetryState,
@@ -61,6 +62,25 @@ export function describeBridgeError(err: unknown): { code: BridgeErrorCode; mess
   if (err instanceof BridgeError) return { code: err.code, message: err.message };
   const message = err instanceof Error ? err.message : String(err);
   return { code: 'network', message: `No se pudo contactar al bridge: ${message}` };
+}
+
+const MOTION_BLOCK_MESSAGES: Record<MotionBlockReason, string> = {
+  braked: 'El freno LiDAR anuló el movimiento (obstáculo cerca): el robot no se movió.',
+  lidar_stale: 'LiDAR sin datos recientes: el bridge bloqueó el chasis y el robot no se movió.',
+  worker_dead: 'El proceso de control del robot no responde: el movimiento no se ejecutó.',
+};
+
+/**
+ * Movement routes answer HTTP 200 with `blocked: "lidar_stale" | "braked" | "worker_dead" | null`.
+ * A non-null value means the bridge refused the motion; older bridges omit the field.
+ */
+export function motionBlockError(blocked: unknown, path: string): BridgeError | null {
+  if (blocked === null || blocked === undefined || blocked === false || blocked === '') return null;
+  const reason = String(blocked);
+  if (reason in MOTION_BLOCK_MESSAGES) {
+    return new BridgeError(reason as MotionBlockReason, MOTION_BLOCK_MESSAGES[reason as MotionBlockReason], 200);
+  }
+  return new BridgeError('blocked', `El bridge bloqueó ${path} (${reason.slice(0, 40)}): el robot no se movió.`, 200);
 }
 
 export interface BridgeLinkState {
@@ -280,12 +300,15 @@ export class RobotBridgeClient {
           throw new BridgeError('http', `El bridge respondió HTTP ${res.status} en ${path}${detail ? `: ${detail}` : ''}.`, res.status);
       }
     }
+    let data: { telemetry?: TelemetryState; blocked?: unknown } | null = null;
     try {
-      const data = (await res.json()) as { telemetry?: TelemetryState };
-      return data?.telemetry ?? null;
+      data = (await res.json()) as { telemetry?: TelemetryState; blocked?: unknown };
     } catch {
       return null;
     }
+    const blocked = motionBlockError(data?.blocked, path);
+    if (blocked) throw blocked;
+    return data?.telemetry ?? null;
   }
 
   public async triggerGesture(name: string, mood?: string): Promise<TelemetryState | null> {

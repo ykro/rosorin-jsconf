@@ -13,7 +13,9 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use backend::{BackendConfig, MotionError, RobotController, TelemetryState, ESTOP_MESSAGE};
+use backend::{
+    BackendConfig, BlockReason, MotionError, RobotController, TelemetryState, ESTOP_MESSAGE,
+};
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use gestures::{get_gesture, is_known_gesture};
@@ -37,7 +39,7 @@ const RATE_LIMIT_PER_SEC: f64 = 30.0;
 const RATE_LIMIT_BURST: f64 = 60.0;
 /// Jog deltas outside ±MAX_JOG_DELTA are rejected with 400.
 const MAX_JOG_DELTA: i16 = 300;
-/// Hostnames allowed as `Origin` besides loopback/private IP literals and `BRIDGE_ALLOWED_ORIGINS`.
+/// Hostnames allowed as `Origin` besides IP literals (see `is_allowed_origin`) and `BRIDGE_ALLOWED_ORIGINS`.
 const BUILTIN_ORIGIN_HOSTS: [&str; 3] = [
     "localhost",
     "jsconfmx26.web.app",
@@ -103,6 +105,10 @@ struct SecurityConfig {
     allowed_origins: Vec<String>,
     /// Normalized (lowercase) hostnames.
     allowed_hosts: Vec<String>,
+    /// Accept private IPv4 literals (192.168/16, 10/8, 172.16/12) as `Origin`. Only with a token
+    /// or a non-loopback bind: a loopback bridge without token must not be drivable from, say,
+    /// a captive portal served from a private IP.
+    allow_private_origins: bool,
 }
 
 /// Simple global token bucket.
@@ -231,6 +237,9 @@ struct HudUpdateRequest {
 struct ActionResponse {
     status: &'static str,
     action: String,
+    /// `null` when the command went through as asked; otherwise why the robot did not (fully)
+    /// move: `worker_dead`, `lidar_stale` or `braked`. The HTTP status stays 200.
+    blocked: Option<BlockReason>,
     telemetry: TelemetryState,
 }
 
@@ -262,11 +271,6 @@ fn json_error(status: StatusCode, code: &str, message: &str) -> Response {
 fn motion_error_response(err: MotionError) -> ApiError {
     ApiError::from(match err {
         MotionError::EstopLatched => json_error(StatusCode::LOCKED, "estop_latched", ESTOP_MESSAGE),
-        MotionError::Superseded => json_error(
-            StatusCode::CONFLICT,
-            "superseded",
-            "Otro comando reemplazó a este.",
-        ),
     })
 }
 
@@ -308,9 +312,10 @@ fn normalize_host(host: &str) -> String {
 }
 
 /// `Origin` check for CORS, WebSocket and any request that carries an `Origin` header:
-/// loopback/private IP literals, `localhost`, the JSConf MX Firebase app, or an exact
-/// origin from `BRIDGE_ALLOWED_ORIGINS`. The host is parsed, never prefix-matched.
-pub fn is_allowed_origin(origin: &str, extra_origins: &[String]) -> bool {
+/// loopback IP literals, private IPv4 literals (only if `allow_private`), `localhost`, the
+/// JSConf MX Firebase app, or an exact origin from `BRIDGE_ALLOWED_ORIGINS`. The host is
+/// parsed, never prefix-matched.
+pub fn is_allowed_origin(origin: &str, extra_origins: &[String], allow_private: bool) -> bool {
     let trimmed = origin.trim();
     let lowered = trimmed.to_ascii_lowercase();
     if extra_origins.contains(&lowered) {
@@ -330,7 +335,7 @@ pub fn is_allowed_origin(origin: &str, extra_origins: &[String]) -> bool {
     };
     if let Ok(ip) = host.parse::<IpAddr>() {
         return match ip {
-            IpAddr::V4(v4) => v4.is_loopback() || v4.is_private(),
+            IpAddr::V4(v4) => v4.is_loopback() || (allow_private && v4.is_private()),
             IpAddr::V6(v6) => v6.is_loopback(),
         };
     }
@@ -436,9 +441,13 @@ async fn host_origin_guard(State(state): State<AppState>, req: Request, next: Ne
         );
     }
     if let Some(origin) = req.headers().get(header::ORIGIN) {
-        let allowed = origin
-            .to_str()
-            .is_ok_and(|o| is_allowed_origin(o, &state.security.allowed_origins));
+        let allowed = origin.to_str().is_ok_and(|o| {
+            is_allowed_origin(
+                o,
+                &state.security.allowed_origins,
+                state.security.allow_private_origins,
+            )
+        });
         if !allowed {
             return json_error(
                 StatusCode::FORBIDDEN,
@@ -489,22 +498,25 @@ async fn get_status(State(state): State<AppState>) -> Json<TelemetryState> {
     Json(state.robot.snapshot())
 }
 
-fn ok_response(state: &AppState, action: String) -> ApiResult {
+fn ok_response(state: &AppState, action: String, blocked: Option<BlockReason>) -> ApiResult {
     Ok(Json(ActionResponse {
         status: "ok",
         action,
+        blocked,
         telemetry: state.robot.snapshot(),
     }))
 }
 
 async fn post_cmd_vel(State(state): State<AppState>, Json(req): Json<CmdVelRequest>) -> ApiResult {
-    let (vx, vy, wz) = state
+    let out = state
         .robot
         .set_velocity_with_duration(req.linear_x, req.linear_y, req.angular_z, req.duration_ms)
         .map_err(motion_error_response)?;
+    let (vx, vy, wz) = out.applied;
     ok_response(
         &state,
         format!("cmd_vel(vx={:.2}, vy={:.2}, wz={:.2})", vx, vy, wz),
+        out.blocked,
     )
 }
 
@@ -524,6 +536,7 @@ async fn post_arm(State(state): State<AppState>, Json(req): Json<ArmRequest>) ->
     ok_response(
         &state,
         format!("arm({} servos, {}ms)", req.servos.len(), safe_duration),
+        state.robot.driver_block(),
     )
 }
 
@@ -552,12 +565,13 @@ async fn post_servo_jog(
             "servo_jog(id={}, delta={}, pulse={})",
             req.id, req.delta, next
         ),
+        state.robot.driver_block(),
     )
 }
 
 async fn post_scene_reset(State(state): State<AppState>) -> ApiResult {
     state.robot.reset_scene().map_err(motion_error_response)?;
-    ok_response(&state, "scene_reset".into())
+    ok_response(&state, "scene_reset".into(), state.robot.driver_block())
 }
 
 async fn post_hud(State(state): State<AppState>, Json(req): Json<HudUpdateRequest>) -> ApiResult {
@@ -568,7 +582,7 @@ async fn post_hud(State(state): State<AppState>, Json(req): Json<HudUpdateReques
         req.subtext,
         req.mood,
     );
-    ok_response(&state, "hud_update".into())
+    ok_response(&state, "hud_update".into(), None)
 }
 
 async fn post_gesture(State(state): State<AppState>, Json(req): Json<GestureRequest>) -> ApiResult {
@@ -576,19 +590,24 @@ async fn post_gesture(State(state): State<AppState>, Json(req): Json<GestureRequ
         return Err(json_error(StatusCode::NOT_FOUND, "not_found", "Gesto desconocido").into());
     }
     let seq = get_gesture(&req.name);
-    state
+    let blocked = state
         .robot
         .run_gesture(&req.name, req.mood)
         .map_err(motion_error_response)?;
     ok_response(
         &state,
         format!("gesture({}) - {}", seq.name, seq.description),
+        blocked,
     )
 }
 
 async fn post_rgb(State(state): State<AppState>, Json(req): Json<RgbRequest>) -> ApiResult {
     state.robot.set_rgb(req.r, req.g, req.b);
-    ok_response(&state, format!("rgb({},{},{})", req.r, req.g, req.b))
+    ok_response(
+        &state,
+        format!("rgb({},{},{})", req.r, req.g, req.b),
+        state.robot.driver_block(),
+    )
 }
 
 async fn post_buzzer(State(state): State<AppState>, Json(req): Json<BuzzerRequest>) -> ApiResult {
@@ -600,17 +619,18 @@ async fn post_buzzer(State(state): State<AppState>, Json(req): Json<BuzzerReques
     ok_response(
         &state,
         format!("buzzer({}Hz x{})", req.freq_hz, safe_repeat),
+        state.robot.driver_block(),
     )
 }
 
 async fn post_stop(State(state): State<AppState>) -> ApiResult {
     state.robot.stop_all();
-    ok_response(&state, "emergency_stop".into())
+    ok_response(&state, "emergency_stop".into(), state.robot.driver_block())
 }
 
 async fn post_estop_release(State(state): State<AppState>) -> ApiResult {
     state.robot.release_estop();
-    ok_response(&state, "estop_release".into())
+    ok_response(&state, "estop_release".into(), None)
 }
 
 async fn post_simulate_lidar(
@@ -643,6 +663,7 @@ async fn post_simulate_lidar(
     ok_response(
         &state,
         format!("simulate_lidar(front_m={:.2})", req.front_m),
+        None,
     )
 }
 
@@ -671,9 +692,13 @@ async fn ws_handler(
 ) -> Response {
     // Browsers always send Origin on WebSocket upgrades; non-browser clients may omit it.
     if let Some(origin) = headers.get(header::ORIGIN) {
-        let allowed = origin
-            .to_str()
-            .is_ok_and(|o| is_allowed_origin(o, &state.security.allowed_origins));
+        let allowed = origin.to_str().is_ok_and(|o| {
+            is_allowed_origin(
+                o,
+                &state.security.allowed_origins,
+                state.security.allow_private_origins,
+            )
+        });
         if !allowed {
             return json_error(
                 StatusCode::FORBIDDEN,
@@ -738,13 +763,22 @@ fn ws_error_event(op: &str, status: &str, message: &str) -> String {
 fn ws_motion_error(op: &str, err: MotionError) -> String {
     match err {
         MotionError::EstopLatched => ws_error_event(op, "estop_latched", ESTOP_MESSAGE),
-        MotionError::Superseded => {
-            ws_error_event(op, "superseded", "Otro comando reemplazó a este.")
-        }
     }
 }
 
-/// Executes one WS command; returns an error event to send back, if any.
+/// WS counterpart of the HTTP `blocked` field: the command was accepted but did not move the
+/// robot as asked. Only sent when `blocked` is not null.
+fn ws_blocked_event(op: &str, reason: BlockReason) -> String {
+    serde_json::json!({
+        "event": "blocked",
+        "op": op,
+        "blocked": reason,
+        "message": reason.message(),
+    })
+    .to_string()
+}
+
+/// Executes one WS command; returns an `error` or `blocked` event to send back, if any.
 fn execute_ws_command(state: &AppState, cmd: WsClientCommand) -> Option<String> {
     let op = cmd.op();
     if !matches!(cmd, WsClientCommand::Stop) && !state.limiter.try_acquire() {
@@ -763,7 +797,7 @@ fn execute_ws_command(state: &AppState, cmd: WsClientCommand) -> Option<String> 
             duration_ms,
         } => robot
             .set_velocity_with_duration(linear_x, linear_y, angular_z, duration_ms)
-            .map(|_| ()),
+            .map(|out| out.blocked),
         WsClientCommand::Gesture { name, mood } => {
             if !is_known_gesture(&name) {
                 return Some(ws_error_event(op, "not_found", "Gesto desconocido"));
@@ -781,21 +815,26 @@ fn execute_ws_command(state: &AppState, cmd: WsClientCommand) -> Option<String> 
                     "servos: 1 a 6 entradas con IDs 1-5 o 10",
                 ));
             }
-            robot.set_arm(duration_ms.clamp(120, 5000), &servos)
+            robot
+                .set_arm(duration_ms.clamp(120, 5000), &servos)
+                .map(|()| robot.driver_block())
         }
         WsClientCommand::Jog { id, delta } => {
             if let Err(msg) = validate_jog(id, delta) {
                 return Some(ws_error_event(op, "invalid_request", msg));
             }
-            robot.jog_servo(id, delta).map(|_| ())
+            robot.jog_servo(id, delta).map(|_| robot.driver_block())
         }
-        WsClientCommand::ResetScene => robot.reset_scene(),
+        WsClientCommand::ResetScene => robot.reset_scene().map(|()| robot.driver_block()),
         WsClientCommand::Stop => {
             robot.stop_all();
-            Ok(())
+            Ok(robot.driver_block())
         }
     };
-    result.err().map(|e| ws_motion_error(op, e))
+    match result {
+        Ok(blocked) => blocked.map(|reason| ws_blocked_event(op, reason)),
+        Err(e) => Some(ws_motion_error(op, e)),
+    }
 }
 
 async fn handle_ws(socket: WebSocket, state: AppState) {
@@ -869,7 +908,13 @@ fn build_router(state: AppState) -> Router {
         .allow_origin(AllowOrigin::predicate(move |origin, _req_parts| {
             origin
                 .to_str()
-                .map(|o| is_allowed_origin(o, &cors_origins.allowed_origins))
+                .map(|o| {
+                    is_allowed_origin(
+                        o,
+                        &cors_origins.allowed_origins,
+                        cors_origins.allow_private_origins,
+                    )
+                })
                 .unwrap_or(false)
         }))
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
@@ -1007,7 +1052,9 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let (tx, _rx) = broadcast::channel::<TelemetryState>(64);
+    let allow_private_origins = token.is_some() || !is_loopback_bind(&args.host);
     let security = Arc::new(SecurityConfig {
+        allow_private_origins,
         token,
         allowed_origins: split_csv(&args.allowed_origins, |s| {
             s.trim_end_matches('/').to_ascii_lowercase()
@@ -1048,7 +1095,7 @@ async fn main() -> anyhow::Result<()> {
 
     let addr: SocketAddr = format!("{}:{}", args.host, args.port).parse()?;
     info!(
-        "rosorin-bridge listening on http://{} (backend={}, watchdog={}ms, token={}, lidar={})",
+        "rosorin-bridge listening on http://{} (backend={}, watchdog={}ms, token={}, lidar={}, orígenes IP privadas={})",
         addr,
         robot.snapshot().backend,
         args.watchdog_ms,
@@ -1058,6 +1105,11 @@ async fn main() -> anyhow::Result<()> {
             "no"
         },
         robot.snapshot().lidar_source,
+        if security.allow_private_origins {
+            "sí"
+        } else {
+            "no"
+        },
     );
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -1099,6 +1151,8 @@ mod tests {
                 token: token.map(str::to_string),
                 allowed_origins: vec!["https://demo.example.com".into()],
                 allowed_hosts: vec!["rosorin.local".into()],
+                // Same rule as main(): this test app is a loopback bind.
+                allow_private_origins: token.is_some(),
             }),
             limiter: Arc::new(RateLimiter::new(RATE_LIMIT_PER_SEC, RATE_LIMIT_BURST)),
         }
@@ -1132,37 +1186,211 @@ mod tests {
     #[test]
     fn test_origin_validation() {
         let extra = vec!["https://demo.example.com".to_string()];
-        assert!(is_allowed_origin("http://localhost:3000", &extra));
-        assert!(is_allowed_origin("http://127.0.0.1:3000", &extra));
-        assert!(is_allowed_origin("http://[::1]:3000", &extra));
-        assert!(is_allowed_origin("http://192.168.1.20:3000", &extra));
-        assert!(is_allowed_origin("http://10.0.0.5:3000", &extra));
-        assert!(is_allowed_origin("http://172.20.10.2:3000", &extra));
-        assert!(is_allowed_origin("https://jsconfmx26.web.app", &extra));
+        assert!(is_allowed_origin("http://localhost:3000", &extra, true));
+        assert!(is_allowed_origin("http://127.0.0.1:3000", &extra, true));
+        assert!(is_allowed_origin("http://[::1]:3000", &extra, true));
+        assert!(is_allowed_origin("http://192.168.1.20:3000", &extra, true));
+        assert!(is_allowed_origin("http://10.0.0.5:3000", &extra, true));
+        assert!(is_allowed_origin("http://172.20.10.2:3000", &extra, true));
+        assert!(is_allowed_origin(
+            "https://jsconfmx26.web.app",
+            &extra,
+            true
+        ));
         assert!(is_allowed_origin(
             "https://jsconfmx26.firebaseapp.com",
-            &extra
+            &extra,
+            true
         ));
-        assert!(is_allowed_origin("https://demo.example.com", &extra));
+        assert!(is_allowed_origin("https://demo.example.com", &extra, true));
 
         // Text-prefix and wildcard tricks are rejected
-        assert!(!is_allowed_origin("http://10.evil.example.com", &extra));
-        assert!(!is_allowed_origin("http://192.168.attacker.net", &extra));
-        assert!(!is_allowed_origin("http://172.16.x.attacker.io", &extra));
-        assert!(!is_allowed_origin("http://rosorin.local:3000", &extra));
+        assert!(!is_allowed_origin(
+            "http://10.evil.example.com",
+            &extra,
+            true
+        ));
+        assert!(!is_allowed_origin(
+            "http://192.168.attacker.net",
+            &extra,
+            true
+        ));
+        assert!(!is_allowed_origin(
+            "http://172.16.x.attacker.io",
+            &extra,
+            true
+        ));
+        assert!(!is_allowed_origin(
+            "http://rosorin.local:3000",
+            &extra,
+            true
+        ));
         assert!(!is_allowed_origin(
             "https://jsconfmx26.web.app.evil.com",
-            &extra
+            &extra,
+            true
         ));
-        assert!(!is_allowed_origin("https://evil.example.com", &extra));
+        assert!(!is_allowed_origin("https://evil.example.com", &extra, true));
         assert!(!is_allowed_origin(
             "https://demo.example.com.evil.io",
-            &extra
+            &extra,
+            true
         ));
-        assert!(!is_allowed_origin("http://172.32.0.1:3000", &extra));
-        assert!(!is_allowed_origin("http://8.8.8.8", &extra));
-        assert!(!is_allowed_origin("http://0.0.0.0:3000", &extra));
-        assert!(!is_allowed_origin("null", &extra));
+        assert!(!is_allowed_origin("http://172.32.0.1:3000", &extra, true));
+        assert!(!is_allowed_origin("http://8.8.8.8", &extra, true));
+        assert!(!is_allowed_origin("http://0.0.0.0:3000", &extra, true));
+        assert!(!is_allowed_origin("null", &extra, true));
+
+        // Loopback bind without token: private IPs are NOT trusted origins (captive portal, etc.)
+        assert!(is_allowed_origin("http://localhost:3000", &extra, false));
+        assert!(is_allowed_origin("http://127.0.0.1:3000", &extra, false));
+        assert!(is_allowed_origin("http://[::1]:3000", &extra, false));
+        assert!(is_allowed_origin(
+            "https://jsconfmx26.web.app",
+            &extra,
+            false
+        ));
+        assert!(is_allowed_origin(
+            "https://jsconfmx26.firebaseapp.com",
+            &extra,
+            false
+        ));
+        assert!(is_allowed_origin("https://demo.example.com", &extra, false));
+        assert!(!is_allowed_origin("http://192.168.1.1", &extra, false));
+        assert!(!is_allowed_origin("http://10.0.0.5:3000", &extra, false));
+        assert!(!is_allowed_origin("http://172.20.10.2:3000", &extra, false));
+        // ...unless listed explicitly in BRIDGE_ALLOWED_ORIGINS
+        let listed = vec!["http://192.168.1.20:3000".to_string()];
+        assert!(is_allowed_origin(
+            "http://192.168.1.20:3000",
+            &listed,
+            false
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_mock_loopback_without_token_rejects_private_ip_origins() {
+        let portal = "http://192.168.1.1";
+        // No token (loopback mock): 403 on HTTP, CORS preflight and WS
+        let app = test_app(None);
+        let resp = app
+            .clone()
+            .oneshot(
+                req("POST", "/cmd_vel")
+                    .header(header::ORIGIN, portal)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"linear_x":0.1}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        assert_eq!(body_json(resp).await["status"], "forbidden_origin");
+        let ws = req("GET", "/ws")
+            .header(header::ORIGIN, portal)
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(ws).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+        let ok = req("GET", "/status")
+            .header(header::ORIGIN, "http://localhost:3000")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(app.oneshot(ok).await.unwrap().status(), StatusCode::OK);
+
+        // With a token the private origin passes the origin guard (the token still applies)
+        let token = "stage-secret-2026-abcdef";
+        let app = test_app(Some(token));
+        let resp = app
+            .oneshot(
+                req("GET", "/status")
+                    .header(header::ORIGIN, portal)
+                    .header("x-bridge-token", token)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_blocked_field_in_http_and_ws() {
+        let state = test_state(None);
+        let app = build_router(state.clone());
+        let resp = app
+            .clone()
+            .oneshot(post_json("/cmd_vel", r#"{"linear_x":0.1}"#))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp).await;
+        assert_eq!(json["status"], "ok");
+        assert!(json["blocked"].is_null());
+
+        // Obstacle in front: still 200, but blocked = "braked" and vx = 0
+        let resp = app
+            .clone()
+            .oneshot(post_json("/simulate/lidar", r#"{"front_m":0.10}"#))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp = app
+            .clone()
+            .oneshot(post_json("/cmd_vel", r#"{"linear_x":0.1}"#))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp).await;
+        assert_eq!(json["blocked"], "braked");
+        assert_eq!(json["telemetry"]["odometry"]["vx"], 0.0);
+
+        let resp = app
+            .clone()
+            .oneshot(post_json("/gesture", r#"{"name":"suspicious_inspect"}"#))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_json(resp).await["blocked"], "braked");
+
+        // Every action response carries the field (null when not applicable)
+        let resp = app
+            .oneshot(post_json("/hud", r#"{"headline":"hola"}"#))
+            .await
+            .unwrap();
+        let json = body_json(resp).await;
+        assert!(json.as_object().unwrap().contains_key("blocked"));
+        assert!(json["blocked"].is_null());
+
+        // WS: a `blocked` event (not an error) when the command did not move as asked
+        let event = execute_ws_command(
+            &state,
+            WsClientCommand::CmdVel {
+                linear_x: 0.1,
+                linear_y: 0.0,
+                angular_z: 0.0,
+                duration_ms: None,
+            },
+        )
+        .expect("blocked event");
+        let json: serde_json::Value = serde_json::from_str(&event).unwrap();
+        assert_eq!(json["event"], "blocked");
+        assert_eq!(json["op"], "cmd_vel");
+        assert_eq!(json["blocked"], "braked");
+        assert!(json["message"].as_str().unwrap().contains("LiDAR"));
+        // Backwards: an unblocked command sends nothing back
+        assert!(execute_ws_command(
+            &state,
+            WsClientCommand::CmdVel {
+                linear_x: -0.1,
+                linear_y: 0.0,
+                angular_z: 0.0,
+                duration_ms: None,
+            },
+        )
+        .is_none());
     }
 
     #[test]

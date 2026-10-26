@@ -6,6 +6,7 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { TelemetryState } from '@/lib/types';
 import { shouldIgnoreShortcut } from '@/lib/keyboard';
+import { ViewerErrorBoundary } from './ViewerErrorBoundary';
 
 export type SceneMode = 'sandbox' | 'roaster' | 'gatekeeper' | 'bughunter';
 export type StageSceneMode = SceneMode;
@@ -67,7 +68,20 @@ function pulseToRadians(id: number, pulse: number): number {
   return (pulse - 500) * scale;
 }
 
-export function Rosorin3DViewer({
+/**
+ * 3D twin of the robot. Wrapped in an error boundary: if the scene crashes (or
+ * the browser has no WebGL), the rest of the page — TopNav with PARO, Live
+ * console, robot buttons — keeps working.
+ */
+export function Rosorin3DViewer(props: Rosorin3DViewerProps) {
+  return (
+    <ViewerErrorBoundary>
+      <Rosorin3DViewerScene {...props} />
+    </ViewerErrorBoundary>
+  );
+}
+
+function Rosorin3DViewerScene({
   telemetry,
   sceneMode = 'sandbox',
   enableKeyboard = true,
@@ -90,6 +104,7 @@ export function Rosorin3DViewer({
   const [lastKeyPressed, setLastKeyPressed] = useState<string>('');
   const [webcamActive, setWebcamActive] = useState(false);
   const [localLidarM, setLocalLidarM] = useState<number | null>(null);
+  const [webglUnavailable, setWebglUnavailable] = useState(false);
   const webcamFrameCbRef = useRef(onWebcamFrame);
 
   const jog = onJogServo ?? onServoJog;
@@ -304,7 +319,15 @@ export function Rosorin3DViewer({
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.02, 20);
     camera.position.set(0.72, 0.56, 0.66);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+    } catch (err) {
+      // Headless Chrome without GPU, blocked WebGL, lost driver…: degrade, do not crash the page.
+      console.warn('[3d] WebGL no disponible; el simulador 3D se desactiva:', err);
+      setWebglUnavailable(true);
+      return;
+    }
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -957,7 +980,10 @@ export function Rosorin3DViewer({
       </div>
 
       {/* 2. FULL-BLEED 3D WEBGL STAGE */}
-      <div ref={mountRef} className="relative flex-1 w-full overflow-hidden bg-[#F1F3F4]" />
+      <div className="relative flex-1 w-full overflow-hidden bg-[#F1F3F4]">
+        <div ref={mountRef} className="absolute inset-0" />
+        {webglUnavailable && <WebglUnavailableNotice />}
+      </div>
 
       {/* Picture-in-Picture Live Webcam Feed (Aurora 930 Pro) */}
       {webcamActive && (
@@ -1006,6 +1032,20 @@ export function Rosorin3DViewer({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+export const WEBGL_UNAVAILABLE_MESSAGE = 'Sin WebGL: el simulador 3D no está disponible';
+
+function WebglUnavailableNotice() {
+  return (
+    <div role="status" className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
+      <p className="text-sm font-bold text-[#202124]">{WEBGL_UNAVAILABLE_MESSAGE}</p>
+      <p className="max-w-sm text-xs text-[#5F6368]">
+        El resto de la página sigue funcionando: consola Live, botones del robot y PARO. Activa la aceleración por
+        hardware del navegador para ver el gemelo 3D.
+      </p>
     </div>
   );
 }

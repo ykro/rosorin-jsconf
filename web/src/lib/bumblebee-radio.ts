@@ -15,6 +15,7 @@ import { LiveConnection, type LiveStatus } from './live-connection';
 import { MicCapture } from './mic-capture';
 import { sanitizeTranscriptChunk } from './transcript-filter';
 import { cleanIdList, cleanToolText, pickEnum } from './tool-args';
+import { toolErrorHint } from './tool-policy';
 import { matchSongsForPrompt, type MatchState, type SongClip, type SongMatch } from './song-matcher';
 
 export type { SongClip } from './song-matcher';
@@ -30,6 +31,7 @@ export interface RadioTurnLog {
 }
 
 export type PlaybackStatus = 'idle' | 'tuning' | 'playing';
+export type ClipUnavailableReason = 'missing' | 'blocked';
 
 export interface BumblebeeCallbacks {
   onConnectionStatus: (status: LiveStatus) => void;
@@ -41,8 +43,12 @@ export interface BumblebeeCallbacks {
   onTurnLog: (turn: RadioTurnLog) => void;
   onMicLevelChange: (level: number) => void;
   onMicWarning: (warning: string | null) => void;
-  /** A clip's MP3 could not be played (public build ships without clips); null once a clip plays. */
-  onClipUnavailable: (clip: SongClip | null) => void;
+  /**
+   * A clip could not be played: `missing` (the public build ships without MP3s) or
+   * `blocked` (the browser refused autoplay until the user touches the page).
+   * Called with null once a clip plays or playback is cut.
+   */
+  onClipUnavailable: (clip: SongClip | null, reason?: ClipUnavailableReason) => void;
 }
 
 export const BUMBLEBEE_DANCES = [
@@ -140,6 +146,10 @@ export class BumblebeeRadioSession {
   private toolHandledCurrentTurn = false;
   private readonly matchState: MatchState = { recentClipIds: [] };
   private danceStepCounter = 0;
+  /** Tool call ids the server cancelled (`toolCallCancellation`): never answered. */
+  private readonly cancelledToolCallIds = new Set<string>();
+  /** Sequence started by a tool call: which ids it answers and whether the robot already danced. */
+  private toolSequence: { seq: number; ids: string[]; started: boolean } | null = null;
 
   constructor(
     bridge: RobotActionHandler | undefined | null,
@@ -166,6 +176,7 @@ export class BumblebeeRadioSession {
       onSessionOpened: () => {
         this.currentUserTurnText = '';
         this.toolHandledCurrentTurn = false;
+        this.cancelledToolCallIds.clear();
       },
       onLost: (reason) => {
         this.endConversation();
@@ -277,6 +288,7 @@ export class BumblebeeRadioSession {
     this.isPlayingRadio = false;
     this.callbacks.onPlaybackStatus('idle');
     this.callbacks.onNowPlaying(null, IDLE_FREQUENCY, '');
+    this.callbacks.onClipUnavailable(null);
     if (wasPlaying) {
       void this.hudClient.updateHud({ speaking: false, listening: this.conversationActive });
     }
@@ -325,11 +337,15 @@ export class BumblebeeRadioSession {
         fallbackStarted = true;
         audio.onended = null;
         audio.onerror = null;
+        // Autoplay policy (no user gesture yet): the file exists, the browser refused to play it.
+        const blocked = err instanceof DOMException && err.name === 'NotAllowedError';
         console.warn(
-          `[bumblebee] Clip no disponible (${clip.audioUrl}); se reproduce un barrido de radio.`,
+          blocked
+            ? `[bumblebee] El navegador bloqueó el audio de ${clip.audioUrl} (falta tocar la página).`
+            : `[bumblebee] Clip no disponible (${clip.audioUrl}); se reproduce un barrido de radio.`,
           err ?? audio.error?.message ?? ''
         );
-        this.callbacks.onClipUnavailable(clip);
+        this.callbacks.onClipUnavailable(clip, blocked ? 'blocked' : 'missing');
         // Keep the lyric on the dial roughly as long as the real clip would last.
         const holdMs = Math.round(Math.min(10, Math.max(1.6, clip.duration || 2)) * 1000);
         void this.playFmTuningStatic(Math.min(holdMs, 1400));
@@ -397,6 +413,7 @@ export class BumblebeeRadioSession {
           i === 0
             ? chosenGesture
             : clip.gesture || BUMBLEBEE_DANCES[(this.danceStepCounter + i) % BUMBLEBEE_DANCES.length];
+        if (this.toolSequence?.seq === seq) this.toolSequence.started = true;
         const step = this.triggerPhysicalDanceStep(segmentGesture);
         if (i === 0) void step.then(resolveFirst);
 
@@ -544,12 +561,12 @@ ${sections.join('\n')}`;
       }
     }
 
-    if (msg.toolCall?.functionCalls?.length) {
-      void this.handleToolCalls(msg.toolCall.functionCalls);
+    if (msg.toolCallCancellation?.ids?.length) {
+      this.handleToolCallCancellation(msg.toolCallCancellation.ids);
     }
 
-    if (msg.toolCallCancellation?.ids?.length) {
-      console.info('[bumblebee] El servidor canceló tool calls:', msg.toolCallCancellation.ids);
+    if (msg.toolCall?.functionCalls?.length) {
+      void this.handleToolCalls(msg.toolCall.functionCalls);
     }
 
     if (msg.serverContent?.turnComplete) {
@@ -565,7 +582,38 @@ ${sections.join('\n')}`;
     }
   }
 
+  /**
+   * The server no longer expects answers for these ids (usually a barge-in).
+   * A sequence they started is cut if the robot has not danced yet.
+   */
+  private handleToolCallCancellation(ids: string[]) {
+    console.info('[bumblebee] El servidor canceló tool calls:', ids);
+    for (const id of ids) this.cancelledToolCallIds.add(id);
+    const current = this.toolSequence;
+    if (
+      current &&
+      !current.started &&
+      current.seq === this.playSeq &&
+      current.ids.length > 0 &&
+      current.ids.every((id) => this.cancelledToolCallIds.has(id))
+    ) {
+      console.info('[bumblebee] Se corta la secuencia cancelada antes de empezar.');
+      this.toolSequence = null;
+      this.stopCurrentPlayback();
+    }
+  }
+
+  private isCancelled(id: string | undefined): boolean {
+    return Boolean(id && this.cancelledToolCallIds.has(id));
+  }
+
   private async handleToolCalls(calls: FunctionCall[]) {
+    calls = calls.filter((fc) => {
+      if (!this.isCancelled(fc.id)) return true;
+      this.cancelledToolCallIds.delete(fc.id!);
+      return false;
+    });
+    if (!calls.length) return;
     if (this.silenceDebounceTimer) clearTimeout(this.silenceDebounceTimer);
     const alreadyHandled = this.toolHandledCurrentTurn || this.isPlayingRadio;
     this.toolHandledCurrentTurn = true;
@@ -603,7 +651,13 @@ ${sections.join('\n')}`;
           note = ` Requested ids not in the catalog (${requestedIds.join(', ') || 'none'}); the local matcher picked the clip.`;
           ({ firstStep } = this.startClipSequence(match.clips, match.gesture, match.caption, userSpoken));
         }
+        this.toolSequence = { seq: this.playSeq, ids: fc.id ? [fc.id] : [], started: false };
         const dance = await firstStep;
+        if (this.isCancelled(fc.id)) {
+          // Cancelled while tuning in: the server does not expect an answer for this id.
+          this.cancelledToolCallIds.delete(fc.id!);
+          continue;
+        }
         response = dance.ok
           ? { status: 'ok', clips_played: played.map((c) => c.id), target: dance.target, message: `Playing.${note}` }
           : {
@@ -611,11 +665,12 @@ ${sections.join('\n')}`;
               code: dance.code ?? 'dance_failed',
               clips_played: played.map((c) => c.id),
               message: `The music plays but the robot could not dance: ${dance.message}${note}`,
+              hint: toolErrorHint(dance),
             };
       }
       responses.push({ id: fc.id, name: fc.name, response });
     }
-    this.live.sendToolResponse({ functionResponses: responses });
+    if (responses.length) this.live.sendToolResponse({ functionResponses: responses });
   }
 
   /**
@@ -642,6 +697,7 @@ ${sections.join('\n')}`;
     if (!this.conversationActive) return false;
     if (!connected) {
       this.conversationActive = false;
+      this.live.close(); // no background retry may revive a conversation that already failed
       this.callbacks.onMicWarning(CONNECT_FAILED_WARNING);
       return false;
     }
