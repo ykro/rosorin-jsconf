@@ -57,7 +57,7 @@ export function toolErrorHint(result: RobotActionResult): string | undefined {
     case 'unauthorized':
       return 'The robot bridge rejected the token. Say in Spanish that the robot is not authorized right now and continue without moving.';
     case 'braked':
-      return 'The LiDAR safety brake cancelled the movement because of a nearby obstacle: the robot did NOT move. Do not say that you moved; briefly say in Spanish that the safety brake stopped you.';
+      return 'The LiDAR safety brake cancelled or limited the movement because of a nearby obstacle: the robot moved only partly or not at all. Do not claim the full movement happened; briefly say in Spanish that the safety brake stopped you.';
     case 'lidar_stale':
       return 'The LiDAR has no recent data, so the bridge blocked the chassis: the robot did NOT move. Do not say that you moved; briefly say in Spanish that the LiDAR is not reporting and you stay still for safety.';
     case 'worker_dead':

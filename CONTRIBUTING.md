@@ -16,9 +16,10 @@ Gracias por el interés. Este repo acompaña la charla «De Web a Physical AI» 
    make lint
    cd web && npx tsc --noEmit && npm run lint && npm run check:css && npm run check:gestures && npm run build
    ```
-2. Si cambias la API, las variables o los flags, actualiza la documentación en el mismo PR (`README.md`, `docs/`, `docs/openapi.yaml` y `skills/`).
+   Si tocaste la API, agrega `npx @redocly/cli@latest lint docs/openapi.yaml` (0 errores). Si tocaste los scripts de Bash, `bash -n` sobre cada uno.
+2. Si cambias la API, las variables o los flags, actualiza la documentación en el mismo PR (`README.md`, `docs/`, `docs/openapi.yaml`, los `.env.example` y `skills/`).
 3. No subas MP3, API keys ni tokens. No pongas secretos en variables `NEXT_PUBLIC_*`.
-4. Los cambios que tocan seguridad del robot (límites, freno, watchdog, E-stop, token) necesitan una explicación de cómo los probaste.
+4. Los cambios que tocan seguridad del robot (límites, freno, watchdog, *heartbeat*, E-stop, token) necesitan una explicación de cómo los probaste; si tienes el robot, adjunta la bitácora de `./ensayo.sh` ([`docs/ENSAYO.md`](./docs/ENSAYO.md)).
 5. Las slides (`slides/`, `web/public/slides/`) son material de la charla: no las cambies sin hablarlo antes.
 
 Las reglas completas para agentes y personas están en [`AGENTS.md`](./AGENTS.md).

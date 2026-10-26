@@ -115,7 +115,7 @@ describe('robot-client: blocked movements (new bridge contract)', () => {
     const r = await postWith({ status: 'ok', action: 'cmd_vel', blocked: 'braked', telemetry: {} });
     assert.equal(r.ok, false);
     assert.equal(r.code, 'braked');
-    assert.match(r.message, /no se movió/);
+    assert.match(r.message, /freno LiDAR/);
   });
 
   it('maps lidar_stale and worker_dead, and unknown reasons to "blocked"', async () => {

@@ -41,9 +41,9 @@ Al arrancar (`cargo run -- --backend mock`, `./run.sh --mock` o el binario en el
    ```
 
 2. **El servidor `axum`.** Atiende cada petición HTTP en las tareas que `axum` crea por conexión.
-3. **Dos tareas por cada cliente WebSocket.** Una reenvía la telemetría del `broadcast` y los eventos de error; la otra lee los comandos (`cmd_vel`, `gesture`, `arm`, `jog`, `reset_scene`, `stop`).
-4. **Un hilo del sistema operativo para escribir al hardware.** Con `serial` escribe en `/dev/rrc`; con `ros2` escribe JSON en el stdin de `ros2_worker.py`. Si se juntan varias velocidades, solo escribe la última. Un error de escritura pone `connected = false`.
-5. **La supervisión.** `main` espera con `tokio::select!` al loop, al servidor y a las señales. Si el loop termina o hace *panic*, detiene los motores y sale con código 70.
+3. **Dos tareas por cada cliente WebSocket.** Una reenvía la telemetría del `broadcast` y los eventos `error` y `blocked`; la otra lee los comandos (`cmd_vel`, `gesture`, `arm`, `jog`, `reset_scene`, `stop`).
+4. **Un hilo del sistema operativo para escribir al hardware.** Con `serial` escribe en `/dev/rrc`; con `ros2` escribe JSON en el stdin de `ros2_worker.py`. La velocidad va en un espacio donde la última gana; los demás comandos, en una cola de 64. Un error de escritura, o una escritura atascada más de 300 ms, pone `connected = false`. Con `ros2`, además, el worker debe contestar cada `ping` del *heartbeat* (uno cada 100 ms) en menos de 400 ms; si no, también `connected = false`, hasta que vuelva a contestar.
+5. **La supervisión.** `main` espera con `tokio::select!` al loop, al servidor y a las señales. Si el loop termina o hace *panic*, detiene los motores y sale con código 70. Con SIGINT o SIGTERM enclava la E-stop y pone el chasis en 0 antes de salir.
 
 ### Los dos candados
 
@@ -54,7 +54,7 @@ Son `std::sync::Mutex`, no `tokio::sync::Mutex`: se toman por microsegundos y nu
 
 ### Qué hace `tick(dt_s)`
 
-1. **Seguridad** (`enforce_motion_safety`): si venció el plazo del comando, pone la velocidad en 0 (sin enclavar). Si el LiDAR está sin datos, la deja en 0. Si no, aplica el freno por eje. Mientras haya un comando vigente, reenvía la velocidad al driver cada ~100 ms.
+1. **Seguridad** (`enforce_motion_safety`): con `ros2`, encola el `ping` del *heartbeat* cuando toca. Si venció el plazo del comando, pone la velocidad en 0 (sin enclavar). Si el LiDAR está sin datos o el driver no responde, la deja en 0. Si no, aplica el freno por eje. Mientras haya un comando vigente, reenvía la velocidad al driver cada ~100 ms.
 2. **Integración**: suma `velocidad × dt` a la odometría (no hay encoders en la telemetría) y mueve cada servo hacia su objetivo a su velocidad en pulsos por segundo.
 
 La velocidad de cada servo se calcula al recibir `/arm`: `|Δ| / duración`, recortada a `150..1800` pulsos por segundo.
@@ -96,9 +96,11 @@ Gemini Live nunca habla directo con el bus serie. Cada comando pasa por estas ba
    }
    ```
 
-   `LIDAR_BRAKE_M` es 0.28 m y `LIDAR_BRAKE_MAX_WZ` 0.3 rad/s. Con `ros2`, si el último scan tiene más de 300 ms la velocidad es 0 sin importar el sector. Los datos vienen de `/scan` vía `ros2_worker.py`, o de `/simulate/lidar` en mock.
+   `LIDAR_BRAKE_M` es 0.28 m y `LIDAR_BRAKE_MAX_WZ` 0.3 rad/s. Con `ros2`, si el último scan tiene más de 300 ms la velocidad es 0 sin importar el sector. Los datos vienen de `/scan` vía `ros2_worker.py`, o de `/simulate/lidar` en mock. Un sector ciego llega como `0.0`, así que esta misma función lo trata como obstáculo. El `bool` que devuelve es el que termina como `blocked: "braked"` en la respuesta HTTP.
 4. **Límites de chasis y watchdog.** Las velocidades se recortan a `±0.25 m/s` y `±0.8 rad/s` (`±0.15 m/s` lineal con `serial`), y cada comando dura `100..2500 ms` (600 ms si no dices). Al vencer, el loop pone el chasis en 0.
 5. **E-stop enclavada.** Después de `POST /stop`, toda ruta de movimiento responde `423` hasta `POST /estop/release`.
+
+Cuando una barrera cambia lo que pediste sin rechazar la petición (freno, LiDAR sin datos o driver caído), la respuesta sigue siendo `200`, pero trae `blocked` con el motivo. Es como devolver `{ ok: true, result }` en vez de lanzar una excepción: el cliente decide qué decirle al usuario o al modelo.
 
 ---
 

@@ -46,8 +46,9 @@ class LidarSectorTests(unittest.TestCase):
         self.assertAlmostEqual(sectors["front_m"], 0.17)
 
     def test_old_wide_filter_still_fails_closed(self):
-        # With the previous 0.18 m filter the wall used to vanish (front=open). Now it blocks.
-        scan = make_scan({d: 0.17 for d in range(-30, 31)})
+        # With the previous 0.18 m filter a wall at 0.17 m used to vanish. A wall wider than the
+        # shadow cone still has echoes outside it, so it blocks.
+        scan = make_scan({d: 0.17 for d in range(-45, 46)})
         sectors = worker.compute_lidar_sectors(scan, 0.18, 35.0)
         self.assertAlmostEqual(sectors["front_m"], 0.17)
         self.assertLess(sectors["front_m"], BRAKE_M)
@@ -58,19 +59,24 @@ class LidarSectorTests(unittest.TestCase):
         sectors = worker.compute_lidar_sectors(make_scan(points), 0.12, 35.0)
         self.assertAlmostEqual(sectors["front_m"], 1.0)
 
-    def test_only_shadow_rays_report_closest_filtered(self):
+    def test_arm_in_open_space_does_not_block(self):
+        # Open stage (+inf) with only the arm in front: the arm is ignored and the front is open.
         scan = make_scan({d: 0.08 for d in range(-10, 11)})
-        # Legacy rule in isolation (no blind-sector check)
-        sectors = worker.compute_lidar_sectors(scan, 0.12, 35.0, 0.06, 0.0)
-        self.assertAlmostEqual(sectors["front_m"], 0.08)
-        # With the default blind-sector check (21/91 echoes) it blocks even harder
         sectors = worker.compute_lidar_sectors(scan, 0.12, 35.0)
+        self.assertEqual(sectors["front_m"], worker.LIDAR_OPEN_M)
+        self.assertEqual(sectors["blind"], [])
+
+    def test_only_shadow_rays_report_closest_filtered(self):
+        # The arm is the only usable thing in the sector (the rest is NaN): it cannot see past it.
+        scan = make_scan({d: 0.08 for d in range(-30, 31)}, default=math.nan)
+        sectors = worker.compute_lidar_sectors(scan, 0.12, 35.0)
+        self.assertAlmostEqual(sectors["front_m"], 0.08)
         self.assertLess(sectors["front_m"], BRAKE_M)
 
     def test_shadow_never_reports_other_sectors_max(self):
-        points = {d: 0.10 for d in range(-20, 21)}  # all front rays filtered
+        points = {d: 0.10 for d in range(-45, 46)}  # every usable front ray is inside the band
         points.update({90: 3.0, -90: 3.5, 180: 5.0})
-        sectors = worker.compute_lidar_sectors(make_scan(points), 0.12, 35.0)
+        sectors = worker.compute_lidar_sectors(make_scan(points, default=math.nan), 0.12, 90.0)
         self.assertAlmostEqual(sectors["front_m"], 0.10)
 
     def test_sector_mapping_rep103(self):
@@ -81,16 +87,26 @@ class LidarSectorTests(unittest.TestCase):
         self.assertAlmostEqual(sectors["right_m"], 0.6)
         self.assertAlmostEqual(sectors["back_m"], 0.7)
 
-    def test_no_returns_reports_blocked(self):
-        # Every ray inf: nothing seen is NOT "open" (fails closed)
+    def test_open_stage_is_free_not_blind(self):
+        # REP 117: +inf is "nothing within range". A stage with >12 m of empty space is open.
         sectors = worker.compute_lidar_sectors(make_scan({}), 0.12, 35.0)
         self.assertEqual(sectors["event"], "lidar")
         for name in ("front_m", "left_m", "right_m", "back_m"):
-            self.assertEqual(sectors[name], 0.0)
-        self.assertEqual(sectors["blind"], ["front", "left", "right", "back"])
+            self.assertEqual(sectors[name], worker.LIDAR_OPEN_M)
+        self.assertEqual(sectors["blind"], [])
+        # Finite values beyond range_max are free space too
+        sectors = worker.compute_lidar_sectors(make_scan({}, default=15.0))
+        self.assertEqual(sectors["front_m"], worker.LIDAR_OPEN_M)
+
+    def test_covered_lidar_blocks_every_sector(self):
+        for bad in (0.0, math.nan, -math.inf, 0.02):
+            sectors = worker.compute_lidar_sectors(make_scan({}, default=bad))
+            for name in ("front_m", "left_m", "right_m", "back_m"):
+                self.assertEqual(sectors[name], 0.0, bad)
+            self.assertEqual(sectors["blind"], ["front", "left", "right", "back"], bad)
 
     def test_sector_with_only_invalid_rays_is_blind(self):
-        for bad in (math.inf, -math.inf, math.nan, 0.0, 0.01):
+        for bad in (-math.inf, math.nan, 0.0, 0.01):
             points = {d: bad for d in range(-45, 46)}
             sectors = worker.compute_lidar_sectors(make_scan(points, default=2.0))
             self.assertEqual(sectors["front_m"], 0.0, bad)
@@ -101,16 +117,19 @@ class LidarSectorTests(unittest.TestCase):
     def test_sparse_echoes_below_fraction_are_blind(self):
         # 9 of 91 front rays (~10%) see a far wall: below the 25% default -> blind
         points = {d: 3.0 for d in range(-45, 46, 10)}
-        sectors = worker.compute_lidar_sectors(make_scan(points), 0.12, 35.0, 0.06, 0.25)
+        scan = make_scan(points, default=math.nan)
+        sectors = worker.compute_lidar_sectors(scan, 0.12, 35.0, 0.06, 0.25)
         self.assertEqual(sectors["front_m"], 0.0)
         # Half of them valid -> real distance
         points = {d: 3.0 for d in range(-45, 46, 2)}
-        sectors = worker.compute_lidar_sectors(make_scan(points), 0.12, 35.0, 0.06, 0.25)
+        scan = make_scan(points, default=math.nan)
+        sectors = worker.compute_lidar_sectors(scan, 0.12, 35.0, 0.06, 0.25)
         self.assertAlmostEqual(sectors["front_m"], 3.0)
         self.assertNotIn("front", sectors["blind"])
 
-    def test_min_valid_fraction_zero_restores_open(self):
-        sectors = worker.compute_lidar_sectors(make_scan({}), 0.12, 35.0, 0.06, 0.0)
+    def test_min_valid_fraction_zero_disables_blind_check(self):
+        scan = make_scan({}, default=math.nan)
+        sectors = worker.compute_lidar_sectors(scan, 0.12, 35.0, 0.06, 0.0)
         self.assertEqual(sectors["front_m"], worker.LIDAR_OPEN_M)
         self.assertEqual(sectors["blind"], [])
 
@@ -138,16 +157,65 @@ class LidarSectorTests(unittest.TestCase):
         self.assertAlmostEqual(sectors["front_m"], 1.0)
 
     def test_env_defaults(self):
-        self.assertEqual(worker.ARM_SHADOW_MIN_M, float(os.environ.get("ARM_SHADOW_MIN_M", 0.06)))
-        self.assertEqual(worker.ARM_SHADOW_MAX_M, float(os.environ.get("ARM_SHADOW_MAX_M", 0.09)))
-        self.assertEqual(
-            worker.ARM_SHADOW_HALF_ANGLE_DEG,
-            float(os.environ.get("ARM_SHADOW_HALF_ANGLE_DEG", 20.0)),
-        )
+        values, _ = worker.load_arm_shadow("/nonexistent/arm-shadow.json", env={})
+        self.assertEqual(values, {"min_m": 0.06, "max_m": 0.09, "half_angle_deg": 20.0})
         self.assertEqual(
             worker.LIDAR_MIN_VALID_FRACTION,
             float(os.environ.get("LIDAR_MIN_VALID_FRACTION", 0.25)),
         )
+
+
+class ScanOrientationTests(unittest.TestCase):
+    def test_offset_180_swaps_front_and_back(self):
+        scan = make_scan({0: 0.5, 180: 2.0}, default=3.0)
+        normal = worker.compute_lidar_sectors(scan)
+        self.assertAlmostEqual(normal["front_m"], 0.5)
+        old = worker.LIDAR_ANGLE_OFFSET_DEG
+        worker.LIDAR_ANGLE_OFFSET_DEG = 180.0
+        try:
+            rotated = worker.compute_lidar_sectors(scan)
+        finally:
+            worker.LIDAR_ANGLE_OFFSET_DEG = old
+        self.assertAlmostEqual(rotated["front_m"], 2.0)
+        self.assertAlmostEqual(rotated["back_m"], 0.5)
+
+    def test_flip_swaps_left_and_right(self):
+        self.assertAlmostEqual(worker.robot_angle(math.radians(90), 0.0, True), math.radians(-90))
+        self.assertAlmostEqual(worker.robot_angle(math.radians(90), 0.0, False), math.radians(90))
+        self.assertAlmostEqual(abs(worker.robot_angle(0.0, 180.0, False)), math.pi)
+
+
+class ArmShadowCalibrationTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "arm-shadow.json")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_calibration_file_overrides_defaults(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump({"min_m": 0.07, "max_m": 0.13, "half_angle_deg": 28.0}, f)
+        values, source = worker.load_arm_shadow(self.path, env={})
+        self.assertEqual(values, {"min_m": 0.07, "max_m": 0.13, "half_angle_deg": 28.0})
+        self.assertIn(self.path, source)
+
+    def test_environment_overrides_file(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump({"min_m": 0.07, "max_m": 0.13, "half_angle_deg": 28.0}, f)
+        values, source = worker.load_arm_shadow(self.path, env={"ARM_SHADOW_MAX_M": "0.2"})
+        self.assertEqual(values["max_m"], 0.2)
+        self.assertEqual(values["min_m"], 0.07)
+        self.assertEqual(source, "environment")
+
+    def test_invalid_file_falls_back_to_defaults(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("{not json")
+        values, source = worker.load_arm_shadow(self.path, env={})
+        self.assertEqual(values, worker.ARM_SHADOW_DEFAULTS)
+        self.assertEqual(source, "defaults")
 
 
 class HeartbeatTests(unittest.TestCase):

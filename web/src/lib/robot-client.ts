@@ -65,7 +65,7 @@ export function describeBridgeError(err: unknown): { code: BridgeErrorCode; mess
 }
 
 const MOTION_BLOCK_MESSAGES: Record<MotionBlockReason, string> = {
-  braked: 'El freno LiDAR anuló el movimiento (obstáculo cerca): el robot no se movió.',
+  braked: 'El freno LiDAR anuló o limitó el movimiento (obstáculo cerca).',
   lidar_stale: 'LiDAR sin datos recientes: el bridge bloqueó el chasis y el robot no se movió.',
   worker_dead: 'El proceso de control del robot no responde: el movimiento no se ejecutó.',
 };

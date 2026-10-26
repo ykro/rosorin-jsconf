@@ -63,6 +63,14 @@ export function BridgeAlerts({ bridge, onReleaseEstop, onOpenSettings }: BridgeA
           {releaseError && <span className="text-xs font-semibold">{releaseError}</span>}
         </div>
       )}
+      {bridge.connected && bridge.workerDown && (
+        <div
+          role="alert"
+          className="pointer-events-auto rounded-xl border-2 border-[#D93025] bg-[#FCE8E6] px-4 py-2.5 text-sm font-bold text-[#A50E0E] shadow-md"
+        >
+          El control del robot no responde: chasis bloqueado
+        </div>
+      )}
       {bridge.lidarStale && (
         <div
           role="alert"

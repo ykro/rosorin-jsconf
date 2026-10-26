@@ -147,7 +147,7 @@ describe('EmbodiedGeminiLiveSession: blocked movements (bridge contract)', () =>
       ok: false,
       target: 'robot',
       code: 'braked',
-      message: 'El freno LiDAR anuló el movimiento (obstáculo cerca): el robot no se movió.',
+      message: 'El freno LiDAR anuló o limitó el movimiento (obstáculo cerca).',
     });
     const { session, logs } = makeSession(bridge);
     await session.roastRepo(analysis, 'test-key');
@@ -159,7 +159,7 @@ describe('EmbodiedGeminiLiveSession: blocked movements (bridge contract)', () =>
     const resp = sock.toolResponses.at(-1)!.functionResponses[0].response;
     assert.equal(resp.status, 'error');
     assert.equal(resp.code, 'braked');
-    assert.match(String(resp.hint), /did NOT move/);
+    assert.match(String(resp.hint), /Do not claim the full movement happened/);
     assert.ok(logs.some((l) => l.startsWith('error(braked)')));
     session.dispose();
   });

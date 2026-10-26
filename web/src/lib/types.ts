@@ -85,6 +85,8 @@ export interface BridgeUiState {
   authError: boolean;
   estopLatched: boolean;
   lidarStale: boolean;
+  /** Telemetry says the robot worker/driver is not answering (`connected: false`) while the bridge is up. */
+  workerDown: boolean;
   lidarSource?: 'mock' | 'ros2' | 'none';
   url: string;
 }

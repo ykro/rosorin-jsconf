@@ -46,7 +46,8 @@ if [ -z "$ROBOT_IP" ]; then
 fi
 
 BASE="http://$ROBOT_IP:$BRIDGE_PORT"
-if [ -z "${BRIDGE_TOKEN:-}" ] && [ -s "$ROOT_DIR/.bridge-token" ]; then
+# En --mock el bridge local (./run.sh --mock) no usa token: no leas el del robot.
+if [ -z "${BRIDGE_TOKEN:-}" ] && [ "$MOCK" = false ] && [ -s "$ROOT_DIR/.bridge-token" ]; then
   BRIDGE_TOKEN="$(tr -d '[:space:]' < "$ROOT_DIR/.bridge-token")"
 fi
 if [ -z "${BRIDGE_TOKEN:-}" ] && [ "$MOCK" = false ]; then
@@ -142,7 +143,7 @@ if [ -n "$ROBOT_SSH" ]; then
   else
     bad "El robot está en $ROBOT_HEAD y la laptop en $LOCAL_HEAD: en el robot corre git pull (o git fetch && git reset --hard origin/main) y make build-robot."
   fi
-  BIN_NEWER="$(ssh "$ROBOT_SSH" "cd $ROBOT_REPO && b=robot-bridge/target/release/rosorin-bridge; [ -x \$b ] && [ \$b -nt robot-bridge/src/backend.rs ] && [ \$b -nt robot-bridge/src/main.rs ] && echo si || echo no" 2>/dev/null || echo '?')"
+  BIN_NEWER="$(ssh "$ROBOT_SSH" "cd $ROBOT_REPO && b=robot-bridge/target/release/rosorin-bridge; [ -x \$b ] && [ -z \"\$(find robot-bridge/src robot-bridge/Cargo.toml robot-bridge/Cargo.lock -newer \$b 2>/dev/null)\" ] && echo si || echo no" 2>/dev/null || echo '?')"
   if [ "$BIN_NEWER" = "si" ]; then ok "El binario de release del robot es más nuevo que el código."; else bad "El binario del robot no está recompilado: corre make build-robot en el robot (bridge y worker van juntos)."; fi
 else
   note "Sin --ssh: no reviso el commit ni el binario del robot."
@@ -164,7 +165,8 @@ fi
 ok "GET /status con token responde 200."
 BACKEND="$(jf "$S" 'd["backend"]')"
 note "Backend: $BACKEND · batería: $(jf "$S" 'd["battery_mv"]') mV · LiDAR: $(jf "$S" 'd["lidar_source"]')"
-if [ "$MOCK" = false ] && [ "$BACKEND" != "ros2" ]; then warn "El backend es '$BACKEND' (en el robot se espera ros2)."; fi
+# Con --backend ros2, `backend` trae el nombre del worker (stm32-board…, ros2-topics): el LiDAR dice la verdad.
+if [ "$MOCK" = false ] && [ "$(jf "$S" 'd["lidar_source"]')" != "ros2" ]; then warn "El LiDAR viene de '$(jf "$S" 'd["lidar_source"]')' (en el robot se espera ros2; ¿el bridge cayó a mock o es serial?)."; fi
 if [ "$(jf "$S" 'd["connected"]')" = "True" ]; then
   ok "El worker responde (connected=true)."
 else
@@ -208,7 +210,7 @@ else
     if [ "$LOWEST" = "$key" ] && python3 -c "import sys; sys.exit(0 if float('$VAL') < 0.35 else 1)"; then
       ok "La caja $label baja $key a $VAL m."
     else
-      bad "La caja $label no baja $key (el sector más cercano es $LOWEST). El /scan está rotado o invertido."
+      bad "La caja $label no baja $key (el sector más cercano es $LOWEST). El /scan está rotado o invertido: corrígelo con LIDAR_ANGLE_OFFSET_DEG (p. ej. 180 si frente y atrás están cambiados) o LIDAR_FLIP=1 (si izquierda y derecha están cambiadas) al levantar make robot."
     fi
   done
   pause "Quita la caja y tapa el LiDAR con la mano"
@@ -248,7 +250,7 @@ if clear_area; then
   if [ ${#SHADOWED[@]} -eq 0 ]; then
     ok "Ningún gesto hace que el brazo bloquee el LiDAR."
   else
-    bad "El brazo aparece como obstáculo en: ${SHADOWED[*]}. Calibra ARM_SHADOW_MIN_M / ARM_SHADOW_MAX_M / ARM_SHADOW_HALF_ANGLE_DEG."
+    bad "El brazo aparece como obstáculo en: ${SHADOWED[*]}. En el robot corre make calibrar-sombra (con el bridge levantado) y reinicia make robot."
   fi
   check_manual "Ningún gesto chocó con algo ni acercó el brazo a la torre del LiDAR"
 else
@@ -261,6 +263,7 @@ if clear_area; then
   for spec in "0.10 0 0:hacia ADELANTE" "-0.10 0 0:hacia ATRÁS" "0 0.10 0:de lado a la IZQUIERDA" "0 -0.10 0:de lado a la DERECHA" "0 0 0.4:girando a la IZQUIERDA (antihorario)" "0 0 -0.4:girando a la DERECHA (horario)"; do
     read -r vx vy wz <<< "${spec%%:*}"; label="${spec#*:}"
     R="$(cmd_vel "$vx" "$vy" "$wz" 600)"
+    if [ "$(code_of "$R")" = "423" ]; then bad "El movimiento $label respondió 423: la E-stop estaba enclavada."; release; continue; fi
     BLOCKED="$(jf "$(body_of "$R")" 'd.get("blocked")')"
     sleep 0.9
     if [ -n "$BLOCKED" ]; then bad "El movimiento $label salió bloqueado ($BLOCKED)."; continue; fi
@@ -338,6 +341,8 @@ if clear_area; then
     check_manual "Con $t el brazo apunta al tótem correcto"
   done
   gesture home >/dev/null
+else
+  warn "Omití la prueba de bandejas y tótems."
 fi
 CLIPS="$(find "$ROOT_DIR/web/public/songs/clips" -maxdepth 1 -name '*.mp3' 2>/dev/null | wc -l | tr -d ' ')"
 if [ "${CLIPS:-0}" -ge 168 ]; then ok "Hay $CLIPS MP3 de Bumblebee en la laptop."; else bad "Solo hay ${CLIPS:-0} MP3 en web/public/songs/clips (se necesitan 168 para Bumblebee)."; fi

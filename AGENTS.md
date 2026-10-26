@@ -6,12 +6,12 @@ Guía corta para agentes de código (y personas) que trabajen en este repo. Es e
 
 | Carpeta | Qué hay | Lenguaje |
 |---|---|---|
-| `robot-bridge/` | Bridge HTTP y WebSocket (`rosorin-bridge`, puerto 9000): límites, freno por LiDAR, watchdog, E-stop, token. `scripts/ros2_worker.py` habla con el STM32 y ROS 2. | Rust, Python |
+| `robot-bridge/` | Bridge HTTP y WebSocket (`rosorin-bridge`, puerto 9000): límites, freno por LiDAR, watchdog, *heartbeat* del worker, E-stop, token. `scripts/ros2_worker.py` habla con el STM32 y ROS 2; `scripts/robot-common.sh` reúne las salvaguardas de los scripts de arranque. | Rust, Python, Bash |
 | `web/` | Next.js 15 (export estático): demos, gemelo 3D, cliente de Gemini Live y del bridge. | TypeScript |
 | `docs/` | Documentación, `openapi.yaml`, diagramas (`assets/*.svg` con su fuente `.html`). | Markdown |
 | `skills/` | Skills `rosorin-pro`, `gemini-live-js` y `threejs-urdf-twin`. | Markdown |
 | `slides/`, `web/public/slides/` | Slides de la charla. | HTML |
-| Raíz | `run.sh`, `iniciar-robot.sh`, `Makefile`, `firebase.json`. | Bash |
+| Raíz | `run.sh`, `iniciar-robot.sh`, `traer-token.sh`, `ensayo.sh`, `Makefile`, `firebase.json`. | Bash |
 
 ## Verificación
 
@@ -21,18 +21,20 @@ Antes de dar un cambio por terminado:
 make test                                   # cargo test + tests del worker (sin rclpy) + npm test
 make lint                                   # cargo clippy --all-targets -- -D warnings
 cd web && npx tsc --noEmit && npm run lint && npm run check:css && npm run check:gestures && npm run build
-npx @redocly/cli@latest lint docs/openapi.yaml   # si tocaste la API
+npx @redocly/cli@latest lint docs/openapi.yaml   # si tocaste la API (0 errores)
+bash -n run.sh iniciar-robot.sh traer-token.sh ensayo.sh robot-bridge/scripts/robot-common.sh   # si tocaste los scripts
 ```
 
-El CI (`.github/workflows/ci.yml`) corre lo mismo en cada push y PR.
+El CI (`.github/workflows/ci.yml`) corre en cada push y PR todo lo anterior menos el lint de OpenAPI y la revisión de los scripts de Bash: build, tests y clippy de Rust (también con Rust 1.87), tests del worker y, en `web/`, `tsc`, `npm test`, `lint`, `check:css`, `check:gestures` y `build`.
 
 ## Reglas
 
 - **No versiones MP3.** Los clips de `web/public/songs/clips/` tienen derechos de autor; `.gitignore` y `firebase.json` los excluyen. No los agregues a git ni los saques del `hosting.ignore`.
-- **Nada secreto en `NEXT_PUBLIC_*`.** Esas variables se incrustan en el bundle público. La API key de Gemini va en `localStorage` y el token del bridge llega por `?token=` o el panel del robot.
-- **No relajes la seguridad del bridge sin pedido explícito:** token fuera de loopback, `Host`/`Origin`, rate limit, E-stop enclavada, LiDAR que falla cerrado y límites de `protocol.rs`.
+- **Nada secreto en `NEXT_PUBLIC_*`.** Esas variables se incrustan en el bundle público. La API key de Gemini va en `localStorage` y el token del bridge llega por `#token=` (o `?token=`) o el panel del robot. En scripts, pásale el token a `curl` por stdin (`rosorin_curl_with_token`), nunca en argumentos.
+- **No relajes la seguridad del bridge sin pedido explícito:** token fuera de loopback, `Host`/`Origin` (IPs privadas solo con token o fuera de loopback), rate limit, E-stop enclavada (también al apagar), *heartbeat* del worker, LiDAR que falla cerrado, campo `blocked` y límites de `protocol.rs`.
+- **Bridge y worker van juntos.** Un cambio en el protocolo entre `backend.rs` y `ros2_worker.py` (por ejemplo el *heartbeat*) obliga a actualizar los dos; documenta en el mismo cambio que en el robot hay que correr `make build-robot`.
 - **Slides fuera de alcance.** No modifiques `slides/` ni `web/public/slides/` salvo que el autor lo pida explícitamente.
-- **La documentación debe coincidir con el código.** Si cambias rutas, códigos de error, variables, flags de `run.sh`, límites o telemetría, actualiza `README.md`, `docs/API.md`, `docs/openapi.yaml`, los diagramas afectados y los skills en el mismo cambio. Los fragmentos de código en docs y skills se copian literal del código.
+- **La documentación debe coincidir con el código.** Si cambias rutas, códigos de error, variables, flags de `run.sh`, `ensayo.sh` o `traer-token.sh`, límites o telemetría, actualiza `README.md`, `docs/` (incluido `docs/ENSAYO.md`), `docs/openapi.yaml`, los `.env.example`, los diagramas afectados y los skills en el mismo cambio. Los fragmentos de código en docs y skills se copian literal del código.
 - **Diagramas:** si editas un `docs/assets/*.svg`, aplica el mismo cambio al bloque `<svg>` de su `.html` y renderízalo para revisar que nada se corte.
 - **Idioma:** docs y UI en español; nombres de código, identificadores y comentarios de código en inglés.
 - No hagas commits, push ni deploy si no te lo piden.

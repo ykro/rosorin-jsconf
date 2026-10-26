@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: API de rosorin-bridge
-  version: 1.1.0
+  version: 1.2.0
   summary: Bridge HTTP y WebSocket en Rust para el Hiwonder ROSOrin Pro.
   description: |
     Contrato HTTP del binario `rosorin-bridge` (carpeta `robot-bridge/`), que mueve el chasis Mecanum,
@@ -13,13 +13,20 @@ info:
     - Con token definido, todas las rutas lo piden menos `GET /health` y los preflight `OPTIONS`.
       Va en `x-bridge-token` o `Authorization: Bearer`; `?token=` solo se acepta en `GET /ws`.
     - El header `Host` debe ser una IP, `localhost` o un nombre de `BRIDGE_ALLOWED_HOSTS` (si no, 403 `forbidden_host`).
-    - Si viene `Origin`, debe ser una IP de loopback o privada, `localhost`, `jsconfmx26.web.app`,
+    - Si viene `Origin`, debe ser una IP de loopback, `localhost`, `jsconfmx26.web.app`,
       `jsconfmx26.firebaseapp.com` o un origen exacto de `BRIDGE_ALLOWED_ORIGINS` (si no, 403 `forbidden_origin`).
+      Las IPs privadas (10/8, 172.16/12, 192.168/16) solo valen si hay token o el bridge escucha fuera de loopback.
     - Límite global de 30 POST/s con ráfaga de 60; `/stop` y `/estop/release` no cuentan.
     - Cuerpos de máximo 8 KiB (413).
 
     **Paro de emergencia:** `POST /stop` enclava la E-stop y las rutas de movimiento responden 423 hasta
-    `POST /estop/release`.
+    `POST /estop/release`. Al apagarse (SIGINT o SIGTERM) el bridge también la enclava.
+
+    **Campo `blocked`:** toda respuesta de acción (200) trae `blocked`: `null` si se ejecutó como se pidió, o
+    `worker_dead`, `lidar_stale` o `braked` si el robot no se movió (o se movió menos). `/cmd_vel` puede traer
+    los tres; `/gesture`, lo que bloquearía el gesto en ese momento (`lidar_stale` y `braked` solo si mueve el
+    chasis); `/arm`, `/servo/jog`, `/arm/jog`, `/scene/reset`, `/stop`, `/rgb` y `/buzzer`, solo `worker_dead`;
+    `/hud`, `/estop/release` y `/simulate/lidar`, siempre `null`.
 
     **Errores:** los del bridge son JSON `{status, message}`. Los 400 por JSON mal formado, 413, 415 y 422
     los genera axum y su cuerpo es texto plano.
@@ -122,6 +129,8 @@ paths:
 
         **Servidor → cliente:** un `TelemetryState` al conectar y luego uno cada 50 ms (20 Hz).
         Los errores de comandos llegan como `WsErrorEvent` (`{"event":"error","op":…,"status":…,"message":…}`).
+        Un comando aceptado que no movió el robot como se pidió llega como `WsBlockedEvent`
+        (`{"event":"blocked","op":…,"blocked":…,"message":…}`); solo se manda si `blocked` no es null.
         La telemetría nunca trae la clave `event`.
 
         **Cliente → servidor:** `WsClientCommand` con el discriminador `op`: `cmd_vel`, `gesture`, `arm`, `jog`,
@@ -154,7 +163,8 @@ paths:
         `duration_ms` se recorta a 100..2500 y por defecto vale el watchdog (600 ms). Mientras está vigente,
         el loop reenvía la velocidad cada ~100 ms. Freno por eje en cada tick de 40 Hz: `vx>0` con front,
         `vx<0` con back, `vy>0` con left y `vy<0` con right por debajo de 0.28 m; con cualquier sector por
-        debajo de 0.28 m, |wz| ≤ 0.3. Con `ros2` y sin scan en más de 300 ms la velocidad aplicada es 0.
+        debajo de 0.28 m, |wz| ≤ 0.3 (`blocked: braked`). Con `ros2` y sin scan en más de 300 ms la velocidad
+        aplicada es 0 (`blocked: lidar_stale`); con el worker caído o atascado, también (`blocked: worker_dead`).
       requestBody:
         required: true
         content:
@@ -284,8 +294,8 @@ paths:
       operationId: postGesture
       description: >
         Acepta los 21 gestos y sus alias (sin distinguir mayúsculas); un nombre desconocido da 404.
-        La respuesta llega de inmediato y los pasos corren en segundo plano hasta que otro comando o /stop
-        los cancela.
+        La respuesta llega de inmediato y los pasos corren en segundo plano hasta que otro comando de
+        movimiento o /stop los cancela. `blocked` dice lo que impediría el gesto en ese momento.
       requestBody:
         required: true
         content:
@@ -464,7 +474,7 @@ paths:
       description: >
         Cancela el gesto activo, pone el chasis en 0, apaga el buzzer y congela el brazo donde está (no lo
         lleva a `home`). `estop_latched` pasa a true y `active_gesture` a `stopped`. No cuenta para el límite
-        de peticiones.
+        de peticiones. Con el driver caído la E-stop se enclava igual y `blocked` es `worker_dead`.
       responses:
         '200':
           $ref: '#/components/responses/Action'
@@ -503,7 +513,7 @@ components:
       description: Solo se acepta en GET /ws.
   responses:
     Action:
-      description: Comando aceptado
+      description: Comando aceptado (revisa `blocked` para saber si el robot se movió como se pidió)
       content:
         application/json:
           schema:
@@ -771,24 +781,26 @@ components:
           type: number
     LidarSummary:
       type: object
-      description: Distancia mínima por sector; con lidar_source `none` los valores no son reales
+      description: >
+        Distancia mínima por sector. Con ros2 vale 0.0 antes del primer scan y en un sector ciego (bloquea).
+        Con lidar_source `none` los valores no son reales.
       required: [front_m, left_m, right_m, back_m, obstacle_alert]
       properties:
         front_m:
           type: number
-          minimum: 0.05
+          minimum: 0.0
           maximum: 12.0
         left_m:
           type: number
-          minimum: 0.05
+          minimum: 0.0
           maximum: 12.0
         right_m:
           type: number
-          minimum: 0.05
+          minimum: 0.0
           maximum: 12.0
         back_m:
           type: number
-          minimum: 0.05
+          minimum: 0.0
           maximum: 12.0
         obstacle_alert:
           type: boolean
@@ -826,6 +838,9 @@ components:
           examples: [mock, serial, stm32-board (/dev/rrc @ 1Mbps), ros2-topics]
         connected:
           type: boolean
+          description: >
+            false si murió el worker, si no contesta el heartbeat en 400 ms o si una escritura al hardware falla
+            o lleva más de 300 ms atascada. Con false el chasis queda bloqueado; se recupera solo.
         battery_mv:
           type: integer
           description: Solo es real con el worker conectado al STM32; si no, queda en 11850
@@ -885,15 +900,27 @@ components:
         lidar_source:
           type: string
           enum: [mock, ros2, none]
+    BlockReason:
+      type: string
+      enum: [worker_dead, lidar_stale, braked]
+      description: >
+        worker_dead: nada llega al hardware (worker caído o sin heartbeat, escrituras fallidas o atascadas).
+        lidar_stale: con ros2, sin scan en más de 300 ms (chasis en 0).
+        braked: el freno del LiDAR anuló un eje o limitó |wz| a 0.3.
     ActionResponse:
       type: object
-      required: [status, action, telemetry]
+      required: [status, action, blocked, telemetry]
       properties:
         status:
           const: ok
         action:
           type: string
           examples: ['cmd_vel(vx=0.14, vy=0.00, wz=0.00)', estop_release]
+        blocked:
+          description: null si se ejecutó como se pidió; si no, por qué el robot no se movió (o se movió menos)
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/BlockReason'
         telemetry:
           $ref: '#/components/schemas/TelemetryState'
     ErrorResponse:
@@ -983,3 +1010,18 @@ components:
           enum: [estop_latched, rate_limited, invalid_request, not_found]
         message:
           type: string
+    WsBlockedEvent:
+      description: Comando recibido por /ws que se aceptó pero no movió el robot como se pidió
+      type: object
+      required: [event, op, blocked, message]
+      properties:
+        event:
+          const: blocked
+        op:
+          type: string
+          enum: [cmd_vel, gesture, arm, jog, reset_scene, stop]
+        blocked:
+          $ref: '#/components/schemas/BlockReason'
+        message:
+          type: string
+          description: Mensaje en español

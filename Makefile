@@ -1,4 +1,4 @@
-.PHONY: up start bridge robot web test lint reset release build-robot
+.PHONY: up start bridge robot web test lint reset release build-robot calibrar-sombra
 
 BRIDGE_PORT ?= 9000
 ROBOT_BACKEND ?= mock
@@ -43,6 +43,11 @@ test:
 # Clippy estricto (warnings = error)
 lint:
 	cd robot-bridge && cargo clippy --all-targets -- -D warnings
+
+# En el robot, con el bridge corriendo (make robot): mide dónde ve el LiDAR al brazo en cada pose
+# de los gestos (solo mueve el brazo) y guarda la banda en robot-bridge/arm-shadow.json.
+calibrar-sombra:
+	bash -c 'source /opt/ros/humble/setup.bash 2>/dev/null; python3 robot-bridge/scripts/calibrar_sombra.py'
 
 # Build release binary on Jetson Orin Nano
 build-robot:

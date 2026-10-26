@@ -175,6 +175,6 @@ Reutiliza objetos en el loop de animación (por ejemplo un solo `THREE.Color` pa
 ## 5. Misma telemetría para simulador y robot
 
 - La trayectoria de los servos la calcula el bridge en Rust (loop de 40 Hz, cada servo a `|Δ| / duración` pulsos por segundo, recortado a `150..1800`). El navegador solo suaviza.
-- La telemetría llega por `ws://<host>:9000/ws?token=<t>` a 20 Hz, igual con `--backend mock` que con `ros2` o `serial`. Los mensajes que traen la clave `event` son errores de comandos, no telemetría.
+- La telemetría llega por `ws://<host>:9000/ws?token=<t>` a 20 Hz, igual con `--backend mock` que con `ros2` o `serial`. Los mensajes que traen la clave `event` (`error` o `blocked`) son respuestas a comandos, no telemetría.
 - **En el bridge, la odometría solo se integra desde la velocidad comandada** (no desde encoders): ningún gesto aplica «saltos» de posición. Los `point_*` (Bug Hunter) se desplazan con su velocidad real.
 - Sin bridge, `use-robot-telemetry.ts` simula una telemetría local para que el gemelo siga respondiendo. Reproduce la misma coreografía paso a paso que el bridge, desde `gesture-choreographies.generated.ts` (generado de `gestures.rs` con `npm run gen:gestures`), e integra la velocidad de cada paso para la odometría.

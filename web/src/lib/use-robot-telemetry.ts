@@ -79,6 +79,7 @@ function initialBridgeState(): BridgeUiState {
     authError: false,
     estopLatched: false,
     lidarStale: false,
+    workerDown: false,
     url: '',
   };
 }
@@ -109,7 +110,9 @@ export function useRobotTelemetry() {
               ...prev,
               connected,
               authError,
-              ...(connected ? {} : { estopLatched: false, lidarStale: false, lidarSource: undefined }),
+              ...(connected
+                ? {}
+                : { estopLatched: false, lidarStale: false, workerDown: false, lidarSource: undefined }),
             }
       );
     };
@@ -126,12 +129,14 @@ export function useRobotTelemetry() {
           setTelemetry(t);
           const estopLatched = Boolean(t.estop_latched);
           const lidarStale = Boolean(t.lidar_stale);
+          const workerDown = t.connected === false;
           setBridge((prev) =>
             prev.estopLatched === estopLatched &&
             prev.lidarStale === lidarStale &&
+            prev.workerDown === workerDown &&
             prev.lidarSource === t.lidar_source
               ? prev
-              : { ...prev, estopLatched, lidarStale, lidarSource: t.lidar_source }
+              : { ...prev, estopLatched, lidarStale, workerDown, lidarSource: t.lidar_source }
           );
         },
         (link) => setLink(link.connected, link.authError)
@@ -357,6 +362,15 @@ export function useRobotTelemetry() {
       if (code === 'estop_latched') {
         setBridge((prev) => (prev.estopLatched ? prev : { ...prev, estopLatched: true }));
         return { ok: true, target: 'robot', message: 'El paro de emergencia ya estaba activo.' };
+      }
+      if (code === 'worker_dead') {
+        // The bridge accepted /stop and latched the E-stop, but the robot driver is not answering.
+        setBridge((prev) => (prev.estopLatched ? prev : { ...prev, estopLatched: true }));
+        return {
+          ok: true,
+          target: 'robot',
+          message: 'Paro enviado, pero el control del robot no responde: si sigue moviéndose, apágalo.',
+        };
       }
       return { ok: false, target: 'robot', code, message };
     }

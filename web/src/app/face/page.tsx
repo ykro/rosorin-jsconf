@@ -123,7 +123,7 @@ export default function RobotFacePage() {
       className="relative flex h-screen w-screen cursor-pointer select-none items-center justify-center overflow-hidden"
     >
       <BridgeAlerts bridge={bridge} onReleaseEstop={releaseEstop} />
-      {bridge.connected && !bridge.estopLatched && (
+      {bridge.enabled && !bridge.estopLatched && (
         <button
           type="button"
           onClick={(e) => {

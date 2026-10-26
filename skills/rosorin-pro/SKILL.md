@@ -64,28 +64,33 @@ Solo se aceptan los IDs `{1, 2, 3, 4, 5, 10}`. Cualquier otro ID en `/arm` o `/s
 - **Watchdog del worker:** `WATCHDOG_TIMEOUT_S = 0.50` en `ros2_worker.py`. Si pasan 500 ms sin comandos con el robot en movimiento, pone los motores en 0. Al cerrarse su stdin (el bridge murió) también.
 - **Freno por eje** (`apply_lidar_brake`, umbral `LIDAR_BRAKE_M = 0.28`): `vx > 0` se anula con `front_m`, `vx < 0` con `back_m`, `vy > 0` con `left_m` y `vy < 0` con `right_m`. Si cualquier sector está por debajo de 0.28 m, `|wz|` se limita a 0.3. Se aplica al recibir el comando y en cada tick de 40 Hz.
 - **`obstacle_alert`:** cualquier sector por debajo de 0.35 m.
-- **LiDAR que falla cerrado (solo `ros2`):** sin scan en más de 300 ms, o con el worker muerto, la velocidad aplicada es 0 y `lidar_stale = true`. Al arrancar el chasis queda bloqueado hasta el primer scan.
-- **E-stop enclavada:** `POST /stop` detiene motores, congela el brazo donde está y bloquea `/cmd_vel`, `/arm`, `/servo/jog`, `/arm/jog`, `/gesture`, `/scene/reset` y `/buzzer` con `423 estop_latched` hasta `POST /estop/release`.
+- **LiDAR que falla cerrado (solo `ros2`):** sin scan en más de 300 ms, o con el worker muerto, la velocidad aplicada es 0 y `lidar_stale = true`. Al arrancar el chasis queda bloqueado hasta el primer scan y los 4 sectores valen `0.0`. Un sector ciego también llega en `0.0` y bloquea.
+- **Heartbeat del worker (solo `ros2`):** cada 100 ms el bridge manda `{"op":"ping","seq":N}` y el worker contesta `{"event":"pong","seq":N}` desde el hilo que ejecuta los comandos. Sin *pong* en 400 ms, o con una escritura atascada más de 300 ms, `connected = false` y el chasis queda bloqueado hasta que vuelva. Bridge y worker se actualizan juntos (`git pull` + `make build-robot`).
+- **Campo `blocked`:** toda respuesta de acción (HTTP 200) trae `blocked`: `null`, `worker_dead`, `lidar_stale` o `braked`. Por WebSocket llega como `{"event":"blocked","op":…,"blocked":…,"message":…}`. Un `200` con `blocked` no nulo **no** es éxito: el robot no se movió (o se movió menos).
+- **E-stop enclavada:** `POST /stop` detiene motores, congela el brazo donde está y bloquea `/cmd_vel`, `/arm`, `/servo/jog`, `/arm/jog`, `/gesture`, `/scene/reset` y `/buzzer` con `423 estop_latched` hasta `POST /estop/release`. El bridge también la enclava al apagarse (SIGINT o SIGTERM).
 - **`POST /simulate/lidar`** solo existe en mock (`403` en hardware).
 
 ## Token y red
 
 - El bridge escucha en `127.0.0.1` por defecto. En el robot `run.sh` lo levanta en `0.0.0.0` con `BRIDGE_TOKEN` (generado en `.bridge-token`, permisos 600). Sin token fuera de loopback, el bridge sale con código 2.
 - Manda el token como `x-bridge-token: <t>` o `Authorization: Bearer <t>`. `?token=` solo vale en `/ws`. `GET /health` es público.
-- `Host` debe ser una IP, `localhost` o un nombre de `BRIDGE_ALLOWED_HOSTS`; `Origin`, una IP privada o de loopback, `localhost`, el sitio de la charla o uno de `BRIDGE_ALLOWED_ORIGINS`.
+- `Host` debe ser una IP, `localhost` o un nombre de `BRIDGE_ALLOWED_HOSTS`; `Origin`, una IP de loopback, `localhost`, el sitio de la charla o uno de `BRIDGE_ALLOWED_ORIGINS`. Las IPs privadas solo valen como origen si hay token o el bridge escucha fuera de loopback.
+- En la laptop, el token se trae con `./traer-token.sh <usuario>@<IP>` y la web lo recibe en `#token=<t>`.
 - Límite global: 30 POST/s con ráfaga de 60 (`/stop` y `/estop/release` exentos).
 
+El token se le pasa a `curl` por stdin (`-H @-`, `curl >= 7.55`) para que no aparezca en `ps`, como hace `rosorin_curl_with_token` en `robot-bridge/scripts/robot-common.sh`:
+
 ```bash
-TOKEN=$(cat .bridge-token)
-curl -X POST -H "x-bridge-token: $TOKEN" -H 'content-type: application/json' \
+hdr() { printf 'x-bridge-token: %s\n' "$(cat .bridge-token)"; }
+hdr | curl -X POST -H @- -H 'content-type: application/json' \
   -d '{"linear_x":0.1,"duration_ms":500}' http://<IP>:9000/cmd_vel
-curl -X POST -H "x-bridge-token: $TOKEN" http://<IP>:9000/stop
-curl -X POST -H "x-bridge-token: $TOKEN" http://<IP>:9000/estop/release
+hdr | curl -X POST -H @- http://<IP>:9000/stop
+hdr | curl -X POST -H @- http://<IP>:9000/estop/release
 ```
 
 ## Lo que hace `ros2_worker.py`
 
-Protocolo: un JSON por línea en stdin (`{"op":"cmd_vel"|"arm"|"buzzer"|"rgb",…}`) y un JSON por línea en stdout (`{"event":"backend"|"lidar"|"battery"|"camera_jpeg",…}`). La primera línea siempre es `{"event":"backend","name":…}`; el bridge la espera hasta 20 s.
+Protocolo: un JSON por línea en stdin (`{"op":"cmd_vel"|"arm"|"buzzer"|"rgb"|"ping",…}`) y un JSON por línea en stdout (`{"event":"backend"|"lidar"|"battery"|"camera_jpeg"|"pong",…}`). La primera línea siempre es `{"event":"backend","name":…}`; el bridge la espera hasta 20 s. Cada `{"op":"ping","seq":N}` se contesta con `{"event":"pong","seq":N}` desde el hilo que lee stdin. El evento `lidar` trae además `blind` (lista de sectores ciegos; solo diagnóstico).
 
 - **Con el SDK (`Board`):** `name = "stm32-board (/dev/rrc @ 1Mbps)"`. Mueve motores con `set_motor_speed`, servos con `bus_servo_set_position`, buzzer y LEDs con el SDK, y lee la batería cada 2 s.
 - **Con tópicos (si `/dev/rrc` está ocupado):** `name = "ros2-topics"`. Publica:
@@ -95,8 +100,12 @@ Protocolo: un JSON por línea en stdin (`{"op":"cmd_vel"|"arm"|"buzzer"|"rgb",�
 - **Suscripciones** (con `qos_profile_sensor_data`, que acepta publicadores *best-effort* y *reliable*):
   - `/scan`: como máximo 20 eventos `lidar` por segundo.
   - `/depth_cam/rgb0/image_raw`: JPEG en base64, como máximo 2 por segundo (requiere `cv2`).
-- **Sectores** (REP-103: ángulo 0 al frente, positivo a la izquierda): frente `|θ| ≤ 45°`, izquierda `45°..135°`, derecha `-135°..-45°`, atrás el resto. Cada sector reporta el eco válido más cercano; sin ecos, `4.0` m.
-- **Sombra del brazo:** los ecos más cercanos que `ARM_SHADOW_MAX_M` (0.12 m) dentro de ±`ARM_SHADOW_HALF_ANGLE_DEG` (35°) se consideran el propio brazo y se ignoran si el sector tiene otros ecos. Si solo quedan ecos filtrados, se reporta el más cercano (falla cerrado). `ARM_SHADOW_MAX_M=0` desactiva el filtro. **Calíbralo en el robot** con `ros2 topic echo /scan`.
+- **Sectores** (REP-103: ángulo 0 al frente, positivo a la izquierda): frente `|θ| ≤ 45°`, izquierda `45°..135°`, derecha `-135°..-45°`, atrás el resto. Cada sector reporta el eco más cercano; si solo hay espacio libre, `4.0` m.
+- **Rayos** (`classify_ray`, REP 117): eco si es finito y está en `[range_min, range_max]`; libre si es `+inf` o mayor que `range_max`; inválido si es `NaN`, `-inf`, `0` o menor que `range_min` (algo pegado, ventana tapada o sucia). Un escenario con más de 12 m vacíos se ve abierto. Ojo: una superficie negra mate que no devuelve eco también se ve libre.
+- **Sector ciego:** si menos de `LIDAR_MIN_VALID_FRACTION` (0.25) de sus rayos son utilizables (eco o libre), el sector vale `0.0` y bloquea. Así un LiDAR tapado o sucio bloquea el chasis. `LIDAR_MIN_VALID_FRACTION=0` desactiva la revisión.
+- **Orientación del scan:** el worker asume REP-103; `LIDAR_ANGLE_OFFSET_DEG` y `LIDAR_FLIP=1` corrigen un `/scan` rotado o reflejado antes de calcular sectores y sombra (`robot_angle()` en `ros2_worker.py`, también la usa `calibrar_sombra.py`).
+- **Sombra del brazo:** los ecos entre `ARM_SHADOW_MIN_M` y `ARM_SHADOW_MAX_M` dentro de ±`ARM_SHADOW_HALF_ANGLE_DEG` al frente se ignoran si el sector tiene otros rayos utilizables (eco o libre); si el brazo es lo único que ve el sector, se reporta (bloquea). Lo que está más cerca que `ARM_SHADOW_MIN_M` siempre bloquea. `ARM_SHADOW_MAX_M=0` desactiva el filtro.
+- **Calibración de la sombra** (`load_arm_shadow`): los valores salen de las variables de entorno, si no del archivo `ARM_SHADOW_FILE` (por defecto `robot-bridge/arm-shadow.json`, fuera de git) y si no de los valores por defecto (0.06–0.09 m, ±20°), estrechos y sin calibrar. El archivo lo escribe `make calibrar-sombra` en el robot, con `make robot` corriendo: mueve solo el brazo por las poses de `gestures.rs`, toma como brazo todo eco a menos de 30 cm dentro de ±90°, agrega 1 cm y 2° de margen y aborta si la banda pasa de 0.25 m. Después hay que reiniciar el bridge; el worker dice en stderr de dónde salió la banda.
 
 Tests sin rclpy: `python3 -m unittest discover -s robot-bridge/scripts -p 'test_*.py'`.
 
@@ -158,3 +167,6 @@ Los motores 3 y 4 (lado derecho) están montados invertidos.
 | Llamar al bridge sin token desde la LAN | Manda `x-bridge-token`; `401` significa token faltante o distinto. |
 | Asumir que el avance está libre porque el frente lo está | El freno es por eje: un `vy` hacia una pared lateral también se anula, y girar se limita a 0.3 rad/s cerca de obstáculos. |
 | Usar `ros2` sin `/scan` publicándose | El chasis queda bloqueado (`lidar_stale`). Revisa `ros2 topic hz /scan`. |
+| Actualizar el bridge sin el worker (o al revés) | Un worker sin *pong* deja `connected = false` y el chasis bloqueado. En el robot: `git pull` y `make build-robot`. |
+| Tratar un `200` como «se movió» | Revisa `blocked`; si no es `null`, el robot no se movió como pediste. |
+| El frente bloqueado por el brazo en algunos gestos | Calibra la sombra con `make calibrar-sombra` en el robot y reinicia `make robot`. |

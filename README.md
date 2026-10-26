@@ -33,7 +33,8 @@ Abre la URL que imprime `run.sh` (`http://localhost:3000/`). Para conectar tu la
 | Documento | Qué encuentras |
 |---|---|
 | [`docs/ONBOARDING.md`](./docs/ONBOARDING.md) | Requisitos, modo simulador, laptop conectada al robot, token, banderas de `run.sh` y problemas comunes. |
-| [`docs/COMMANDS.md`](./docs/COMMANDS.md) | Comandos de `make`, `iniciar-robot.sh` y scripts de la web. |
+| [`docs/ENSAYO.md`](./docs/ENSAYO.md) | Ensayo con el robot físico: `traer-token.sh`, `ensayo.sh`, qué revisa cada sección, valores a anotar y qué hacer si algo falla. |
+| [`docs/COMMANDS.md`](./docs/COMMANDS.md) | Comandos de `make`, `run.sh`, `traer-token.sh`, `ensayo.sh`, `iniciar-robot.sh` y scripts de la web. |
 | [`docs/WEB.md`](./docs/WEB.md) | Sitio público, rutas de la web y gestos del simulador. |
 | [`docs/DEMOS.md`](./docs/DEMOS.md) | Las 4 demos (Repo Roaster, Gatekeeper CI/CD, Bug Hunter y Bumblebee Radio), los MP3 y los props imprimibles. |
 | [`docs/SECURITY.md`](./docs/SECURITY.md) | Token, orígenes, paro de emergencia, LiDAR que falla cerrado y operación en el robot. |

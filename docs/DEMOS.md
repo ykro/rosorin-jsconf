@@ -10,13 +10,14 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
 
 ## Controles comunes
 
-- **Un clic para empezar.** El botón principal de cada demo ejecuta el movimiento, le pide al modelo que hable y deja el micrófono abierto. La app se conecta a Gemini Live antes de abrir el micrófono; si la conexión falla, el micrófono no se abre.
+- **Un clic para empezar.** El botón principal de cada demo ejecuta el movimiento, le pide al modelo que hable y deja el micrófono abierto. La app se conecta a Gemini Live antes de abrir el micrófono; si la conexión falla, el micrófono no se abre, la consola muestra «Error de conexión» y no queda ningún reintento en segundo plano: vuelve a pulsar el botón.
 - **Compuerta después de mover (1200 ms).** Cada vez que el robot se mueve, el micrófono manda silencio durante 1200 ms para que el ruido de los servos no interrumpa al modelo.
 - **Interrumpir.** Habla fuerte mientras el robot habla, o pulsa **Interrumpir**, y la web corta su audio. La siguiente respuesta se escucha normal.
 - **Detener.** El botón **Detener** cierra el micrófono y la sesión.
 - **Cambiar de ruta o de pestaña.** Al navegar con la barra superior o cambiar de pestaña, la conversación se detiene; en el segundo caso aparece un aviso.
 - **Estado de la conexión.** La consola muestra Listo, Conectando…, Reconectando…, Conectado, Escuchando tu micrófono, Hablando…, Desconectado, Error de conexión o Sin API key.
-- **Paro de emergencia.** Desde el panel de la píldora del robot o desde `/face`. Mientras esté enclavado, los movimientos fallan y el modelo recibe `status: "error", code: "estop_latched"` y lo dice en voz alta.
+- **Paro de emergencia.** Botón **PARO** de la barra superior o tecla **Escape** (también desde el panel de la píldora del robot o desde `/face`). Mientras esté enclavado, los movimientos fallan y el modelo recibe `status: "error", code: "estop_latched"` y lo dice en voz alta.
+- **Movimientos bloqueados.** Si el bridge acepta un movimiento pero lo frena o lo bloquea (`blocked`: `braked`, `lidar_stale` o `worker_dead`), el modelo recibe un error con ese código y un `hint` que le pide no decir que se movió.
 
 ---
 
@@ -28,7 +29,7 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
 - **Si GitHub no responde:** estrellas y dependencias quedan como «no disponible» (`origin: "unavailable"`) y se le pide al modelo que lo diga en vez de inventar cifras.
 - **Flujo:**
   1. Elige un repo y pulsa **Analizar y Roastear**.
-  2. La app ejecuta el gesto sugerido por el análisis y le indica al modelo que no llame herramientas en ese turno: el modelo solo habla.
+  2. La app ejecuta el gesto sugerido por el análisis y le indica al modelo que no llame herramientas en ese turno: el modelo solo habla. Si aun así llama una, la app no ejecuta nada y le responde `code: "tool_disabled"`. Lo mismo pasa con los botones de las demos B y C y con los mensajes escritos o rápidos de las demos A, B y C.
   3. Sigue por voz o con los botones rápidos («Dame más detalles técnicos de lo que encontraste en el repositorio.», etc.).
 
 ---
@@ -79,7 +80,8 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
   - `bumblebee_sassy`: giro con actitud
 
   Cada clip dispara el baile y un pequeño movimiento del chasis.
-- **Herramienta:** `play_radio_sequence({ clip_ids, dance_gesture, radio_caption })`. El modelo pide 1 o 2 IDs. Si ningún ID existe en el catálogo, elige el clip un buscador local.
+- **Herramienta:** `play_radio_sequence({ clip_ids, dance_gesture, radio_caption })`. El modelo pide 1 o 2 IDs. Si ningún ID existe en el catálogo, elige el clip un buscador local. Si el servidor cancela la llamada (`toolCallCancellation`, normalmente porque lo interrumpiste) antes de que el robot empiece a bailar, la secuencia se corta y esa llamada no recibe respuesta.
+- **Audio bloqueado por el navegador:** si el navegador no deja reproducir sin un toque previo, la demo muestra «El navegador bloqueó el audio: toca la página una vez y vuelve a intentarlo.», distinto del aviso de clip faltante. «Cortar» limpia el aviso.
 - **Flujo:**
   1. Pulsa **📻 Iniciar Conversación Musical** (necesita API key) y háblale.
   2. Sin API key también funciona por texto: las frases rápidas («¡Hola Bumblebee! ¿Cómo estás hoy?», «El deploy en viernes salió perfecto a la primera.», «Se cayó producción y nadie sabe por qué.») y el cuadro de texto usan el buscador local de canciones.
