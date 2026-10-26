@@ -54,14 +54,14 @@ export const BUMBLEBEE_DANCES = [
   'bumblebee_sassy',
 ] as const;
 
-/** Spanish labels for the dance ids (the ids themselves are API values and do not change). */
+/** Display labels for the dance ids (the ids themselves are API values and do not change). */
 export const BUMBLEBEE_DANCE_LABELS: Record<string, string> = {
-  bumblebee_hype: 'Fiesta',
-  bumblebee_groove: 'Ritmo funk',
-  bumblebee_rock_out: 'Cabeceo rockero',
-  bumblebee_romance: 'Romántico',
-  bumblebee_sad_droop: 'Violines tristes',
-  bumblebee_sassy: 'Giro con actitud',
+  bumblebee_hype: 'Fiesta Hype',
+  bumblebee_groove: 'Ritmo Funk',
+  bumblebee_rock_out: 'Rock Headbang',
+  bumblebee_romance: 'Romance FM',
+  bumblebee_sad_droop: 'Violines Tristes',
+  bumblebee_sassy: 'Giro Sassy',
 };
 
 /**

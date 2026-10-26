@@ -295,50 +295,6 @@
   .hud button:hover {
     color: var(--orange);
   }
-
-  /* Presenter Notes Below Fold */
-  .below-fold {
-    max-width: 1240px;
-    margin: 0 auto;
-    padding: 72px 32px 120px;
-    color: var(--light-text);
-  }
-
-  .below-fold h2 {
-    font-family: var(--font-display);
-    font-size: 44px;
-    text-transform: uppercase;
-    margin-bottom: 20px;
-    color: var(--orange);
-  }
-
-  .notes-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-    gap: 20px;
-    margin-top: 28px;
-  }
-
-  .note-item {
-    background: var(--dark-card);
-    border: 1px solid var(--dark-border);
-    border-radius: 12px;
-    padding: 22px;
-  }
-
-  .note-item h4 {
-    font-family: var(--font-mono);
-    font-size: 15px;
-    color: var(--cyan);
-    margin-bottom: 8px;
-    text-transform: uppercase;
-  }
-
-  .note-item p {
-    font-size: 16px;
-    line-height: 1.55;
-    color: var(--light-muted);
-  }
 </style>
 </head>
 <body>
@@ -402,21 +358,21 @@
             <h3 class="headline-md" style="font-size: 64px; margin-top: 24px;">RENDERIZAR UN DOM</h3>
           </div>
           <ul style="list-style: none; display: flex; flex-direction: column; gap: 30px; font-size: 36px; line-height: 1.36; color: var(--ink-muted);">
-            <li><strong style="color: var(--ink);">0 kg de masa:</strong> actualizar un componente no tiene inercia ni fricción.</li>
-            <li><strong style="color: var(--ink);">Estado reversible:</strong> un error de salida se corrige refrescando la vista.</li>
-            <li><strong style="color: var(--ink);">Coordenadas virtuales:</strong> un número fuera de rango solo desacomoda un <code>div</code>.</li>
+            <li><strong style="color: var(--ink);">0 kg de masa.</strong> Actualizar un componente no tiene inercia ni fricción.</li>
+            <li><strong style="color: var(--ink);">Estado reversible.</strong> Un error de salida se corrige refrescando la vista.</li>
+            <li><strong style="color: var(--ink);">Coordenadas virtuales.</strong> Un número fuera de rango solo desacomoda un <code>div</code>.</li>
           </ul>
         </div>
 
         <div class="card-paper" style="border: 3px solid var(--orange); display: flex; flex-direction: column; gap: 36px; justify-content: center;">
           <div>
-            <span class="badge-mono" style="background: var(--orange); color: #0E1117;">HARDWARE REAL</span>
-            <h3 class="headline-md" style="font-size: 64px; margin-top: 24px;">MOVER 3.5 KG DE ALUMINIO</h3>
+            <span class="badge-mono" style="background: var(--orange); color: #0E1117;">HARDWARE</span>
+            <h3 class="headline-md" style="font-size: 64px; margin-top: 24px;">MOVER UN BRAZO DE 6 SERVOS</h3>
           </div>
           <ul style="list-style: none; display: flex; flex-direction: column; gap: 30px; font-size: 36px; line-height: 1.36; color: var(--ink-muted);">
-            <li><strong style="color: var(--ink);">Inercia y gravedad:</strong> frenar tarde o perder la red en movimiento golpea la mesa.</li>
-            <li><strong style="color: var(--ink);">Sin Ctrl+Z físico:</strong> abrir la pinza (<code>ID 10</code>) suelta el objeto de verdad.</li>
-            <li><strong style="color: var(--ink);">Geometría rígida:</strong> un pulso fuera de rango (<code>120..880</code>) fuerza o choca un servo.</li>
+            <li><strong style="color: var(--ink);">Inercia y gravedad.</strong> Frenar tarde o perder la red en movimiento golpea la mesa.</li>
+            <li><strong style="color: var(--ink);">Sin Ctrl+Z físico.</strong> Abrir la pinza (<code>ID 10</code>) suelta el objeto de verdad.</li>
+            <li><strong style="color: var(--ink);">Geometría rígida.</strong> Bajar el hombro (<code>J2</code>) de <code>220</code> golpea la torre del LiDAR.</li>
           </ul>
         </div>
       </div>
@@ -452,7 +408,7 @@
           <text x="52" y="64" font-family="'JetBrains Mono', monospace" font-size="20" font-weight="700" fill="#68707C" letter-spacing="2">CLIENTE WEB (:3000)</text>
 
           <rect x="572" y="24" width="496" height="614" rx="8" fill="#F8F7F3" stroke="#CFCBC0" stroke-width="2" stroke-dasharray="6 4"/>
-          <text x="600" y="64" font-family="'JetBrains Mono', monospace" font-size="20" font-weight="700" fill="#68707C" letter-spacing="2">VOZ Y BRIDGE (:9000)</text>
+          <text x="600" y="64" font-family="'JetBrains Mono', monospace" font-size="20" font-weight="700" fill="#68707C" letter-spacing="2">GEMINI (NUBE) · BRIDGE (:9000)</text>
 
           <rect x="1132" y="24" width="484" height="614" rx="8" fill="#F8F7F3" stroke="#CFCBC0" stroke-width="2" stroke-dasharray="6 4"/>
           <text x="1160" y="64" font-family="'JetBrains Mono', monospace" font-size="20" font-weight="700" fill="#68707C" letter-spacing="2">ROSORIN PRO</text>
@@ -514,7 +470,7 @@
           <text x="724" y="146" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="16" font-weight="700" fill="#0E1117">GEMINI-3.8-LIVE</text>
           <text x="626" y="194" font-family="'IBM Plex Sans', sans-serif" font-size="26" font-weight="700" fill="#0E1117">Gemini Live API (WSS)</text>
           <text x="626" y="232" font-family="'IBM Plex Sans', sans-serif" font-size="21" fill="#3F4752">• Voz nativa + Visión JPEG 1 FPS</text>
-          <text x="626" y="266" font-family="'IBM Plex Sans', sans-serif" font-size="21" fill="#3F4752">• Function Calling asíncrono</text>
+          <text x="626" y="266" font-family="'IBM Plex Sans', sans-serif" font-size="21" fill="#3F4752">• Tools con resultado ok o error</text>
 
           <!-- Node 4 (FOCAL CORAL NODE): Rust robot-bridge :9000 -->
           <rect x="604" y="405" width="432" height="186" rx="6" fill="rgba(235, 108, 54, 0.10)" stroke="#EB6C36" stroke-width="3.5"/>
@@ -522,7 +478,7 @@
           <text x="723" y="446" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="16" font-weight="700" fill="#FFFFFF">RUST · AXUM :9000</text>
           <text x="626" y="494" font-family="'IBM Plex Sans', sans-serif" font-size="26" font-weight="700" fill="#0E1117">API robot-bridge (40 Hz)</text>
           <text x="626" y="532" font-family="'IBM Plex Sans', sans-serif" font-size="21" fill="#0E1117">• Loop de servos a 40 Hz + WS 20 Hz</text>
-          <text x="626" y="566" font-family="'IBM Plex Sans', sans-serif" font-size="21" fill="#0E1117">• Límites 120..880 + Freno LiDAR</text>
+          <text x="626" y="566" font-family="'IBM Plex Sans', sans-serif" font-size="21" fill="#0E1117">• Rango por servo + Freno LiDAR</text>
 
           <!-- Node 5: ROS 2 Humble -->
           <rect x="1164" y="105" width="424" height="186" rx="6" fill="#FFFFFF" stroke="#948F84" stroke-width="2.5"/>
@@ -579,7 +535,7 @@
           <text x="64" y="86" font-family="'JetBrains Mono', monospace" font-size="24" font-weight="700" fill="#0E1117">CAPA 4</text>
           <text x="64" y="122" font-family="'JetBrains Mono', monospace" font-size="19" font-weight="600" fill="#68707C">TYPESCRIPT</text>
           <text x="296" y="80" font-family="'IBM Plex Sans', sans-serif" font-size="28" font-weight="700" fill="#0E1117">Navegador + Web Audio PCM + Visor Three.js (:3000)</text>
-          <text x="296" y="124" font-family="'IBM Plex Sans', sans-serif" font-size="23" fill="#3F4752">Captura micrófono a 16 kHz, vacía la cola de voz en &lt;20 ms al interrumpir y dibuja el modelo 3D.</text>
+          <text x="296" y="124" font-family="'IBM Plex Sans', sans-serif" font-size="23" fill="#3F4752">Captura micrófono a 16 kHz, vacía la cola de voz al interrumpir y dibuja el modelo 3D.</text>
           <rect x="1340" y="54" width="234" height="40" rx="2" fill="#ECEAE3"/>
           <text x="1457" y="80" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="17" font-weight="700" fill="#0E1117">gemini-3.8-live</text>
 
@@ -589,7 +545,7 @@
           <text x="64" y="256" font-family="'JetBrains Mono', monospace" font-size="24" font-weight="700" fill="#EB6C36">CAPA 3</text>
           <text x="64" y="292" font-family="'JetBrains Mono', monospace" font-size="19" font-weight="700" fill="#0E1117">API EN RUST</text>
           <text x="296" y="248" font-family="'IBM Plex Sans', sans-serif" font-size="28" font-weight="700" fill="#0E1117">robot-bridge (:9000) · Control y Límites Físicos</text>
-          <text x="296" y="292" font-family="'IBM Plex Sans', sans-serif" font-size="23" fill="#0E1117">Interpola los 6 servos en su loop de 40 Hz y aplica límites mecánicos (120..880), watchdog y freno LiDAR.</text>
+          <text x="296" y="292" font-family="'IBM Plex Sans', sans-serif" font-size="23" fill="#0E1117">Interpola los 6 servos a 40 Hz y aplica el rango por articulación, el watchdog, el freno LiDAR y la E-stop.</text>
           <rect x="1340" y="220" width="234" height="40" rx="2" fill="#EB6C36"/>
           <text x="1457" y="246" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="17" font-weight="700" fill="#FFFFFF">AXUM · TOKIO 40HZ</text>
 
@@ -609,7 +565,7 @@
           <text x="64" y="598" font-family="'JetBrains Mono', monospace" font-size="24" font-weight="700" fill="#0E1117">CAPA 1</text>
           <text x="64" y="634" font-family="'JetBrains Mono', monospace" font-size="19" font-weight="600" fill="#68707C">STM32 1 MBPS</text>
           <text x="296" y="592" font-family="'IBM Plex Sans', sans-serif" font-size="28" font-weight="700" fill="#0E1117">Controlador Electrónico ros_robot_controller (/dev/rrc)</text>
-          <text x="296" y="636" font-family="'IBM Plex Sans', sans-serif" font-size="23" fill="#3F4752">Genera el PWM de los 4 motores Mecanum, mueve los 6 servos seriales y reporta batería (11.8 V).</text>
+          <text x="296" y="636" font-family="'IBM Plex Sans', sans-serif" font-size="23" fill="#3F4752">Genera el PWM de los 4 motores Mecanum, mueve los 6 servos seriales y reporta el voltaje de la batería.</text>
           <rect x="1340" y="566" width="234" height="40" rx="2" fill="#ECEAE3"/>
           <text x="1457" y="592" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="17" font-weight="700" fill="#0E1117">0xAA 0x55 UART</text>
 
@@ -661,7 +617,7 @@
           <span class="badge-mono" style="background: rgba(78,168,222,0.18); color: var(--cyan); align-self: flex-start;">¿POR QUÉ ROS 2 HUMBLE?</span>
           <h3 class="headline-md" style="font-size: 50px;">DRIVERS DE SENSORES LISTOS</h3>
           <p style="font-size: 31px; line-height: 1.42; color: var(--light-muted);">
-            Escribir desde cero el driver USB de la cámara 3D Deptrum Aurora 930 o del LiDAR MS200 no aporta valor. ROS 2 entrega <code>/scan</code> y <code>/depth_cam/rgb0/image_raw</code> listos para consumir desde el bridge.
+            Escribir desde cero el driver USB de la cámara 3D Deptrum Aurora 930 o del LiDAR MS200 no aporta valor. ROS 2 entrega <code>/scan</code> y <code>/depth_cam/rgb0/image_raw</code> listos, y el bridge los consume a través de <code>ros2_worker.py</code>.
           </p>
         </div>
       </div>
@@ -678,17 +634,17 @@
           <span class="badge-mono" style="background: #E0F2FE; color: #0369A1; align-self: flex-start;">GEMINI ROBOTICS-ER 2 (LIVE API)</span>
           <h3 class="headline-md" style="font-size: 52px;">PLANEACIÓN ESPACIAL Y SECUENCIAL</h3>
           <ul style="list-style: none; display: flex; flex-direction: column; gap: 22px; font-size: 32px; line-height: 1.38; color: var(--ink-muted);">
-            <li>• <strong style="color: var(--ink);">Recibe voz y video en Live API:</strong> ideal para ubicar objetos desconocidos en cámara y devolver coordenadas <code>[y, x]</code>.</li>
-            <li>• <strong style="color: var(--ink);">Tools <code>BLOCKING</code> y TTS externo:</strong> responde en <code>TEXT</code> (ruteando el habla a un TTS como tool) y espera a que cada acción termine antes del siguiente paso.</li>
+            <li>• <strong style="color: var(--ink);">Recibe voz y video en Live API.</strong> Ideal para ubicar objetos desconocidos en cámara y devolver coordenadas <code>[y, x]</code>.</li>
+            <li>• <strong style="color: var(--ink);">Tools <code>BLOCKING</code> y TTS externo.</strong> Responde en <code>TEXT</code> (ruteando el habla a un TTS como tool) y espera a que cada acción termine antes del siguiente paso.</li>
           </ul>
         </div>
 
         <div class="card-paper" style="border: 3px solid var(--orange); border-top: 8px solid var(--orange); display: flex; flex-direction: column; gap: 24px; justify-content: center;">
           <span class="badge-mono" style="background: var(--orange); color: var(--ink); align-self: flex-start;">GEMINI-3.8-LIVE</span>
-          <h3 class="headline-md" style="font-size: 52px;">VOZ NATIVA Y TOOLS EN PARALELO</h3>
+          <h3 class="headline-md" style="font-size: 52px;">VOZ NATIVA MIENTRAS EL BRAZO SE MUEVE</h3>
           <ul style="list-style: none; display: flex; flex-direction: column; gap: 22px; font-size: 32px; line-height: 1.38; color: var(--ink-muted);">
-            <li>• <strong style="color: var(--ink);">Audio nativo <code>24 kHz</code> directo:</strong> conversa y maneja <em>barge-in</em> en <code>~350 ms</code> sin pasar por un TTS externo.</li>
-            <li>• <strong style="color: var(--ink);">Tools <code>NON_BLOCKING</code> por defecto:</strong> como las bandejas y tótems tienen poses fijas en Rust, dispara el gesto y sigue hablando mientras se mueve.</li>
+            <li>• <strong style="color: var(--ink);">Audio nativo <code>24 kHz</code> directo.</strong> Conversa y admite <em>barge-in</em> sin pasar por un TTS externo.</li>
+            <li>• <strong style="color: var(--ink);">Tools con resultado.</strong> El bridge responde en menos de <code>800 ms</code> y, como las bandejas y tótems tienen poses fijas en Rust, el modelo habla mientras el brazo termina el gesto.</li>
           </ul>
         </div>
       </div>
@@ -744,9 +700,9 @@
           <rect x="616" y="122" width="236" height="36" rx="4" fill="#EB6C36"/>
           <text x="734" y="147" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="18" font-weight="700" fill="#FFFFFF">MISMO BINARIO RUST</text>
           <text x="616" y="210" font-family="'IBM Plex Sans', sans-serif" font-size="33" font-weight="700" fill="#0E1117">robot-bridge (:9000)</text>
-          <text x="616" y="268" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#0E1117">• Loop a 40 Hz (900 pulsos/s)</text>
+          <text x="616" y="268" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#0E1117">• Loop a 40 Hz (25 ms)</text>
           <text x="616" y="316" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#0E1117">• Coreografías seguras (gestures.rs)</text>
-          <text x="616" y="364" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#0E1117">• Límites mecánicos (120..880)</text>
+          <text x="616" y="364" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#0E1117">• Rango por articulación</text>
           <text x="616" y="412" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#0E1117">• Freno LiDAR (&lt; 0.28 m)</text>
 
           <rect x="1116" y="54" width="496" height="256" rx="8" fill="#FFFFFF" stroke="#16A34A" stroke-width="3"/>
@@ -761,7 +717,7 @@
           <text x="1304" y="405" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="18" font-weight="700" fill="#9A3412">--backend ros2 / serial</text>
           <text x="1144" y="462" font-family="'IBM Plex Sans', sans-serif" font-size="31" font-weight="700" fill="#0E1117">Modo Físico (En el Robot)</text>
           <text x="1144" y="512" font-family="'IBM Plex Sans', sans-serif" font-size="24" fill="#3F4752">• Publica a ROS 2 Humble y /dev/rrc</text>
-          <text x="1144" y="556" font-family="'IBM Plex Sans', sans-serif" font-size="24" fill="#3F4752">• Cero cambios en TypeScript</text>
+          <text x="1144" y="556" font-family="'IBM Plex Sans', sans-serif" font-size="24" fill="#3F4752">• Mismo código TypeScript (más token)</text>
         </svg>
       </div>
     </section>
@@ -780,9 +736,9 @@
         <div style="display: flex; flex-direction: column; gap: 28px; justify-content: center;">
           <div class="card-paper" style="padding: 34px 36px;">
             <span class="badge-mono" style="background: #DBEAFE; color: #1D4ED8;">PANEL IZQUIERDO</span>
-            <h3 style="font-family: var(--font-display); font-size: 44px; text-transform: uppercase; margin-top: 14px;">CONTROL MANUAL Y DEMOS</h3>
+            <h3 style="font-family: var(--font-display); font-size: 44px; text-transform: uppercase; margin-top: 14px;">CONTROL MANUAL Y GESTOS</h3>
             <p style="font-size: 28px; line-height: 1.38; color: var(--ink-muted); margin-top: 12px;">
-              Acceso directo a los demos, control individual de cada servo (<code>120..880</code>), cruceta Mecanum y gestos completos.
+              Control de cada servo dentro de su rango, cruceta Mecanum y gestos completos.
             </p>
           </div>
 
@@ -830,38 +786,38 @@
         <div class="card-paper" style="border-top: 8px solid var(--orange); display: flex; flex-direction: column; gap: 20px;">
           <h3 class="headline-md" style="font-size: 48px;">ROSORIN-PRO</h3>
           <p style="font-size: 28px; line-height: 1.38; color: var(--ink-muted);">
-            Evita que el agente de código alucine pines o tópicos inexistentes en el hardware real:
+            Evita que el agente de código alucine pines o tópicos inexistentes en el hardware.
           </p>
           <ul style="list-style: none; display: flex; flex-direction: column; gap: 16px; font-size: 27px; color: var(--ink);">
-            <li>• <strong>Pinza en <code>ID 10</code>:</strong> no <code>ID 6</code> (<code>1..5</code> son el brazo).</li>
-            <li>• <strong>Protección LiDAR:</strong> prohibido bajar <code>joint2 &lt; 220</code>.</li>
-            <li>• <strong>Cámara 3D:</strong> tópico <code>/depth_cam/rgb0/image_raw</code>.</li>
-            <li>• <strong>STM32:</strong> tramas <code>0xAA 0x55</code> en <code>/dev/rrc</code> a <code>1 Mbps</code>.</li>
+            <li>• <strong>Pinza en <code>ID 10</code>.</strong> No <code>ID 6</code> (<code>1..5</code> son el brazo).</li>
+            <li>• <strong>Protección LiDAR.</strong> Prohibido bajar <code>joint2 &lt; 220</code>.</li>
+            <li>• <strong>Cámara 3D.</strong> Tópico <code>/depth_cam/rgb0/image_raw</code>.</li>
+            <li>• <strong>STM32.</strong> Tramas <code>0xAA 0x55</code> en <code>/dev/rrc</code> a <code>1 Mbps</code>.</li>
           </ul>
         </div>
 
         <div class="card-paper" style="border-top: 8px solid var(--cyan); display: flex; flex-direction: column; gap: 20px;">
           <h3 class="headline-md" style="font-size: 48px;">GEMINI-LIVE-JS</h3>
           <p style="font-size: 28px; line-height: 1.38; color: var(--ink-muted);">
-            Estandariza la sesión WebSocket bidireccional con <code>gemini-3.8-live</code> en TypeScript:
+            Estandariza la sesión WebSocket bidireccional con <code>gemini-3.8-live</code> en TypeScript.
           </p>
           <ul style="list-style: none; display: flex; flex-direction: column; gap: 16px; font-size: 27px; color: var(--ink);">
-            <li>• <strong>Audio PCM:</strong> entrada a <code>16 kHz</code> y salida a <code>24 kHz</code>.</li>
-            <li>• <strong>Noise Gate:</strong> silencia el mic cuando suenan los servos.</li>
-            <li>• <strong>Barge-In:</strong> vacía la cola PCM al recibir <code>interrupted</code>.</li>
-            <li>• <strong>Tool Calling asíncrono:</strong> mueve el brazo mientras habla.</li>
+            <li>• <strong>Audio PCM.</strong> Entrada a <code>16 kHz</code> y salida a <code>24 kHz</code>.</li>
+            <li>• <strong>Noise Gate.</strong> Silencia el mic cuando suenan los servos.</li>
+            <li>• <strong>Barge-In.</strong> Vacía la cola PCM al recibir <code>interrupted</code>.</li>
+            <li>• <strong>Tools con resultado.</strong> Devuelven al modelo ok o error.</li>
           </ul>
         </div>
 
         <div class="card-paper" style="border-top: 8px solid var(--green); display: flex; flex-direction: column; gap: 20px;">
           <h3 class="headline-md" style="font-size: 48px;">THREEJS-URDF-TWIN</h3>
           <p style="font-size: 28px; line-height: 1.38; color: var(--ink-muted);">
-            Construye el clon 3D a <code>60 FPS</code> a partir de las mallas CAD del fabricante:
+            Construye el clon 3D a <code>60 FPS</code> a partir de las mallas CAD del fabricante.
           </p>
           <ul style="list-style: none; display: flex; flex-direction: column; gap: 16px; font-size: 27px; color: var(--ink);">
-            <li>• <strong>Normales STL:</strong> <code>computeVertexNormals()</code> + <code>DoubleSide</code>.</li>
-            <li>• <strong>Árbol cinemático:</strong> pivotes anidados <code>J1..J5</code> + pinza.</li>
-            <li>• <strong>Espejo a <code>20 Hz</code>:</strong> refleja <code>--backend mock</code> y <code>ros2</code>.</li>
+            <li>• <strong>Normales STL.</strong> <code>computeVertexNormals()</code> + <code>DoubleSide</code>.</li>
+            <li>• <strong>Árbol cinemático.</strong> Pivotes anidados <code>J1..J5</code> + pinza.</li>
+            <li>• <strong>Espejo a <code>20 Hz</code>.</strong> Refleja <code>--backend mock</code> y <code>ros2</code>.</li>
           </ul>
         </div>
       </div>
@@ -877,29 +833,31 @@
         <div style="display: flex; flex-direction: column; gap: 26px;">
           <h3 class="headline-md" style="font-size: 56px; color: var(--orange);">UN SOLO WEBSOCKET PARA VOZ Y ACCIÓN</h3>
           <p style="font-size: 33px; line-height: 1.42; color: var(--light-muted);">
-            En <code>gemini-3.8-live</code>, las herramientas se ejecutan en modo <strong>no bloqueante</strong> por defecto: cuando llega un <code>toolCall</code>, despachamos el gesto físico a <code>robot-bridge</code> y el modelo sigue hablando sin pausas.
+            En <code>gemini-3.8-live</code> las herramientas son <strong>bloqueantes</strong>. Cuando llega un <code>toolCall</code>, la web lo manda a <code>robot-bridge</code> (timeout de <code>800 ms</code>) y le devuelve al modelo el resultado, ok o error con su código. El gesto sigue en el bridge mientras el modelo habla.
           </p>
         </div>
 
-        <div class="code-block" style="font-size: 23px; line-height: 1.48;"><span style="color:#FF7B72;">const</span> session = <span style="color:#FF7B72;">await</span> ai.live.<span style="color:#D2A8FF;">connect</span>({
-  model: <span style="color:#A5D6FF;">'gemini-3.8-live'</span>,
-  config: {
-    responseModalities: [Modality.AUDIO],
-    speechConfig: { languageCode: <span style="color:#A5D6FF;">'es-US'</span> },
-    tools: [{ functionDeclarations: EMBODIED_TOOLS }],
-  },
-  callbacks: {
-    onmessage: <span style="color:#FF7B72;">async</span> (msg) =&gt; {
-      <span style="color:#FF7B72;">if</span> (msg.data) <span style="color:#D2A8FF;">playPcm24kBase64</span>(msg.data);
-      <span style="color:#FF7B72;">for</span> (<span style="color:#FF7B72;">const</span> fc <span style="color:#FF7B72;">of</span> msg.toolCall?.functionCalls ?? []) {
-        <span style="color:#FF7B72;">const</span> res = <span style="color:#FF7B72;">await</span> <span style="color:#D2A8FF;">executeEmbodiedTool</span>(fc.name, fc.args);
-        <span style="color:#FF7B72;">await</span> session.<span style="color:#D2A8FF;">sendToolResponse</span>({
-          functionResponses: [{ id: fc.id, name: fc.name, response: res }],
-        });
-      }
-    },
-  },
-});</div>
+        <div class="code-block" style="font-size: 23px; line-height: 1.48;"><span style="color:#8B949E;">// web/src/lib/gemini-live.ts</span>
+tools: [{ functionDeclarations: EMBODIED_TOOLS }],
+
+<span style="color:#FF7B72;">if</span> (msg.toolCall?.functionCalls?.length) {
+  <span style="color:#FF7B72;">void</span> this.<span style="color:#D2A8FF;">handleToolCalls</span>(msg.toolCall.functionCalls);
+}
+
+<span style="color:#8B949E;">// handleToolCalls()</span>
+<span style="color:#FF7B72;">const</span> result = <span style="color:#FF7B72;">await</span> this.<span style="color:#D2A8FF;">executeEmbodiedTool</span>(
+  fc.name ?? <span style="color:#A5D6FF;">''</span>, fc.args ?? {});
+responses.<span style="color:#D2A8FF;">push</span>({
+  id: fc.id,
+  name: fc.name,
+  response: result.ok
+    ? { status: <span style="color:#A5D6FF;">'ok'</span>, target: result.target,
+        message: result.message }
+    : { status: <span style="color:#A5D6FF;">'error'</span>,
+        code: result.code ?? <span style="color:#A5D6FF;">'invalid_args'</span>, /* … */ },
+});
+<span style="color:#FF7B72;">if</span> (responses.length)
+  this.live.<span style="color:#D2A8FF;">sendToolResponse</span>({ functionResponses: responses });</div>
       </div>
     </section>
 
@@ -915,26 +873,26 @@
             1,200 MS
           </div>
           <p style="font-size: 40px; line-height: 1.34; color: var(--light-text); margin-top: 24px; font-weight: 600;">
-            Ventana de supresión de micrófono tras cada movimiento del brazo.
+            Ventana de supresión de micrófono desde que arranca cada gesto.
           </p>
           <p style="font-size: 33px; line-height: 1.42; color: var(--light-muted); margin-top: 20px;">
-            El zumbido mecánico de los 6 servos y la bocina del robot disparaban falsas interrupciones en Gemini Live. Aplicamos una compuerta de ruido de 3 capas y vaciado inmediato de la cola PCM.
+            El zumbido mecánico de los 6 servos y la bocina del robot disparaban falsas interrupciones en Gemini Live. El micrófono se silencia por tres condiciones (gesto reciente, ruido de fondo, eco mientras habla) y la cola PCM se vacía al instante.
           </p>
         </div>
 
-        <div class="code-block"><span style="color:#8B949E;">// 1. Silenciar mic durante eco o movimiento</span>
-<span style="color:#FF7B72;">const</span> isMuted =
-  aiSpeakingRef.current ||
-  Date.<span style="color:#D2A8FF;">now</span>() &lt; muteMicUntilRef.current;
+        <div class="code-block"><span style="color:#8B949E;">// web/src/lib/gemini-live.ts</span>
+<span style="color:#FF7B72;">const</span> POST_MOTION_GATE_MS = <span style="color:#79C0FF;">1200</span>;
 
-<span style="color:#FF7B72;">if</span> (!isMuted &amp;&amp; rms &gt;= <span style="color:#79C0FF;">0.012</span>) {
-  session.<span style="color:#D2A8FF;">sendRealtimeInput</span>({ audio: pcm16k });
-}
+<span style="color:#FF7B72;">const</span> muted =
+  Date.<span style="color:#D2A8FF;">now</span>() &lt; this.motionSuppressUntil ||
+  normalizedLevel &lt; NOISE_FLOOR_LEVEL ||
+  (this.player.isPlaying &amp;&amp;
+    normalizedLevel &lt;= BARGE_IN_LEVEL);
+<span style="color:#8B949E;">// si muted, se envía PCM en silencio</span>
 
-<span style="color:#8B949E;">// 2. Vaciar audio en &lt; 20 ms si el humano interrumpe</span>
-<span style="color:#FF7B72;">if</span> (msg.serverContent?.interrupted) {
-  playbackQueueRef.current = [];
-  nextStartTimeRef.current = ctx.currentTime;
+<span style="color:#FF7B72;">if</span> (sc?.interrupted) {
+  this.<span style="color:#D2A8FF;">flushPlayback</span>();
+  this.gate.<span style="color:#D2A8FF;">onServerInterrupted</span>();
 }</div>
       </div>
     </section>
@@ -947,10 +905,10 @@
 
       <div class="grid-3" style="flex: 1; margin-top: 36px;">
         <div class="card-paper" style="border-top: 8px solid var(--orange); display: flex; flex-direction: column; gap: 18px;">
-          <div style="font-family: var(--font-display); font-size: 96px; font-weight: 700; line-height: 1.05;">120..880</div>
+          <div style="font-family: var(--font-display); font-size: 96px; font-weight: 700; line-height: 1.05;">220</div>
           <h3 style="font-family: var(--font-display); font-size: 46px; text-transform: uppercase;">LÍMITES DE SERVOS</h3>
           <p style="font-size: 32px; line-height: 1.42; color: var(--ink-muted);">
-            Aunque alguien pida el pulso <code>0</code> o <code>1500</code>, Rust recorta cada articulación a su rango seguro y protege el LiDAR (<code>joint2 &gt;= 220</code>).
+            El hombro (<code>J2</code>) nunca baja de <code>220</code> para no golpear el LiDAR. Cada articulación tiene su rango y Rust recorta pulsos como <code>0</code> o <code>1500</code>.
           </p>
         </div>
 
@@ -958,7 +916,7 @@
           <div style="font-family: var(--font-display); font-size: 96px; font-weight: 700; line-height: 1.05;">600 MS</div>
           <h3 style="font-family: var(--font-display); font-size: 46px; text-transform: uppercase;">DEADMAN WATCHDOG</h3>
           <p style="font-size: 32px; line-height: 1.42; color: var(--ink-muted);">
-            Si el Wi-Fi del escenario cae o se cierra la pestaña mientras el robot avanza, el bridge envía <code>cmd_vel = 0</code> automáticamente a los <code>600 ms</code>.
+            Cada <code>cmd_vel</code> trae un plazo (<code>600 ms</code> por defecto, de 100 a 2,500 ms). Si el Wi-Fi cae o se cierra la pestaña, el bridge manda <code>cmd_vel = 0</code> al vencer.
           </p>
         </div>
 
@@ -966,7 +924,7 @@
           <div style="font-family: var(--font-display); font-size: 96px; font-weight: 700; line-height: 1.05;">28 CM</div>
           <h3 style="font-family: var(--font-display); font-size: 46px; text-transform: uppercase;">ESCUDO LIDAR MS200</h3>
           <p style="font-size: 32px; line-height: 1.42; color: var(--ink-muted);">
-            El reflejo de parada vive en el loop de <code>40 Hz</code> en Rust: si hay un obstáculo a menos de <code>28 cm</code>, bloquea <code>vx &gt; 0</code> sin consultar al LLM.
+            El reflejo vive en el loop de <code>40 Hz</code> en Rust. Si un sector marca menos de <code>28 cm</code>, bloquea el avance hacia ese lado y limita el giro, sin consultar al LLM.
           </p>
         </div>
       </div>
@@ -982,25 +940,23 @@
         <div style="display: flex; flex-direction: column; gap: 26px;">
           <h3 class="headline-md" style="font-size: 56px; color: var(--cyan);">SEGURIDAD FÍSICA EN CADA TICK DE 25 MS</h3>
           <p style="font-size: 33px; line-height: 1.42; color: var(--light-muted);">
-            Cada <code>25 ms</code>, <code>robot-bridge</code> evalúa el freno LiDAR, verifica el watchdog e interpola suavemente los 6 servos aplicando <code>clamp_servo_pulse</code> antes de escribir al puerto serial o a ROS 2.
+            Cada <code>25 ms</code>, <code>robot-bridge</code> revisa el plazo de cada comando, la antigüedad del scan y el freno por eje, y frena el chasis sin consultar al modelo. El rango de cada servo se recorta antes, al recibir el comando.
           </p>
         </div>
 
-        <div class="code-block" style="font-size: 23px; line-height: 1.48;"><span style="color:#FF7B72;">pub fn</span> <span style="color:#D2A8FF;">tick</span>(&amp;<span style="color:#FF7B72;">mut self</span>, dt_s: <span style="color:#79C0FF;">f32</span>) {
-  <span style="color:#8B949E;">// 1. Deadman watchdog (600 ms) y freno LiDAR (28 cm)</span>
-  <span style="color:#FF7B72;">if</span> <span style="color:#FF7B72;">self</span>.last_cmd.<span style="color:#D2A8FF;">elapsed</span>() &gt; Duration::<span style="color:#D2A8FF;">from_millis</span>(<span style="color:#79C0FF;">600</span>)
-    || (<span style="color:#FF7B72;">self</span>.lidar.front_m &lt; <span style="color:#79C0FF;">0.28</span> &amp;&amp; <span style="color:#FF7B72;">self</span>.odom.vx &gt; <span style="color:#79C0FF;">0.0</span>) {
-    <span style="color:#FF7B72;">self</span>.<span style="color:#D2A8FF;">stop_chassis</span>();
-  }
-  <span style="color:#8B949E;">// 2. Interpolación suave (900 pulsos/s) con límites físicos</span>
-  <span style="color:#FF7B72;">let</span> max_step = (<span style="color:#79C0FF;">900.0</span> * dt_s) <span style="color:#FF7B72;">as</span> <span style="color:#79C0FF;">i16</span>;
-  <span style="color:#FF7B72;">for</span> (&amp;id, &amp;target) <span style="color:#FF7B72;">in</span> &amp;<span style="color:#FF7B72;">self</span>.target_servos {
-    <span style="color:#FF7B72;">let</span> safe = <span style="color:#D2A8FF;">clamp_servo_pulse</span>(id, target);
-    <span style="color:#FF7B72;">let</span> cur = *<span style="color:#FF7B72;">self</span>.servos.<span style="color:#D2A8FF;">get</span>(&amp;id).<span style="color:#D2A8FF;">unwrap_or</span>(&amp;<span style="color:#79C0FF;">500</span>);
-    <span style="color:#FF7B72;">let</span> next = cur + (safe <span style="color:#FF7B72;">as</span> <span style="color:#79C0FF;">i16</span> - cur <span style="color:#FF7B72;">as</span> <span style="color:#79C0FF;">i16</span>).<span style="color:#D2A8FF;">clamp</span>(-max_step, max_step);
-    <span style="color:#FF7B72;">self</span>.servos.<span style="color:#D2A8FF;">insert</span>(id, next <span style="color:#FF7B72;">as</span> <span style="color:#79C0FF;">u16</span>);
-  }
-}</div>
+        <div class="code-block" style="font-size: 23px; line-height: 1.48;"><span style="color:#8B949E;">// robot-bridge/src/backend.rs · enforce_motion_safety()</span>
+<span style="color:#FF7B72;">if</span> expired {
+  <span style="color:#FF7B72;">self</span>.<span style="color:#D2A8FF;">apply_velocity_locked</span>(&amp;<span style="color:#FF7B72;">mut</span> gate, <span style="color:#79C0FF;">0.0</span>, <span style="color:#79C0FF;">0.0</span>, <span style="color:#79C0FF;">0.0</span>, None, <span style="color:#FF7B72;">false</span>);
+} <span style="color:#FF7B72;">else</span> <span style="color:#FF7B72;">if</span> moving {
+  <span style="color:#FF7B72;">let</span> target = <span style="color:#FF7B72;">if</span> stale {
+    (<span style="color:#79C0FF;">0.0</span>, <span style="color:#79C0FF;">0.0</span>, <span style="color:#79C0FF;">0.0</span>)
+  } <span style="color:#FF7B72;">else</span> <span style="color:#FF7B72;">if</span> <span style="color:#FF7B72;">self</span>.lidar_source != LidarSource::None {
+    <span style="color:#FF7B72;">let</span> (vx, vy, wz, _) =
+      <span style="color:#D2A8FF;">apply_lidar_brake</span>(&amp;lidar, cur.<span style="color:#79C0FF;">0</span>, cur.<span style="color:#79C0FF;">1</span>, cur.<span style="color:#79C0FF;">2</span>);
+    (vx, vy, wz)
+  } <span style="color:#FF7B72;">else</span> {
+    cur
+  };</div>
       </div>
     </section>
 
@@ -1013,21 +969,21 @@
       <div class="grid-2" style="flex: 1; margin-top: 36px; align-items: stretch;">
         <div class="card-dark" style="display: flex; flex-direction: column; gap: 24px; justify-content: center; opacity: 0.84;">
           <span class="badge-mono" style="background: #374151; color: #D1D5DB; align-self: flex-start;">POR TURNOS (STT → LLM → TTS)</span>
-          <div style="font-family: var(--font-display); font-size: 156px; font-weight: 700; color: #9CA3AF; line-height: 1.05;">
-            2,400 MS
+          <div style="font-family: var(--font-display); font-size: 128px; font-weight: 700; color: #9CA3AF; line-height: 1.05;">
+            EN SERIE
           </div>
           <p style="font-size: 36px; line-height: 1.4; color: var(--light-muted);">
-            Dos segundos y medio de silencio mirándote fijo antes de mover un milímetro el brazo rompen por completo la interacción.
+            STT, LLM y TTS en serie. El silencio mirándote fijo antes de mover un milímetro el brazo rompe por completo la interacción.
           </p>
         </div>
 
         <div class="card-dark" style="border: 3px solid var(--orange); display: flex; flex-direction: column; gap: 24px; justify-content: center;">
           <span class="badge-mono" style="background: var(--orange); color: var(--ink); align-self: flex-start;">GEMINI 3.8 LIVE + BRIDGE EN RUST</span>
-          <div style="font-family: var(--font-display); font-size: 156px; font-weight: 700; color: var(--orange); line-height: 1.05;">
-            ~350 MS
+          <div style="font-family: var(--font-display); font-size: 128px; font-weight: 700; color: var(--orange); line-height: 1.05;">
+            EN PARALELO
           </div>
           <p style="font-size: 36px; line-height: 1.4; color: var(--light-text);">
-            El modelo emite <code>toolCall</code> en el mismo flujo WebSocket que la primera sílaba de voz: el brazo empieza a moverse mientras empieza a hablar.
+            El <code>toolCall</code> llega por el mismo WebSocket que el audio. El bridge responde en menos de <code>800 ms</code> y el brazo sigue moviéndose mientras el modelo habla.
           </p>
         </div>
       </div>
@@ -1047,7 +1003,8 @@
           </p>
           <div class="code-block" style="background: #1E2430; font-size: 24px; padding: 26px 30px; margin-top: 8px;"><span style="color:#FF7B72;">// Mal: acopla el modelo a la geometría</span>
 set_servo({ id: <span style="color:#79C0FF;">1</span>, pulse: <span style="color:#79C0FF;">680</span> });
-set_servo({ id: <span style="color:#79C0FF;">10</span>, pulse: <span style="color:#79C0FF;">220</span> }); <span style="color:#8B949E;">// Suelta antes de girar</span></div>
+<span style="color:#8B949E;">// Suelta antes de girar</span>
+set_servo({ id: <span style="color:#79C0FF;">10</span>, pulse: <span style="color:#79C0FF;">220</span> });</div>
         </div>
 
         <div class="card-paper" style="border-left: 10px solid var(--green); display: flex; flex-direction: column; gap: 22px;">
@@ -1074,7 +1031,7 @@ release_deploy_key({
           DECISIONES EN EL ESPACIO FÍSICO
         </h2>
         <p style="font-size: 32px; font-weight: 500; color: #1E2430; margin-top: 12px;">
-          Cuatro agentes multimodales que transforman juicios de código y conversación en movimiento real sobre el ROSOrin Pro:
+          Cuatro agentes multimodales que transforman juicios de código y conversación en movimiento sobre el ROSOrin Pro.
         </p>
       </div>
 
@@ -1084,11 +1041,8 @@ release_deploy_key({
             <span class="badge-mono" style="background: #FEE2E2; color: #991B1B;">DEMO A · ROASTER</span>
             <h3 class="headline-md" style="font-size: 40px; margin-top: 16px;">REPO ROASTER</h3>
             <p style="font-size: 23px; line-height: 1.38; color: var(--ink-muted); margin-top: 12px;">
-              Analiza un repositorio real o en cámara y dramatiza el veredicto con todo el brazo y el chasis: <em>chef kiss</em>, <em>facepalm</em> o <em>trash toss</em>.
+              Analiza un repositorio de GitHub y dramatiza el veredicto con todo el brazo y el chasis con <em>chef kiss</em>, <em>facepalm</em> o <em>trash toss</em>.
             </p>
-          </div>
-          <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--paper-border); font-family: var(--font-mono); font-size: 19px; font-weight: 700; color: var(--ink);">
-            tool: express_verdict()
           </div>
         </div>
 
@@ -1097,11 +1051,8 @@ release_deploy_key({
             <span class="badge-mono" style="background: #DCFCE7; color: #166534;">DEMO B · GATEKEEPER</span>
             <h3 class="headline-md" style="font-size: 40px; margin-top: 16px;">CI/CD GATEKEEPER</h3>
             <p style="font-size: 23px; line-height: 1.38; color: var(--ink-muted); margin-top: 12px;">
-              Sostiene la llave física de deploy en la pinza (<code>ID 10</code>): solo la deposita en tu mano si defiendes el PR y el plan de rollback por voz.
+              Sostiene la llave física de deploy en la pinza (<code>ID 10</code>): la suelta en la bandeja verde o roja según los tests y el plan de rollback del PR.
             </p>
-          </div>
-          <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--paper-border); font-family: var(--font-mono); font-size: 19px; font-weight: 700; color: var(--ink);">
-            tool: release_deploy_key()
           </div>
         </div>
 
@@ -1110,11 +1061,8 @@ release_deploy_key({
             <span class="badge-mono" style="background: #E0F2FE; color: #0369A1;">DEMO C · BUG HUNTER</span>
             <h3 class="headline-md" style="font-size: 40px; margin-top: 16px;">SPATIAL BUG HUNTER</h3>
             <p style="font-size: 23px; line-height: 1.38; color: var(--ink-muted); margin-top: 12px;">
-              Desplaza el chasis lateralmente con las 4 ruedas Mecanum y apunta físicamente al tótem del microservicio culpable (<code>Auth</code>, <code>API</code> o <code>DB</code>).
+              Desplaza el chasis lateralmente con las 4 ruedas Mecanum y apunta físicamente al tótem del servicio culpable (Cloud Run, Gemini Live o Firestore).
             </p>
-          </div>
-          <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--paper-border); font-family: var(--font-mono); font-size: 19px; font-weight: 700; color: var(--ink);">
-            tool: point_at_service_totem()
           </div>
         </div>
 
@@ -1123,11 +1071,8 @@ release_deploy_key({
             <span class="badge-mono" style="background: #FEF3C7; color: #92400E;">DEMO D · BUMBLEBEE</span>
             <h3 class="headline-md" style="font-size: 40px; margin-top: 16px;">RADIO MUSICAL</h3>
             <p style="font-size: 23px; line-height: 1.38; color: var(--ink-muted); margin-top: 12px;">
-              Tiene el sintetizador de voz dañado: te responde exclusivamente sintonizando 168 coros reales en español e inglés mientras baila.
+              Tiene el sintetizador de voz dañado: te responde exclusivamente sintonizando 168 clips en español e inglés (95 ES / 73 EN) mientras baila.
             </p>
-          </div>
-          <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--paper-border); font-family: var(--font-mono); font-size: 19px; font-weight: 700; color: var(--ink);">
-            tool: play_radio_sequence()
           </div>
         </div>
       </div>
@@ -1143,21 +1088,21 @@ release_deploy_key({
         <div style="display: grid; grid-template-columns: 112px 1fr; gap: 36px; align-items: start; border-bottom: 1px solid var(--dark-border); padding-bottom: 36px;">
           <div style="font-family: var(--font-display); font-size: 72px; font-weight: 700; color: var(--orange); line-height: 0.86; margin-top: 4px;">01</div>
           <div style="font-size: 36px; line-height: 1.38; color: var(--light-text);">
-            <strong>Al LLM se le dan intenciones de negocio, nunca control de motores:</strong> el modelo es excelente decidiendo si aprueba un PR, pero pésimo calculando ángulos e inercia; expón acciones semánticas y resuelve las trayectorias en un loop determinista.
+            <strong>Al LLM se le dan intenciones de negocio, nunca control de motores.</strong> El modelo es excelente decidiendo si aprueba un PR, pero pésimo calculando ángulos e inercia; expón acciones semánticas y resuelve las trayectorias en un loop determinista.
           </div>
         </div>
 
         <div style="display: grid; grid-template-columns: 112px 1fr; gap: 36px; align-items: start; border-bottom: 1px solid var(--dark-border); padding-bottom: 36px;">
           <div style="font-family: var(--font-display); font-size: 72px; font-weight: 700; color: var(--cyan); line-height: 0.86; margin-top: 4px;">02</div>
           <div style="font-size: 36px; line-height: 1.38; color: var(--light-text);">
-            <strong>En el mundo físico, cada acción del robot afecta a sus propios sensores:</strong> mover un servo o hablar por la bocina se mete al micrófono y mueve la cámara; tu arquitectura debe coordinar cuándo silenciar la entrada y vaciar la cola de voz en <code>&lt; 20 ms</code>.
+            <strong>En el mundo físico, cada acción del robot afecta a sus propios sensores.</strong> Mover un servo o hablar por la bocina se mete al micrófono y mueve la cámara; tu arquitectura debe coordinar cuándo silenciar la entrada y vaciar la cola de voz.
           </div>
         </div>
 
         <div style="display: grid; grid-template-columns: 112px 1fr; gap: 36px; align-items: start;">
           <div style="font-family: var(--font-display); font-size: 72px; font-weight: 700; color: #86EFAC; line-height: 0.86; margin-top: 4px;">03</div>
           <div style="font-size: 36px; line-height: 1.38; color: var(--light-text);">
-            <strong>Si sabes hacer una app web en tiempo real, ya puedes programar robots:</strong> con un bridge HTTP/WebSocket que abstraiga ROS 2 y un clon 3D en Three.js, construyes sobre hardware físico con el mismo stack que ya usas a diario.
+            <strong>Si sabes hacer una app web en tiempo real, ya puedes programar robots.</strong> Con un bridge HTTP/WebSocket que abstraiga ROS 2 y un clon 3D en Three.js, construyes sobre hardware físico con el mismo stack que ya usas a diario.
           </div>
         </div>
       </div>
@@ -1204,33 +1149,6 @@ release_deploy_key({
     <span id="slideCounter">01 / 22</span>
     <button id="nextBtn" title="Siguiente (→)">▶</button>
     <button id="fsBtn" title="Pantalla completa (F)">⛶</button>
-  </div>
-</div>
-
-<!-- Presenter Notes & Quick Links Below the Stage -->
-<div class="below-fold">
-  <h2>Guía del Presentador — Embodied AI con Gemini Live y JS</h2>
-  <p style="font-size: 18px; color: var(--light-muted); line-height: 1.6;">
-    Usa las flechas del teclado (<code>←</code> / <code>→</code> / <code>Espacio</code>) para avanzar y <code>F</code> para pantalla completa.
-  </p>
-
-  <div class="notes-grid">
-    <div class="note-item">
-      <h4>Láminas 1–4 · Apertura y Física vs. DOM</h4>
-      <p>Arranco con el demo moviendo el robot y el simulador 3D desde el navegador. Luego planteo la pregunta de arquitectura al controlar hardware y la diferencia física entre renderizar un DOM sin masa y mover 3.5 kg de aluminio.</p>
-    </div>
-    <div class="note-item">
-      <h4>Láminas 5–9 · Diagramas y Stack</h4>
-      <p>Explico la arquitectura end-to-end con <code>gemini-3.8-live</code>, las 4 capas del stack, por qué Rust corre el loop de 40 Hz + WebSocket 20 Hz sin bloqueos del GIL ni pausas de garbage collector en un solo binario, y cómo funciona el simulador 3D con <code>--backend mock</code>.</p>
-    </div>
-    <div class="note-item">
-      <h4>Láminas 10–13 · Interfaces, Skills y Conexión Live</h4>
-      <p>Muestro el simulador de 16 piezas STL, la consola ligera <code>/robot</code>, la pantalla táctil <code>/face</code>, los 3 skills del repo (<code>rosorin-pro</code>, <code>gemini-live-js</code>, <code>threejs-urdf-twin</code>) y el código de conexión a <code>gemini-3.8-live</code>.</p>
-    </div>
-    <div class="note-item">
-      <h4>Láminas 14–21 · Guardrails, Snippets y Top 3 Aprendizajes</h4>
-      <p>Recorro la compuerta acústica de 1,200 ms, los 3 guardrails físicos en Rust con su código real del loop de 40 Hz, la diferencia de latencia al hablar y moverse en paralelo, el diseño de herramientas con intención física, el demo final y el resumen en texto de los 3 aprendizajes.</p>
-    </div>
   </div>
 </div>
 

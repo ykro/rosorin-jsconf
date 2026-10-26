@@ -14,7 +14,7 @@ Gracias por el interés. Este repo acompaña la charla «De Web a Physical AI» 
    ```bash
    make test
    make lint
-   cd web && npx tsc --noEmit && npm run lint && npm run check:css && npm run build
+   cd web && npx tsc --noEmit && npm run lint && npm run check:css && npm run check:gestures && npm run build
    ```
 2. Si cambias la API, las variables o los flags, actualiza la documentación en el mismo PR (`README.md`, `docs/`, `docs/openapi.yaml` y `skills/`).
 3. No subas MP3, API keys ni tokens. No pongas secretos en variables `NEXT_PUBLIC_*`.

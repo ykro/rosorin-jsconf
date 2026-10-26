@@ -9,6 +9,7 @@ import {
 } from './robot-client';
 import { isBridgeEnabled, onBridgeConfigChange, resolveBridgeUrl } from './bridge-config';
 import type { BridgeUiState, RobotActionResult, TelemetryState } from './types';
+import { GESTURES, GESTURE_ALIASES } from './gesture-choreographies.generated';
 
 function clampServoForHardware(id: number, pulse: number): number {
   const p = Math.round(pulse);
@@ -29,259 +30,40 @@ function clampServoForHardware(id: number, pulse: number): number {
   }
 }
 
-const LOCAL_GESTURE_TARGETS: Record<
-  string,
-  {
-    servos: Record<string, number>;
-    odometry?: { x_m: number; y_m: number; yaw_rad: number };
-    rgb: [number, number, number];
-    held_object?: string;
-    pointed_totem?: string | null;
-  }
-> = {
-  home: {
-    servos: { '1': 500, '2': 430, '3': 310, '4': 380, '5': 500, '10': 500 },
-    odometry: { x_m: 0, y_m: 0, yaw_rad: 0 },
-    rgb: [43, 74, 203],
-    pointed_totem: null,
-  },
-  facepalm: {
-    servos: { '1': 360, '2': 520, '3': 200, '4': 220, '5': 380, '10': 680 },
-    odometry: { x_m: -0.09, y_m: 0, yaw_rad: 0 },
-    rgb: [220, 38, 38],
-  },
-  trash_toss: {
-    servos: { '1': 210, '2': 400, '3': 300, '4': 320, '5': 300, '10': 220 },
-    odometry: { x_m: -0.04, y_m: -0.10, yaw_rad: 0 },
-    rgb: [234, 88, 12],
-    held_object: 'released_rejected',
-  },
-  chef_kiss: {
-    servos: { '1': 560, '2': 370, '3': 290, '4': 360, '5': 700, '10': 220 },
-    odometry: { x_m: 0.06, y_m: 0, yaw_rad: 0 },
-    rgb: [16, 185, 129],
-  },
-  suspicious_inspect: {
-    servos: { '1': 380, '2': 340, '3': 280, '4': 340, '5': 380, '10': 240 },
-    odometry: { x_m: 0.09, y_m: 0, yaw_rad: 0 },
-    rgb: [245, 158, 11],
-  },
-  victory_spin: {
-    servos: { '1': 660, '2': 470, '3': 360, '4': 420, '5': 260, '10': 220 },
-    odometry: { x_m: 0, y_m: 0, yaw_rad: 0.75 },
-    rgb: [59, 130, 246],
-  },
-  nod_yes: {
-    servos: { '1': 500, '2': 360, '3': 260, '4': 290, '5': 500, '10': 260 },
-    odometry: { x_m: 0.05, y_m: 0, yaw_rad: 0 },
-    rgb: [34, 197, 94],
-  },
-  shake_no: {
-    servos: { '1': 300, '2': 420, '3': 300, '4': 370, '5': 350, '10': 660 },
-    odometry: { x_m: -0.06, y_m: 0, yaw_rad: 0 },
-    rgb: [220, 38, 38],
-  },
-  gatekeeper_hold: {
-    servos: { '1': 500, '2': 430, '3': 310, '4': 380, '5': 500, '10': 680 },
-    odometry: { x_m: 0, y_m: 0, yaw_rad: 0 },
-    rgb: [245, 158, 11],
-    held_object: 'deploy_key',
-    pointed_totem: null,
-  },
-  gatekeeper_approve: {
-    servos: { '1': 700, '2': 350, '3': 260, '4': 330, '5': 500, '10': 220 },
-    odometry: { x_m: 0.04, y_m: 0.06, yaw_rad: 0 },
-    rgb: [16, 185, 129],
-    held_object: 'released_approved',
-  },
-  gatekeeper_reject: {
-    servos: { '1': 280, '2': 350, '3': 260, '4': 330, '5': 500, '10': 220 },
-    odometry: { x_m: -0.08, y_m: -0.06, yaw_rad: 0 },
-    rgb: [220, 38, 38],
-    held_object: 'released_rejected',
-  },
-  point_cloud_run: {
-    servos: { '1': 610, '2': 350, '3': 270, '4': 350, '5': 500, '10': 660 },
-    rgb: [43, 74, 203],
-    pointed_totem: 'cloud_run',
-  },
-  point_gemini_live: {
-    servos: { '1': 500, '2': 340, '3': 260, '4': 340, '5': 500, '10': 660 },
-    rgb: [15, 118, 110],
-    pointed_totem: 'gemini_live',
-  },
-  point_firestore: {
-    servos: { '1': 390, '2': 350, '3': 270, '4': 350, '5': 500, '10': 660 },
-    rgb: [180, 83, 9],
-    pointed_totem: 'firestore',
-  },
-  wave_hello: {
-    servos: { '1': 560, '2': 580, '3': 380, '4': 460, '5': 680, '10': 260 },
-    odometry: { x_m: 0.03, y_m: 0, yaw_rad: 0.12 },
-    rgb: [59, 130, 246],
-  },
-  bumblebee_hype: {
-    servos: { '1': 640, '2': 610, '3': 420, '4': 460, '5': 720, '10': 240 },
-    odometry: { x_m: 0.06, y_m: 0.08, yaw_rad: 0.45 },
-    rgb: [251, 188, 4],
-  },
-  bumblebee_groove: {
-    servos: { '1': 380, '2': 490, '3': 350, '4': 410, '5': 320, '10': 340 },
-    odometry: { x_m: 0.02, y_m: -0.12, yaw_rad: -0.25 },
-    rgb: [26, 115, 232],
-  },
-  bumblebee_rock_out: {
-    servos: { '1': 520, '2': 310, '3': 220, '4': 260, '5': 680, '10': 220 },
-    odometry: { x_m: 0.09, y_m: 0, yaw_rad: 0.18 },
-    rgb: [234, 67, 53],
-  },
-  bumblebee_romance: {
-    servos: { '1': 580, '2': 460, '3': 360, '4': 430, '5': 600, '10': 580 },
-    odometry: { x_m: 0.04, y_m: 0.06, yaw_rad: 0.15 },
-    rgb: [233, 30, 99],
-  },
-  bumblebee_sad_droop: {
-    servos: { '1': 450, '2': 560, '3': 210, '4': 210, '5': 500, '10': 640 },
-    odometry: { x_m: -0.07, y_m: 0, yaw_rad: -0.12 },
-    rgb: [95, 99, 104],
-  },
-  bumblebee_sassy: {
-    servos: { '1': 330, '2': 530, '3': 390, '4': 470, '5': 260, '10': 250 },
-    odometry: { x_m: 0.03, y_m: -0.09, yaw_rad: -0.52 },
-    rgb: [52, 168, 83],
-  },
+/**
+ * Scene side effects the bridge applies when a gesture starts (backend.rs `run_gesture`).
+ * The servo/chassis choreography itself comes from the generated GESTURES table.
+ */
+const LOCAL_GESTURE_SCENE: Record<string, { held_object?: string; pointed_totem?: string | null }> = {
+  home: { held_object: 'deploy_key', pointed_totem: null },
+  gatekeeper_hold: { held_object: 'deploy_key', pointed_totem: null },
+  gatekeeper_approve: { held_object: 'released_approved' },
+  gatekeeper_reject: { held_object: 'released_rejected' },
+  trash_toss: { held_object: 'released_rejected' },
+  point_cloud_run: { pointed_totem: 'cloud_run' },
+  point_gemini_live: { pointed_totem: 'gemini_live' },
+  point_firestore: { pointed_totem: 'firestore' },
 };
 
-const LOCAL_CHOREOGRAPHIES: Record<
-  string,
-  Array<{
-    delayMs: number;
-    servos: Record<string, number>;
-    odometry?: { x_m: number; y_m: number; yaw_rad: number };
-    rgb: [number, number, number];
-  }>
-> = {
-  bumblebee_hype: [
-    {
-      delayMs: 0,
-      servos: { '1': 660, '2': 610, '3': 420, '4': 480, '5': 740, '10': 230 },
-      odometry: { x_m: 0.06, y_m: 0.09, yaw_rad: 0.45 },
-      rgb: [251, 188, 4],
-    },
-    {
-      delayMs: 420,
-      servos: { '1': 340, '2': 520, '3': 350, '4': 360, '5': 260, '10': 650 },
-      odometry: { x_m: 0.02, y_m: -0.09, yaw_rad: -0.45 },
-      rgb: [234, 67, 53],
-    },
-    {
-      delayMs: 840,
-      servos: { '1': 620, '2': 590, '3': 410, '4': 460, '5': 700, '10': 240 },
-      odometry: { x_m: 0.07, y_m: 0.05, yaw_rad: 0.32 },
-      rgb: [52, 168, 83],
-    },
-    {
-      delayMs: 1260,
-      servos: { '1': 500, '2': 450, '3': 330, '4': 400, '5': 500, '10': 380 },
-      odometry: { x_m: 0.03, y_m: 0, yaw_rad: 0.08 },
-      rgb: [251, 188, 4],
-    },
-  ],
-  bumblebee_groove: [
-    {
-      delayMs: 0,
-      servos: { '1': 370, '2': 490, '3': 350, '4': 420, '5': 300, '10': 260 },
-      odometry: { x_m: 0.02, y_m: -0.12, yaw_rad: -0.28 },
-      rgb: [26, 115, 232],
-    },
-    {
-      delayMs: 450,
-      servos: { '1': 630, '2': 440, '3': 310, '4': 370, '5': 700, '10': 620 },
-      odometry: { x_m: 0.02, y_m: 0.12, yaw_rad: 0.28 },
-      rgb: [251, 188, 4],
-    },
-    {
-      delayMs: 900,
-      servos: { '1': 410, '2': 510, '3': 370, '4': 430, '5': 350, '10': 280 },
-      odometry: { x_m: 0.04, y_m: -0.06, yaw_rad: -0.15 },
-      rgb: [26, 115, 232],
-    },
-  ],
-  bumblebee_rock_out: [
-    {
-      delayMs: 0,
-      servos: { '1': 520, '2': 290, '3': 200, '4': 240, '5': 720, '10': 220 },
-      odometry: { x_m: 0.09, y_m: 0, yaw_rad: 0.22 },
-      rgb: [234, 67, 53],
-    },
-    {
-      delayMs: 380,
-      servos: { '1': 480, '2': 560, '3': 410, '4': 480, '5': 280, '10': 680 },
-      odometry: { x_m: -0.05, y_m: 0, yaw_rad: -0.22 },
-      rgb: [251, 188, 4],
-    },
-    {
-      delayMs: 760,
-      servos: { '1': 540, '2': 310, '3': 220, '4': 260, '5': 680, '10': 220 },
-      odometry: { x_m: 0.08, y_m: 0.04, yaw_rad: 0.18 },
-      rgb: [234, 67, 53],
-    },
-  ],
-  bumblebee_romance: [
-    {
-      delayMs: 0,
-      servos: { '1': 590, '2': 470, '3': 370, '4': 440, '5': 640, '10': 580 },
-      odometry: { x_m: 0.04, y_m: 0.07, yaw_rad: 0.2 },
-      rgb: [233, 30, 99],
-    },
-    {
-      delayMs: 520,
-      servos: { '1': 410, '2': 450, '3': 350, '4': 410, '5': 360, '10': 280 },
-      odometry: { x_m: 0.04, y_m: -0.07, yaw_rad: -0.2 },
-      rgb: [251, 188, 4],
-    },
-    {
-      delayMs: 1040,
-      servos: { '1': 550, '2': 460, '3': 360, '4': 430, '5': 580, '10': 540 },
-      odometry: { x_m: 0.03, y_m: 0.03, yaw_rad: 0.1 },
-      rgb: [233, 30, 99],
-    },
-  ],
-  bumblebee_sad_droop: [
-    {
-      delayMs: 0,
-      servos: { '1': 440, '2': 570, '3': 200, '4': 200, '5': 420, '10': 650 },
-      odometry: { x_m: -0.08, y_m: -0.04, yaw_rad: -0.18 },
-      rgb: [95, 99, 104],
-    },
-    {
-      delayMs: 520,
-      servos: { '1': 560, '2': 550, '3': 220, '4': 220, '5': 580, '10': 600 },
-      odometry: { x_m: -0.06, y_m: 0.04, yaw_rad: 0.16 },
-      rgb: [59, 130, 246],
-    },
-  ],
-  bumblebee_sassy: [
-    {
-      delayMs: 0,
-      servos: { '1': 320, '2': 540, '3': 400, '4': 480, '5': 240, '10': 230 },
-      odometry: { x_m: 0.04, y_m: -0.11, yaw_rad: -0.55 },
-      rgb: [52, 168, 83],
-    },
-    {
-      delayMs: 420,
-      servos: { '1': 680, '2': 500, '3': 360, '4': 430, '5': 760, '10': 660 },
-      odometry: { x_m: 0.04, y_m: 0.11, yaw_rad: 0.55 },
-      rgb: [251, 188, 4],
-    },
-    {
-      delayMs: 840,
-      servos: { '1': 360, '2': 530, '3': 390, '4': 470, '5': 280, '10': 250 },
-      odometry: { x_m: 0.03, y_m: -0.06, yaw_rad: -0.35 },
-      rgb: [52, 168, 83],
-    },
-  ],
-};
+const SERVO_IDS = ['1', '2', '3', '4', '5', '10'] as const;
+
+/** Dead-reckons the chassis pose after holding (vx, vy, wz) for `dtS` seconds, like the bridge tick. */
+function integrateOdometry(
+  odom: TelemetryState['odometry'],
+  [vx, vy, wz]: [number, number, number],
+  dtS: number
+): TelemetryState['odometry'] {
+  const yaw_rad = odom.yaw_rad + wz * dtS;
+  return {
+    ...odom,
+    x_m: odom.x_m + (vx * Math.cos(yaw_rad) - vy * Math.sin(yaw_rad)) * dtS,
+    y_m: odom.y_m + (vx * Math.sin(yaw_rad) + vy * Math.cos(yaw_rad)) * dtS,
+    yaw_rad,
+    vx,
+    vy,
+    wz,
+  };
+}
 
 
 const SIMULATOR_ONLY: RobotActionResult = {
@@ -493,41 +275,51 @@ export function useRobotTelemetry() {
       }
       choreoTimersRef.current = [];
 
-      const choreo = LOCAL_CHOREOGRAPHIES[gesture];
-      if (choreo && choreo.length > 0) {
-        for (const step of choreo) {
-          const timer = setTimeout(() => {
-            setTelemetry((prev) => ({
+      // Same multi-step choreography as the bridge (generated from gestures.rs), so the
+      // browser-only twin performs the whole gesture instead of jumping to one pose.
+      const canonical = GESTURE_ALIASES[gesture.trim().toLowerCase()] ?? 'home';
+      const choreo = GESTURES[canonical];
+      const scene = LOCAL_GESTURE_SCENE[canonical] ?? {};
+      let delayMs = 0;
+      let velocity: [number, number, number] = [0, 0, 0];
+      choreo.steps.forEach((step, index) => {
+        if (step.velocity) velocity = step.velocity;
+        const held = velocity;
+        const timer = setTimeout(() => {
+          setTelemetry((prev) => {
+            const servos = { ...prev.servos };
+            SERVO_IDS.forEach((id, i) => {
+              servos[id] = step.servos[i];
+            });
+            const blockedForward = prev.lidar.front_m < 0.28 && held[0] > 0;
+            const applied: [number, number, number] = blockedForward ? [0, held[1], held[2]] : held;
+            return {
               ...prev,
-              servos: { ...prev.servos, ...step.servos },
-              odometry: step.odometry
-                ? { ...prev.odometry, ...step.odometry }
-                : prev.odometry,
-              rgb: step.rgb,
-              active_gesture: gesture,
+              servos,
+              odometry: integrateOdometry(prev.odometry, applied, step.durationMs / 1000),
+              rgb: choreo.rgb,
+              active_gesture: canonical,
               mood,
-            }));
-          }, step.delayMs);
-          choreoTimersRef.current.push(timer);
-        }
-      } else {
-        const preset = LOCAL_GESTURE_TARGETS[gesture];
-        if (preset) {
-          setTelemetry((prev) => ({
-            ...prev,
-            servos: { ...prev.servos, ...preset.servos },
-            odometry: preset.odometry
-              ? { ...prev.odometry, ...preset.odometry }
-              : prev.odometry,
-            rgb: preset.rgb,
-            active_gesture: gesture,
-            mood,
-            held_object: preset.held_object ?? prev.held_object,
-            pointed_totem:
-              preset.pointed_totem !== undefined ? preset.pointed_totem : prev.pointed_totem,
-          }));
-        }
-      }
+              ...(index === 0 && scene.pointed_totem !== undefined
+                ? { pointed_totem: scene.pointed_totem }
+                : {}),
+              ...(index === 0 && canonical !== 'trash_toss' && scene.held_object
+                ? { held_object: scene.held_object }
+                : {}),
+              // trash_toss drops the object only once the gripper opens (pulse < 320), as in the bridge.
+              ...(canonical === 'trash_toss' && step.servos[5] < 320
+                ? { held_object: 'released_rejected' }
+                : {}),
+            };
+          });
+        }, delayMs);
+        choreoTimersRef.current.push(timer);
+        delayMs += step.durationMs;
+      });
+      const stopTimer = setTimeout(() => {
+        setTelemetry((prev) => ({ ...prev, odometry: { ...prev.odometry, vx: 0, vy: 0, wz: 0 } }));
+      }, delayMs);
+      choreoTimersRef.current.push(stopTimer);
       return sendToBridge(`gesture ${gesture}`, (c) => c.triggerGesture(gesture, mood));
     },
     [sendToBridge]

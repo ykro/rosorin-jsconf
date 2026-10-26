@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { TopNav } from '@/components/TopNav';
 import { ApiKeyCollapsible } from '@/components/ApiKeyCollapsible';
@@ -152,9 +152,6 @@ export default function BumblebeeDemoPage() {
     await sessionRef.current.respondWithMusic(text);
   };
 
-  const esCount = useMemo(() => catalog.filter((c) => c.lang === 'es').length, [catalog]);
-  const enCount = useMemo(() => catalog.filter((c) => c.lang === 'en').length, [catalog]);
-
   const controlsColumn = (
     <div className="flex flex-col gap-4">
       <ApiKeyCollapsible />
@@ -179,12 +176,6 @@ export default function BumblebeeDemoPage() {
             Posición Inicial
           </button>
         </div>
-
-        <p className="mt-2 text-xs leading-relaxed text-[#5F6368]">
-          Su caja de voz está dañada: busca en tiempo real con embeddings semánticos entre{' '}
-          <strong>{catalog.length || 168} segmentos de canciones</strong> ({esCount || 95} ES / {enCount || 73} EN),
-          encadena frases musicales y baila con los 6 ejes + chasis Mecanum.
-        </p>
 
         <div className="mt-3.5 flex flex-col gap-2.5 sm:flex-row">
           <button

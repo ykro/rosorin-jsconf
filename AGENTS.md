@@ -20,7 +20,7 @@ Antes de dar un cambio por terminado:
 ```bash
 make test                                   # cargo test + tests del worker (sin rclpy) + npm test
 make lint                                   # cargo clippy --all-targets -- -D warnings
-cd web && npx tsc --noEmit && npm run lint && npm run check:css && npm run build
+cd web && npx tsc --noEmit && npm run lint && npm run check:css && npm run check:gestures && npm run build
 npx @redocly/cli@latest lint docs/openapi.yaml   # si tocaste la API
 ```
 

@@ -1,42 +1,10 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import Link from 'next/link';
 import { TopNav } from '@/components/TopNav';
 import { HardwareControlPanel } from '@/components/HardwareControlPanel';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { shouldIgnoreShortcut } from '@/lib/keyboard';
-
-const LITE_DEMOS = [
-  {
-    tag: 'DEMO A',
-    title: 'Repo Roaster',
-    href: '/demos/roaster?lite=1',
-    bgClass: 'bg-[#1A73E8] border-[#1A73E8] hover:bg-[#1557B0] text-white',
-    tagClass: 'bg-white/20 text-white',
-  },
-  {
-    tag: 'DEMO B',
-    title: 'Gatekeeper CI/CD',
-    href: '/demos/gatekeeper?lite=1',
-    bgClass: 'bg-[#1E8E3E] border-[#1E8E3E] hover:bg-[#137333] text-white',
-    tagClass: 'bg-white/20 text-white',
-  },
-  {
-    tag: 'DEMO C',
-    title: 'Bug Hunter',
-    href: '/demos/bughunter?lite=1',
-    bgClass: 'bg-[#F9AB00] border-[#F9AB00] hover:bg-[#EA8600] text-[#202124]',
-    tagClass: 'bg-white/70 text-[#202124]',
-  },
-  {
-    tag: 'DEMO D',
-    title: 'Bumblebee Radio',
-    href: '/demos/bumblebee?lite=1',
-    bgClass: 'bg-[#EA4335] border-[#EA4335] hover:bg-[#C5221F] text-white',
-    tagClass: 'bg-white/20 text-white',
-  },
-];
 
 export default function RobotLiteHubPage() {
   const robot = useRobotTelemetry();
@@ -134,30 +102,6 @@ export default function RobotLiteHubPage() {
       <TopNav robot={robot} liteMode={true} />
 
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-5 p-6">
-        {/* 4 Large Google-Colored Stage Launch Buttons */}
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {LITE_DEMOS.map((d) => (
-            <Link
-              key={d.href}
-              href={d.href}
-              prefetch={true}
-              className={`group flex h-[116px] flex-col justify-between rounded-2xl border-2 p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:scale-95 ${d.bgClass}`}
-            >
-              <div>
-                <span
-                  className={`rounded-md px-2.5 py-1 font-mono text-xs font-bold tracking-wider ${d.tagClass}`}
-                >
-                  {d.tag}
-                </span>
-              </div>
-
-              <span className="font-display text-2xl font-extrabold tracking-tight">
-                {d.title}
-              </span>
-            </Link>
-          ))}
-        </section>
-
         {/* Balanced 2-Column Hardware Studio Console */}
         <HardwareControlPanel
           telemetry={telemetry}

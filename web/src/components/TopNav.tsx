@@ -66,8 +66,8 @@ export function TopNav({ robot, liteMode: propLite }: TopNavProps) {
 
   const links = isLite
     ? [
-        { href: '/', match: '/', label: 'Inicio' },
-        { href: '/slides/index.html', match: '/slides', label: 'Diapositivas' },
+        { href: '/', match: '/', label: 'Hub' },
+        { href: '/slides/index.html', match: '/slides', label: 'Slides' },
         { href: '/robot', match: '/robot', label: 'Consola' },
         { href: '/demos/roaster?lite=1', match: '/demos/roaster', label: 'Demo A' },
         { href: '/demos/gatekeeper?lite=1', match: '/demos/gatekeeper', label: 'Demo B' },
@@ -75,8 +75,8 @@ export function TopNav({ robot, liteMode: propLite }: TopNavProps) {
         { href: '/demos/bumblebee?lite=1', match: '/demos/bumblebee', label: 'Demo D' },
       ]
     : [
-        { href: '/', match: '/', label: 'Inicio' },
-        { href: '/slides/index.html', match: '/slides', label: 'Diapositivas' },
+        { href: '/', match: '/', label: 'Hub' },
+        { href: '/slides/index.html', match: '/slides', label: 'Slides' },
         { href: '/demo', match: '/demo', label: 'Simulador (/demo)' },
         { href: '/demos/roaster', match: '/demos/roaster', label: 'Demo A' },
         { href: '/demos/gatekeeper', match: '/demos/gatekeeper', label: 'Demo B' },

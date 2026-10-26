@@ -79,7 +79,7 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
   - `bumblebee_sassy`: giro con actitud
 
   Cada clip dispara el baile y un pequeño movimiento del chasis.
-- **Herramienta:** `play_radio_sequence({ clip_ids, dance_gesture, radio_caption })`. El modelo puede pedir hasta 3 IDs; la web reproduce como máximo 2. Si ningún ID existe en el catálogo, elige el clip un buscador local.
+- **Herramienta:** `play_radio_sequence({ clip_ids, dance_gesture, radio_caption })`. El modelo pide 1 o 2 IDs. Si ningún ID existe en el catálogo, elige el clip un buscador local.
 - **Flujo:**
   1. Pulsa **📻 Iniciar Conversación Musical** (necesita API key) y háblale.
   2. Sin API key también funciona por texto: las frases rápidas («¡Hola Bumblebee! ¿Cómo estás hoy?», «El deploy en viernes salió perfecto a la primera.», «Se cayó producción y nadie sabe por qué.») y el cuadro de texto usan el buscador local de canciones.

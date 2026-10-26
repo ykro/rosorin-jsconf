@@ -231,43 +231,43 @@ export function Rosorin3DViewer({
           if (effectiveLidarM < 0.28) {
             setLastKeyPressed('BLOQUEADO POR LIDAR (<0.28m)');
           } else {
-            setLastKeyPressed('Avanzar');
+            setLastKeyPressed('Avanzar Mecanum');
             move?.(0.15, 0, 0);
           }
           break;
         case 'arrowdown':
           e.preventDefault();
-          setLastKeyPressed('Retroceder');
+          setLastKeyPressed('Retroceder Mecanum');
           move?.(-0.15, 0, 0);
           break;
         case 'arrowleft':
           e.preventDefault();
-          setLastKeyPressed('Deslizar a la izquierda');
+          setLastKeyPressed('Strafe Izquierda');
           move?.(0, 0.15, 0);
           break;
         case 'arrowright':
           e.preventDefault();
-          setLastKeyPressed('Deslizar a la derecha');
+          setLastKeyPressed('Strafe Derecha');
           move?.(0, -0.15, 0);
           break;
         case 'f':
-          setLastKeyPressed('Gesto: mano a la frente');
+          setLastKeyPressed('Gesto: Facepalm');
           trigger?.('facepalm');
           break;
         case 'g':
-          setLastKeyPressed('Gesto: tirar a la basura');
+          setLastKeyPressed('Gesto: Trash Toss');
           trigger?.('trash_toss');
           break;
         case 'h':
-          setLastKeyPressed('Gesto: beso de chef');
+          setLastKeyPressed('Gesto: Chef Kiss');
           trigger?.('chef_kiss');
           break;
         case 'v':
-          setLastKeyPressed('Gesto: giro de victoria');
+          setLastKeyPressed('Gesto: Victory Spin');
           trigger?.('victory_spin');
           break;
         case '0':
-          setLastKeyPressed('Posición inicial');
+          setLastKeyPressed('Reset Home');
           setLocalLidarM(null);
           onResetScene?.();
           break;
@@ -941,7 +941,7 @@ export function Rosorin3DViewer({
                 : 'border-[#DADCE0] bg-[#F8F9FA] text-[#202124] hover:border-[#1A73E8]'
             }`}
           >
-            {webcamActive ? 'Cámara web: activa' : 'Cámara web'}
+            {webcamActive ? 'Webcam: Activa' : 'Webcam'}
           </button>
 
           {onResetScene && (

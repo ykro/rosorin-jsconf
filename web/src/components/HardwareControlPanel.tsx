@@ -24,12 +24,12 @@ const SERVO_AXES = [
 
 /** `key` must match the keyboard handlers in Rosorin3DViewer and /robot (F, G, H, V). */
 const GESTURE_PRESETS: Array<{ id: string; label: string; key?: string }> = [
-  { id: 'wave_hello', label: 'Saludo' },
-  { id: 'facepalm', label: 'Mano a la frente', key: 'F' },
-  { id: 'trash_toss', label: 'Tirar a la basura', key: 'G' },
-  { id: 'chef_kiss', label: 'Beso de chef', key: 'H' },
-  { id: 'victory_spin', label: 'Giro de victoria', key: 'V' },
-  { id: 'suspicious_inspect', label: 'Inspección' },
+  { id: 'wave_hello', label: 'Wave Hello' },
+  { id: 'facepalm', label: 'Facepalm', key: 'F' },
+  { id: 'trash_toss', label: 'Trash Toss', key: 'G' },
+  { id: 'chef_kiss', label: 'Chef Kiss', key: 'H' },
+  { id: 'victory_spin', label: 'Victory Spin', key: 'V' },
+  { id: 'suspicious_inspect', label: 'Suspicious Inspect' },
 ];
 
 export function HardwareControlPanel({

@@ -12,7 +12,7 @@ El mismo código TypeScript y el mismo binario de Rust (`rosorin-bridge`, en la 
 ## 1. Requisitos
 
 - **Node.js 22** ([`.nvmrc`](../.nvmrc); `web/package.json` exige `>= 22.6`) y `npm`.
-- **Rust con `cargo >= 1.87`**. Si falta, `./run.sh` pregunta antes de instalarlo con rustup; en una terminal no interactiva aborta salvo con `--yes` o `ASSUME_YES=1`. Lo mismo hace con Node (vía fnm).
+- **Rust con `cargo >= 1.87`**. En Linux o WSL instala antes `libudev-dev` y `pkg-config` (`sudo apt-get install -y libudev-dev pkg-config`), que pide el crate `serialport`. Si falta, `./run.sh` pregunta antes de instalarlo con rustup; en una terminal no interactiva aborta salvo con `--yes` o `ASSUME_YES=1`. Lo mismo hace con Node (vía fnm).
 - **API key de Gemini** de [Google AI Studio](https://aistudio.google.com/apikey). Pégala en el navegador (botón «Ingresar API Key» de la consola de cada demo, o panel «Gemini Live API Key» en `/demo`); se guarda en `localStorage` como `rosorin_gemini_api_key`. Para desarrollo local puedes copiar [`web/.env.example`](../web/.env.example) a `web/.env.local` y llenar `NEXT_PUBLIC_GEMINI_API_KEY`, pero no hagas `npm run build` ni despliegues con ella: quedaría en el bundle público.
 - **En el robot:** Ubuntu 22.04 con ROS 2 Humble y el SDK de Hiwonder (lo usa `robot-bridge/scripts/ros2_worker.py`).
 
@@ -42,18 +42,7 @@ curl http://localhost:9000/status      # telemetría completa
 
 ### Rutas de la web
 
-| Ruta | Para qué |
-|---|---|
-| `/` y `/simulator` | Inicio con enlaces a slides, simulador y código. |
-| `/demo` | Simulador 3D con control de servos 1 a 5 y pinza 10, cruceta Mecanum, LiDAR y accesos a las demos. |
-| `/robot` | Consola ligera sin WebGL. |
-| `/demos/roaster` | Demo A · Repo Roaster. |
-| `/demos/gatekeeper` | Demo B · Gatekeeper CI/CD. |
-| `/demos/bughunter` | Demo C · Bug Hunter. |
-| `/demos/bumblebee` | Demo D · Bumblebee Radio (168 clips: 95 ES / 73 EN). |
-| `/face` | Rostro para la pantalla táctil de 7" del robot. |
-| `/presenter` | Pantalla del presentador. |
-| `/props` | Props imprimibles a escala 1:1 (`rosorin-stage-props-print.pdf`). |
+La lista de rutas (`/demo`, `/robot`, `/face`, las 4 demos…) y cómo funcionan los gestos del simulador están en [`WEB.md`](./WEB.md).
 
 ---
 
