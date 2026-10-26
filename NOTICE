@@ -1,0 +1,20 @@
+rosorin-jsconf
+Copyright (c) 2026 Adrián Catalán (@adriancs.tech)
+
+El código de este repositorio se distribuye bajo la licencia MIT (ver LICENSE).
+
+Material de terceros
+--------------------
+
+Mallas 3D del robot (web/public/meshes/)
+  Las 16 mallas .stl del Hiwonder ROSOrin Pro provienen del paquete de
+  descripción URDF de ROS 2 publicado por el fabricante
+  (https://github.com/Hiwonder/ROSOrin-Pro). Se incluyen con fines educativos,
+  de simulación y de visualización del gemelo digital, con atribución a
+  Shenzhen Hiwonder Technology Co., Ltd. La licencia MIT de este repositorio
+  no aplica a esas mallas: sus derechos pertenecen a Hiwonder.
+
+Clips de audio de Bumblebee Radio (web/public/songs/clips/)
+  Los archivos .mp3 no forman parte del repositorio ni del sitio desplegado.
+  web/public/songs/catalog.json solo contiene metadatos (título, artista,
+  fragmento de letra y duración) para que la demo funcione sin el audio.

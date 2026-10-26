@@ -3,9 +3,10 @@
 import React, { useEffect, useState } from 'react';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { stopAllActiveConversations } from '@/lib/gemini-live';
+import { BridgeAlerts } from '@/components/BridgeControls';
 
 export default function RobotFacePage() {
-  const { telemetry, triggerGesture, client } = useRobotTelemetry();
+  const { telemetry, triggerGesture, client, bridge, emergencyStop, releaseEstop } = useRobotTelemetry();
 
   const [blinking, setBlinking] = useState(false);
   const [talkPhase, setTalkPhase] = useState(0);
@@ -19,13 +20,17 @@ export default function RobotFacePage() {
     return () => clearInterval(blinkInterval);
   }, []);
 
-  // Smooth mouth animation when speaking
+  const isSpeaking = Boolean(telemetry.speaking);
+  const isListening = Boolean(telemetry.listening);
+
+  // Mouth animation only while speaking (no 60 ms re-render loop when idle).
   useEffect(() => {
+    if (!isSpeaking) return;
     const anim = setInterval(() => {
       setTalkPhase((p) => (p + 1) % 60);
-    }, 60);
+    }, 80);
     return () => clearInterval(anim);
-  }, []);
+  }, [isSpeaking]);
 
   // Track Servo 1 (base yaw: 120..880, center 500) and Servo 4 (wrist pitch: center 380)
   const servo1 = telemetry.servos['1'] ?? 500;
@@ -97,15 +102,12 @@ export default function RobotFacePage() {
     primaryColor = '#4285F4';
   }
 
-  const isSpeaking = Boolean(telemetry.speaking);
-  const isListening = Boolean(telemetry.listening);
-
   const handleTap = () => {
     if (isSpeaking) {
-      stopAllActiveConversations();
-      client?.updateHud({ speaking: false });
+      stopAllActiveConversations('user');
+      void client?.updateHud({ speaking: false });
     } else {
-      triggerGesture('wave_hello', 'impressed');
+      void triggerGesture('wave_hello', 'impressed');
     }
   };
 
@@ -118,8 +120,21 @@ export default function RobotFacePage() {
     <div
       onClick={handleTap}
       style={{ backgroundColor: '#0E1117' }}
-      className="flex h-screen w-screen cursor-pointer select-none items-center justify-center overflow-hidden"
+      className="relative flex h-screen w-screen cursor-pointer select-none items-center justify-center overflow-hidden"
     >
+      <BridgeAlerts bridge={bridge} onReleaseEstop={releaseEstop} />
+      {bridge.connected && !bridge.estopLatched && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            void emergencyStop();
+          }}
+          className="absolute bottom-4 right-4 z-10 rounded-xl bg-[#D93025] px-4 py-3 text-sm font-extrabold text-white shadow-lg hover:bg-[#B3261E]"
+        >
+          PARO
+        </button>
+      )}
       <svg
         viewBox="0 0 1000 600"
         className="h-full w-full"

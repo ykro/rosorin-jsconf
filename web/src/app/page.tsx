@@ -6,11 +6,11 @@ import { TopNav } from '@/components/TopNav';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 
 export default function LandingHubPage() {
-  const { bridgeConnected } = useRobotTelemetry();
+  const robot = useRobotTelemetry();
 
   return (
     <div className="flex min-h-screen w-screen flex-col bg-[#F8F9FA] text-[#202124]">
-      <TopNav bridgeConnected={bridgeConnected} liteMode={false} />
+      <TopNav robot={robot} liteMode={false} />
 
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center gap-6 px-6 py-10">
         <div>

@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { TopNav } from '@/components/TopNav';
 import { GeminiLiveConsole } from '@/components/GeminiLiveConsole';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
+import { useEmbodiedLiveSession } from '@/lib/use-embodied-live-session';
+import { useLiteMode } from '@/lib/use-lite-mode';
 import { analyzeGitHubPR } from '@/lib/repo-analyzer';
-import { EmbodiedGeminiLiveSession } from '@/lib/gemini-live';
 
 const Rosorin3DViewer = dynamic(
   () => import('@/components/Rosorin3DViewer').then((m) => m.Rosorin3DViewer),
@@ -35,72 +36,16 @@ const FOLLOW_UP_QUESTIONS = [
 ];
 
 export default function GatekeeperDemoPage() {
-  const {
-    telemetry,
-    bridgeConnected,
-    jogServo,
-    moveChassis,
-    simulateLidar,
-    triggerGesture,
-    resetScene,
-  } = useRobotTelemetry();
-
-  const [isLite, setIsLite] = useState(
-    process.env.NEXT_PUBLIC_LITE_MODE === '1'
-  );
+  const robot = useRobotTelemetry();
+  const { telemetry, jogServo, moveChassis, simulateLidar, triggerGesture, resetScene } = robot;
+  const isLite = useLiteMode();
   const [prUrlInput, setPrUrlInput] = useState(PRESET_PR_LINKS[0].url);
   const [evaluating, setEvaluating] = useState(false);
-  const [conversationActive, setConversationActive] = useState(false);
-  const [liveStatus, setLiveStatus] = useState<'idle' | 'connecting' | 'live' | 'rehearsal_voice'>('idle');
-  const [speaking, setSpeaking] = useState(false);
-  const [micLevel, setMicLevel] = useState(0);
-  const [micWarning, setMicWarning] = useState<string | null>(null);
-  const [userTranscript, setUserTranscript] = useState('');
-  const [verdictHeadline, setVerdictHeadline] = useState<string>('');
-
-  const liveSessionRef = useRef<EmbodiedGeminiLiveSession | null>(null);
+  const { sessionRef: liveSessionRef, consoleProps, setVerdictHeadline } = useEmbodiedLiveSession(robot);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('lite') === '1' || process.env.NEXT_PUBLIC_LITE_MODE === '1') {
-        setIsLite(true);
-      } else {
-        window.localStorage.removeItem('ROSORIN_LITE_MODE');
-        setIsLite(false);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    const session = new EmbodiedGeminiLiveSession(
-      { triggerGesture, moveChassis },
-      {
-        onStatus: (st) => setLiveStatus(st),
-        onTranscript: (role, text) => {
-          if (role === 'robot' && text.trim()) {
-            setVerdictHeadline(text);
-          } else if (role === 'user' && text.trim()) {
-            setUserTranscript(text);
-          }
-        },
-        onVerdictHeadline: (headline) => {
-          if (headline) setVerdictHeadline(headline);
-        },
-        onSpeakingChange: (sp) => setSpeaking(sp),
-        onConversationActiveChange: (act) => setConversationActive(act),
-        onMicLevelChange: (lvl) => setMicLevel(lvl),
-        onMicWarning: (warn) => setMicWarning(warn),
-      }
-    );
-    liveSessionRef.current = session;
-    triggerGesture('gatekeeper_hold', 'guarding');
-
-    return () => {
-      session.stopContinuousConversation();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void triggerGesture('gatekeeper_hold', 'guarding');
+  }, [triggerGesture]);
 
   const handleEvaluatePr = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -151,7 +96,11 @@ export default function GatekeeperDemoPage() {
         </div>
 
         <form onSubmit={handleEvaluatePr} className="mt-4 flex flex-col gap-3">
+          <label htmlFor="gatekeeper-pr-input" className="text-xs font-bold text-[#5F6368]">
+            Pull Request de GitHub
+          </label>
           <input
+            id="gatekeeper-pr-input"
             type="text"
             value={prUrlInput}
             onChange={(e) => setPrUrlInput(e.target.value)}
@@ -188,18 +137,9 @@ export default function GatekeeperDemoPage() {
 
       {/* 2. Gemini Live Voice & Follow-up Conversation */}
       <GeminiLiveConsole
-        status={liveStatus}
-        speaking={speaking}
-        externalActive={conversationActive}
-        micLevel={micLevel}
-        micWarning={micWarning}
-        userTranscript={userTranscript}
-        verdictHeadline={verdictHeadline}
+        {...consoleProps}
         placeholderHeadline="Selecciona un Pull Request de GitHub y pulsa Evaluar PR para iniciar la conversación."
         quickQuestions={FOLLOW_UP_QUESTIONS}
-        onSendBargeIn={(text) => liveSessionRef.current?.sendUserDefense(text)}
-        onStopContinuous={() => liveSessionRef.current?.stopContinuousConversation()}
-        onInterruptSpeech={() => liveSessionRef.current?.interruptRobotSpeech()}
       />
     </div>
   );
@@ -207,7 +147,7 @@ export default function GatekeeperDemoPage() {
   if (isLite) {
     return (
       <div className="flex min-h-screen w-screen flex-col bg-[#F8F9FA] text-[#202124]">
-        <TopNav bridgeConnected={bridgeConnected} liteMode={true} />
+        <TopNav robot={robot} liteMode={true} />
         <main className="mx-auto w-full max-w-2xl flex-1 p-6">{controlsColumn}</main>
       </div>
     );
@@ -215,7 +155,7 @@ export default function GatekeeperDemoPage() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#F8F9FA] text-[#202124]">
-      <TopNav bridgeConnected={bridgeConnected} />
+      <TopNav robot={robot} />
       <main className="flex h-[calc(100vh-56px)] w-full overflow-hidden">
         <aside className="flex w-[460px] shrink-0 flex-col overflow-y-auto border-r border-[#DADCE0] bg-[#F8F9FA] p-4">
           {controlsColumn}

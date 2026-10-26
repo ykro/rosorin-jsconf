@@ -19,13 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-### Third-Party Hardware CAD Meshes Notice
-
-The 3D `.stl` robot meshes located in `web/public/meshes/` are derived from the
-official Hiwonder ROSOrin Pro ROS 2 URDF description package
-(`https://github.com/Hiwonder/ROSOrin-Pro`) and are included for educational,
-simulation, and digital-twin visualization purposes with attribution to
-Shenzhen Hiwonder Technology Co., Ltd.

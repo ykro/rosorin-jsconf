@@ -8,7 +8,6 @@ Generates a true 1:1 physical scale 5-page printable PDF for the JSConf MX stage
 - Page 5: Demo C Self-Standing Tent Totem 03 — FIRESTORE (Right, Y = -20 cm, Google Yellow #F9AB00)
 """
 
-import os
 import subprocess
 
 HTML_CONTENT = """<!DOCTYPE html>
@@ -516,7 +515,6 @@ HTML_CONTENT = """<!DOCTYPE html>
 """
 
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 

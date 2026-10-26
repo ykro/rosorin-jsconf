@@ -52,7 +52,7 @@
 
   <rect x="724" y="194" width="492" height="80" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
   <text x="748" y="230" fill="#2d3142" font-size="20" font-weight="700">Tokio Async Runtime</text>
-  <text x="748" y="258" fill="#4f5d75" font-size="16">Timers exactos a 40 Hz y 20 Hz</text>
+  <text x="748" y="258" fill="#4f5d75" font-size="16">Un timer de 40 Hz que emite a 20 Hz</text>
 
   <!-- Row 3 -->
   <rect x="64" y="290" width="492" height="80" rx="10" fill="#ffffff" stroke="#2e5aa8" stroke-width="1.5"/>
@@ -70,5 +70,5 @@
 
   <rect x="724" y="386" width="492" height="80" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
   <text x="748" y="422" fill="#2d3142" font-size="20" font-weight="700">Ownership y RAII (0 ms GC)</text>
-  <text x="748" y="450" fill="#4f5d75" font-size="16">Trayectorias de servos sin jitter</text>
+  <text x="748" y="450" fill="#4f5d75" font-size="16">Sin pausas de GC en el loop de control</text>
 </svg>

@@ -79,8 +79,8 @@ export async function attachPcmCaptureWorklet(
         workletNode.disconnect();
         source.disconnect();
         silentGain.disconnect();
-      } catch {
-        // ignore
+      } catch (err) {
+        console.debug('[mic] Nodos de captura ya desconectados:', err);
       }
     },
   };

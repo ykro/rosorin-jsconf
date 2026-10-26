@@ -62,7 +62,7 @@ export const PRESET_REPOS: Record<string, RepoAnalysis> = {
   },
   'ykro/rosorin-jsconf': {
     repo: 'ykro/rosorin-jsconf',
-    description: 'Embodied AI with Gemini 3.8 Live, TypeScript, and a 40Hz Rust bridge for ROSOrin Pro.',
+    description: 'Physical AI with Gemini 3.8 Live, TypeScript, and a 40Hz Rust bridge for ROSOrin Pro.',
     stars: 128,
     language: 'Rust / TypeScript',
     stack: ['Gemini 3.8 Live API', 'Rust Axum 40Hz', 'Three.js URDF', 'ROS 2 Humble'],
@@ -157,13 +157,11 @@ export async function analyzeGithubRepo(rawInput: string): Promise<RepoAnalysis>
   }
 
   try {
+    // Unauthenticated on purpose: this runs in the browser (static export), so a
+    // GitHub token would be public. The API allows 60 requests/hour per IP.
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github+json',
-      'User-Agent': 'rosorin-jsconf-analyzer',
     };
-    if (process.env.GITHUB_TOKEN) {
-      headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-    }
 
     const repoRes = await fetch(`https://api.github.com/repos/${slug}`, {
       headers,
@@ -201,7 +199,7 @@ export async function analyzeGithubRepo(rawInput: string): Promise<RepoAnalysis>
       }
     }
 
-    let depCount = 0;
+    let depCount: number | null = null;
     let hasFakeTestScript = false;
     const stack: string[] = [];
     if (meta.language) stack.push(meta.language);
@@ -223,9 +221,11 @@ export async function analyzeGithubRepo(rawInput: string): Promise<RepoAnalysis>
         if (!testCmd || testCmd.includes('no test specified')) {
           hasFakeTestScript = true;
         }
-      } catch {
-        // ignore malformed package.json
+      } catch (err) {
+        console.warn(`[repo-analyzer] package.json de ${slug} no es JSON válido:`, err);
       }
+    } else if (pkgRes.status === 'rejected') {
+      console.warn(`[repo-analyzer] No se pudo leer package.json de ${slug}:`, pkgRes.reason);
     }
 
     const hasTests =
@@ -237,14 +237,14 @@ export async function analyzeGithubRepo(rawInput: string): Promise<RepoAnalysis>
     const findings: RepoFinding[] = [];
     let score = 72;
 
-    if (depCount > 120) {
+    if (depCount !== null && depCount > 120) {
       score -= 28;
       findings.push({
         label: 'node_modules',
         value: `${depCount} paquetes declarados en package.json`,
         severity: 'roast',
       });
-    } else if (depCount > 0) {
+    } else if (depCount !== null && depCount > 0) {
       score += 8;
       findings.push({
         label: 'dependencias',
@@ -290,7 +290,7 @@ export async function analyzeGithubRepo(rawInput: string): Promise<RepoAnalysis>
 
     const roastHeadline =
       score < 45
-        ? `${meta.full_name} confía más en la fe que en los tests (${depCount} paquetes).`
+        ? `${meta.full_name} confía más en la fe que en los tests${depCount !== null ? ` (${depCount} paquetes)` : ''}.`
         : score < 75
           ? `${meta.full_name} compila y promete en el README, pero mi cámara 3D ve deuda técnica.`
           : `${meta.full_name} tiene estructura limpia y merece el saludo de mis 6 grados de libertad.`;
@@ -307,26 +307,33 @@ export async function analyzeGithubRepo(rawInput: string): Promise<RepoAnalysis>
       suggestedGesture,
       roastScore: score,
       roastHeadline,
-      roastPromptContext: `Repo ${meta.full_name} (${meta.language}, ${meta.stargazers_count} stars): "${meta.description || 'no description'}". Root files: [${files.slice(0, 12).join(', ')}]. Dependencies: ${depCount}. Has tests: ${hasTests}. Score: ${score}/100.`,
+      roastPromptContext: `Repo ${meta.full_name} (${meta.language}, ${meta.stargazers_count} stars): "${meta.description || 'no description'}". Root files: [${files.slice(0, 12).join(', ')}]. Dependencies: ${depCount ?? 'unknown (no package.json read)'}. Has tests: ${hasTests}. Score: ${score}/100.`,
       origin: 'github_live',
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[repo-analyzer] No se pudo consultar ${slug} en GitHub:`, err);
+    // Never invent numbers: mark everything as unavailable.
     return {
       repo: slug,
-      description: `Repositorio ${slug}`,
-      stars: 42,
-      language: 'TypeScript',
-      stack: ['TypeScript', 'Node.js'],
-      dependencyCount: 64,
+      description: `Repositorio ${slug} (datos de GitHub no disponibles)`,
+      stars: null,
+      language: 'no disponible',
+      stack: [],
+      dependencyCount: null,
       hasTests: false,
       findings: [
-        { label: 'análisis rápido', value: `Inspección en vivo de ${slug}`, severity: 'warn' },
+        {
+          label: 'GitHub',
+          value: 'No se pudo consultar la API (límite de peticiones, repo privado o sin red): datos no disponibles',
+          severity: 'warn',
+        },
       ],
       suggestedGesture: 'suspicious_inspect',
-      roastScore: 58,
-      roastHeadline: `Estuve revisando ${slug} con mi cámara 3D y veo más promesas en el README que pruebas unitarias.`,
-      roastPromptContext: `Repository ${slug}: analyzed live on stage. Roast its README promises vs test coverage in witty Spanish.`,
-      origin: 'preset_rehearsal',
+      // Neutral placeholder (not shown in the UI); only picks the "skeptical" mood.
+      roastScore: 50,
+      roastHeadline: `No pude consultar ${slug} en GitHub; sin datos no hay roast justo.`,
+      roastPromptContext: `GitHub data for ${slug} is unavailable (rate limit, private repo or network). Do not invent stars, dependencies or tests.`,
+      origin: 'unavailable',
     };
   }
 }
@@ -405,7 +412,7 @@ export async function analyzeGitHubPR(prInput: string): Promise<GitHubPRAnalysis
     if (!urlMatch && !hashMatch) {
       const listRes = await fetch(
         `https://api.github.com/repos/${ownerRepo}/pulls?state=all&per_page=1`,
-        { headers: { Accept: 'application/vnd.github+json' } }
+        { headers: { Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(3500) }
       );
       if (listRes.ok) {
         const list = (await listRes.json()) as Array<{ number: number }>;
@@ -418,9 +425,11 @@ export async function analyzeGitHubPR(prInput: string): Promise<GitHubPRAnalysis
     const [prRes, filesRes] = await Promise.all([
       fetch(`https://api.github.com/repos/${ownerRepo}/pulls/${prNum}`, {
         headers: { Accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(4500),
       }),
       fetch(`https://api.github.com/repos/${ownerRepo}/pulls/${prNum}/files?per_page=30`, {
         headers: { Accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(4500),
       }),
     ]);
 
@@ -456,17 +465,16 @@ export async function analyzeGitHubPR(prInput: string): Promise<GitHubPRAnalysis
       testsPassing: hasTestChanges,
       justification,
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[repo-analyzer] No se pudo consultar el PR ${ownerRepo}#${prNum}:`, err);
+    // No data means no evidence of tests: never invent a passing suite.
     return {
       url: canonicalUrl,
       repoSlug: ownerRepo,
       prNumber: prNum,
-      prSummary: `PR #${prNum} (${ownerRepo}): Cambios en servicio principal enviados para revisión`,
-      testsPassing: prNum % 2 !== 0,
-      justification:
-        prNum % 2 !== 0
-          ? `PR #${prNum} de ${ownerRepo} con tests en verde, canary y plan de rollback.`
-          : `PR #${prNum} de ${ownerRepo} enviado de urgencia sin suite de tests adjunta.`,
+      prSummary: `PR #${prNum} (${ownerRepo}): datos de GitHub no disponibles`,
+      testsPassing: false,
+      justification: `No se pudo consultar el PR #${prNum} en GitHub, así que no hay evidencia de tests ni de plan de rollback.`,
     };
   }
 }
@@ -534,8 +542,8 @@ export async function analyzeGitHubIncident(input: string): Promise<GitHubIncide
           incidentLog: `GitHub ${ownerRepo}#${num}: ${data.title}. ${(data.body || '').slice(0, 220)}`,
         };
       }
-    } catch {
-      // fall through
+    } catch (err) {
+      console.warn(`[repo-analyzer] No se pudo consultar ${ownerRepo}#${num}:`, err);
     }
   }
 

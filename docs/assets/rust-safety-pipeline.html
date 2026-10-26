@@ -29,7 +29,7 @@
   <div class="diagram-container">
     <svg viewBox="0 0 1280 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="rust-safety-pipeline-title rust-safety-pipeline-desc" id="rust-safety-pipeline-root">
   <title id="rust-safety-pipeline-title">Pipeline de 4 Barreras de Seguridad de Hardware en Rust</title>
-  <desc id="rust-safety-pipeline-desc">Secuencia de cuatro validaciones deterministas en Rust que filtran los comandos de Gemini Live antes de escribir en el bus serial STM32 del robot.</desc>
+  <desc id="rust-safety-pipeline-desc">Secuencia de cuatro validaciones deterministas en Rust que filtran los comandos de Gemini Live antes de escribir al STM32 o al worker de ROS 2: tipos e IDs, recorte por articulación, freno por eje del LiDAR y watchdog.</desc>
   <defs>
     <style>
       #rust-safety-pipeline-root {
@@ -75,7 +75,7 @@
   <rect x="660" y="104" width="252" height="172" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
   <text x="684" y="146" fill="#eb6c36" font-size="16" font-weight="700" class="mono">3. ESCUDO LIDAR</text>
   <text x="684" y="190" fill="#2d3142" font-size="21" font-weight="700">Freno a &lt; 0.28 m</text>
-  <text x="684" y="230" fill="#4f5d75" font-size="16">Anula avance vx &gt; 0</text>
+  <text x="684" y="230" fill="#4f5d75" font-size="16">Por eje (vx, vy); |wz| ≤ 0.3</text>
 
   <!-- Stage 4 -->
   <rect x="960" y="104" width="256" height="172" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>

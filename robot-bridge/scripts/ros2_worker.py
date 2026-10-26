@@ -5,6 +5,16 @@ Uses Hiwonder's official `ros_robot_controller_sdk.Board` on `/dev/rrc` (with `r
 so the STM32 never resets into bootloader mode), and runs a background ROS 2 Humble subscriber
 on `/depth_cam/rgb0/image_raw` (2 FPS JPEG frames from the Deptrum Aurora 930 Pro 3D camera)
 and `/scan` (10 Hz LiDAR sector telemetry with 6-DOF arm shadow filtering).
+
+If `/dev/rrc` is owned by another ROS 2 node, it falls back to publishing ROS 2 topics:
+`/controller/cmd_vel` (Twist), `/servo_controller` (ServosPosition) and
+`/ros_robot_controller/set_buzzer` (BuzzerState).
+
+Protocol: one JSON command per line on stdin, one JSON event per line on stdout.
+On stdin EOF (bridge died or exited) the motors are set to 0.
+
+This module is importable without ROS 2 / the Board (see `test_ros2_worker.py`):
+hardware is only touched from `main()`.
 """
 import base64
 import json
@@ -14,19 +24,67 @@ import sys
 import threading
 import time
 
-HAS_BOARD = False
-board_instance = None
 VALID_SERVO_IDS = {1, 2, 3, 4, 5, 10}
+# The bridge re-sends the active velocity every ~100 ms, so 500 ms without
+# commands means the bridge is gone or stuck: stop the motors.
 WATCHDOG_TIMEOUT_S = 0.50
 
-try:
-    from ros_robot_controller.ros_robot_controller_sdk import Board
 
-    board_instance = Board("/dev/rrc", 1000000)
-    board_instance.enable_reception()
-    HAS_BOARD = True
-except Exception as exc:
-    sys.stderr.write(f"[ros2_worker] Direct Board(/dev/rrc) init info: {exc}\n")
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        sys.stderr.write(f"[ros2_worker] invalid {name}, using {default}\n")
+        return default
+
+
+# Arm shadow filter: returns closer than ARM_SHADOW_MAX_M within ±ARM_SHADOW_HALF_ANGLE_DEG of the
+# front are assumed to be the robot's own arm. Conservative defaults; calibrate on the robot with
+# `ros2 topic echo /scan` (ARM_SHADOW_MAX_M=0 disables the filter).
+ARM_SHADOW_MAX_M = _env_float("ARM_SHADOW_MAX_M", 0.12)
+ARM_SHADOW_HALF_ANGLE_DEG = _env_float("ARM_SHADOW_HALF_ANGLE_DEG", 35.0)
+
+# Several threads (camera, LiDAR, battery, main) write JSON lines: serialize them.
+_stdout_lock = threading.Lock()
+_rclpy_lock = threading.Lock()
+
+
+def emit(event: dict) -> None:
+    line = json.dumps(event)
+    with _stdout_lock:
+        sys.stdout.write(line + "\n")
+        sys.stdout.flush()
+
+
+def ensure_rclpy():
+    """Initializes rclpy exactly once, even if called from several threads."""
+    with _rclpy_lock:
+        import rclpy
+
+        if not rclpy.ok():
+            rclpy.init()
+        return rclpy
+
+
+def spin_node(node) -> None:
+    """Spins `node` on its own executor (never share the global one across threads)."""
+    from rclpy.executors import SingleThreadedExecutor
+
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    executor.spin()
+
+
+def init_board():
+    try:
+        from ros_robot_controller.ros_robot_controller_sdk import Board
+
+        board = Board("/dev/rrc", 1000000)
+        board.enable_reception()
+        return board
+    except Exception as exc:
+        sys.stderr.write(f"[ros2_worker] Direct Board(/dev/rrc) init info: {exc}\n")
+        return None
 
 
 def clamp_servo_pulse(sid: int, pos: int) -> int:
@@ -107,7 +165,7 @@ def battery_poller(board):
         try:
             mv = board.get_battery()
             if mv and 8000 <= int(mv) <= 14000:
-                print(json.dumps({"event": "battery", "mv": int(mv)}), flush=True)
+                emit({"event": "battery", "mv": int(mv)})
         except Exception:
             pass
         time.sleep(2.0)
@@ -125,21 +183,31 @@ def board_watchdog_loop(board, vel_state: dict):
             zero_board_motors(board)
 
 
-def compute_lidar_sectors(msg) -> dict:
+def compute_lidar_sectors(msg, shadow_max_m=None, shadow_half_angle_deg=None) -> dict:
     """
-    Computes (front_m, left_m, right_m, back_m) from a ROS 2 sensor_msgs/LaserScan message,
-    filtering out the 6-DOF robotic arm shadow (±35 deg with range < 0.18 m).
+    Computes (front_m, left_m, right_m, back_m) from a ROS 2 sensor_msgs/LaserScan message
+    (REP-103: angle 0 = front, positive = left).
+
+    Fails closed around the 6-DOF arm shadow: returns closer than `shadow_max_m` within
+    ±`shadow_half_angle_deg` of the front are ignored only while the sector still has other
+    valid rays; if every valid ray of a sector was filtered, the closest filtered ray is
+    reported (blocking) instead of an "open" value. A sector without any valid return
+    reports 4.0 m.
     """
-    front_m = 4.0
-    left_m = 4.0
-    right_m = 4.0
-    back_m = 4.0
+    if shadow_max_m is None:
+        shadow_max_m = ARM_SHADOW_MAX_M
+    if shadow_half_angle_deg is None:
+        shadow_half_angle_deg = ARM_SHADOW_HALF_ANGLE_DEG
+
+    open_m = 4.0
+    valid = {"front": math.inf, "left": math.inf, "right": math.inf, "back": math.inf}
+    shadow = dict(valid)
 
     r_min = max(0.05, float(getattr(msg, "range_min", 0.05)))
     r_max = min(12.0, float(getattr(msg, "range_max", 12.0)))
     angle = float(msg.angle_min)
     inc = float(msg.angle_increment)
-    arm_shadow_rad = math.radians(35.0)
+    arm_shadow_rad = math.radians(shadow_half_angle_deg)
     pi_4 = math.pi / 4.0
     three_pi_4 = 3.0 * math.pi / 4.0
 
@@ -148,29 +216,35 @@ def compute_lidar_sectors(msg) -> dict:
         angle += inc
         if not math.isfinite(r) or r < r_min or r > r_max:
             continue
-        # Filter out the 6-DOF robotic arm base/gripper shadow mounted over the front bumper
-        if abs(curr_angle) <= arm_shadow_rad and r < 0.18:
-            continue
 
         if abs(curr_angle) <= pi_4:
-            if r < front_m:
-                front_m = r
+            sector = "front"
         elif pi_4 < curr_angle <= three_pi_4:
-            if r < left_m:
-                left_m = r
+            sector = "left"
         elif -three_pi_4 <= curr_angle < -pi_4:
-            if r < right_m:
-                right_m = r
+            sector = "right"
         else:
-            if r < back_m:
-                back_m = r
+            sector = "back"
+
+        # Possible 6-DOF arm base/gripper shadow mounted over the front bumper
+        if abs(curr_angle) <= arm_shadow_rad and r < shadow_max_m:
+            shadow[sector] = min(shadow[sector], r)
+        else:
+            valid[sector] = min(valid[sector], r)
+
+    def sector_value(name: str) -> float:
+        if math.isfinite(valid[name]):
+            return valid[name]
+        if math.isfinite(shadow[name]):
+            return shadow[name]
+        return open_m
 
     return {
         "event": "lidar",
-        "front_m": round(front_m, 3),
-        "left_m": round(left_m, 3),
-        "right_m": round(right_m, 3),
-        "back_m": round(back_m, 3),
+        "front_m": round(sector_value("front"), 3),
+        "left_m": round(sector_value("left"), 3),
+        "right_m": round(sector_value("right"), 3),
+        "back_m": round(sector_value("back"), 3),
     }
 
 
@@ -179,11 +253,13 @@ def ros2_telemetry_subscriber():
     Subscribes to:
     - /depth_cam/rgb0/image_raw (Aurora 930 3D camera, 2 FPS JPEG base64)
     - /scan (LD19/MS200 LiDAR, up to 10 Hz sector distances with arm shadow filtering)
+    Without /scan the bridge marks the LiDAR as stale and blocks the chassis.
     """
     try:
         os.environ.setdefault("ROS_LOCALHOST_ONLY", "1")
-        import rclpy
+        ensure_rclpy()
         from rclpy.node import Node
+        from rclpy.qos import qos_profile_sensor_data
         from sensor_msgs.msg import Image, LaserScan
 
         try:
@@ -194,8 +270,6 @@ def ros2_telemetry_subscriber():
         except Exception:
             has_cv2 = False
 
-        if not rclpy.ok():
-            rclpy.init()
         node = Node("rosorin_telemetry_bridge_sub")
         last_img_sent = [0.0]
         last_scan_sent = [0.0]
@@ -219,39 +293,47 @@ def ros2_telemetry_subscriber():
                     ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 78])
                     if ok:
                         b64 = base64.b64encode(buf.tobytes()).decode("ascii")
-                        print(json.dumps({"event": "camera_jpeg", "b64": b64}), flush=True)
+                        emit({"event": "camera_jpeg", "b64": b64})
                 except Exception as e:
                     sys.stderr.write(f"[ros2_worker] camera encode error: {e}\n")
 
-            node.create_subscription(Image, "/depth_cam/rgb0/image_raw", on_image, 1)
+            # Best-effort QoS matches both reliable and best-effort sensor publishers
+            node.create_subscription(
+                Image, "/depth_cam/rgb0/image_raw", on_image, qos_profile_sensor_data
+            )
             sys.stderr.write("[ros2_worker] Subscribed to /depth_cam/rgb0/image_raw (Aurora 930)\n")
 
         def on_scan(msg: LaserScan):
             now = time.monotonic()
-            if now - last_scan_sent[0] < 0.1:
+            # ~20 Hz max: well inside the bridge's 300 ms staleness window
+            if now - last_scan_sent[0] < 0.05:
                 return
             last_scan_sent[0] = now
             try:
-                sectors = compute_lidar_sectors(msg)
-                print(json.dumps(sectors), flush=True)
+                emit(compute_lidar_sectors(msg))
             except Exception as e:
                 sys.stderr.write(f"[ros2_worker] lidar scan parse error: {e}\n")
 
-        node.create_subscription(LaserScan, "/scan", on_scan, 1)
-        sys.stderr.write("[ros2_worker] Subscribed to /scan (LiDAR 10Hz with arm shadow filter)\n")
-        rclpy.spin(node)
+        node.create_subscription(LaserScan, "/scan", on_scan, qos_profile_sensor_data)
+        sys.stderr.write(
+            "[ros2_worker] Subscribed to /scan (arm shadow filter "
+            f"<{ARM_SHADOW_MAX_M} m within ±{ARM_SHADOW_HALF_ANGLE_DEG} deg)\n"
+        )
+        spin_node(node)
     except Exception as exc:
         sys.stderr.write(f"[ros2_worker] Telemetry subscriber info: {exc}\n")
 
 
 def main():
-    # Start Aurora 930 camera + /scan LiDAR subscriber thread in the background
-    threading.Thread(target=ros2_telemetry_subscriber, daemon=True).start()
+    board_instance = init_board()
 
-    if HAS_BOARD and board_instance is not None:
+    if board_instance is not None:
         backend_label = "stm32-board (/dev/rrc @ 1Mbps)"
         sys.stderr.write(f"[ros2_worker] Connected directly to STM32: {backend_label}\n")
-        print(json.dumps({"event": "backend", "name": backend_label}), flush=True)
+        # First line on stdout must be the backend event (the bridge waits for it)
+        emit({"event": "backend", "name": backend_label})
+        # Start Aurora 930 camera + /scan LiDAR subscriber thread in the background
+        threading.Thread(target=ros2_telemetry_subscriber, daemon=True).start()
 
         vel_state = {"lock": threading.Lock(), "last_cmd_at": time.monotonic(), "moving": False}
         threading.Thread(target=battery_poller, args=(board_instance,), daemon=True).start()
@@ -270,19 +352,18 @@ def main():
                 except Exception as exc:
                     sys.stderr.write(f"[ros2_worker] board command error: {exc}\n")
         finally:
+            # stdin EOF: the bridge is gone, never leave the wheels spinning
             zero_board_motors(board_instance)
         return
 
     # Fallback to ROS 2 rclpy topics if Board(/dev/rrc) is owned by another ROS 2 node
     os.environ.setdefault("ROS_LOCALHOST_ONLY", "1")
-    import rclpy
+    rclpy = ensure_rclpy()
     from rclpy.node import Node
     from geometry_msgs.msg import Twist
     from servo_controller_msgs.msg import ServoPosition, ServosPosition
     from ros_robot_controller_msgs.msg import BuzzerState
 
-    if not rclpy.ok():
-        rclpy.init()
     node = Node("rosorin_rust_bridge_worker")
     vel_pub = node.create_publisher(Twist, "/controller/cmd_vel", 10)
     servo_pub = node.create_publisher(ServosPosition, "/servo_controller", 10)
@@ -303,9 +384,10 @@ def main():
                 pass
 
     node.create_timer(0.1, ros2_watchdog)
-    threading.Thread(target=rclpy.spin, args=(node,), daemon=True).start()
 
-    print(json.dumps({"event": "backend", "name": "ros2-topics"}), flush=True)
+    emit({"event": "backend", "name": "ros2-topics"})
+    threading.Thread(target=spin_node, args=(node,), daemon=True).start()
+    threading.Thread(target=ros2_telemetry_subscriber, daemon=True).start()
 
     try:
         for line in sys.stdin:

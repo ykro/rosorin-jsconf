@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg viewBox="0 0 1280 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="rosorin-arch-title rosorin-arch-desc" id="architecture-root">
-  <title id="rosorin-arch-title">Arquitectura End-to-End de ROSOrin Pro con Gemini 3.8 Live</title>
-  <desc id="rosorin-arch-desc">Flujo de voz bidireccional PCM, llamadas a herramientas no bloqueantes y telemetría a 20 Hz entre el cliente web en Next.js 15, Gemini 3.8 Live, el puente en Rust a 40 Hz y el robot Hiwonder ROSOrin Pro.</desc>
+  <title id="rosorin-arch-title">Arquitectura de punta a punta: navegador, Gemini Live, bridge en Rust y robot</title>
+  <desc id="rosorin-arch-desc">El navegador (web y gemelo 3D en localhost:3000) habla por WebSocket con Gemini Live en la nube de Google: audio PCM de 16 kHz hacia el modelo y de 24 kHz de vuelta. Las herramientas las ejecuta el navegador con HTTP y token contra el bridge en Rust (:9000), que corre en la laptop en modo mock o en el Jetson del robot, con un loop de 40 Hz y telemetría por WebSocket a 20 Hz. El bridge controla ROS 2 y el STM32 por UART a 1 Mbps.</desc>
   <defs>
     <style>
       #architecture-root {
@@ -27,30 +27,38 @@
 
   <!-- Zones -->
   <rect x="36" y="36" width="360" height="488" rx="12" fill="#2d3142" fill-opacity="0.03" stroke="#2d3142" stroke-opacity="0.16" stroke-width="1.2"/>
-  <text x="64" y="76" fill="#2d3142" font-size="18" font-weight="700">1. Cliente Web (:3000)</text>
+  <text x="64" y="76" fill="#2d3142" font-size="18" font-weight="700">1. Navegador (:3000)</text>
 
-  <rect x="460" y="36" width="360" height="488" rx="12" fill="#2d3142" fill-opacity="0.03" stroke="#2d3142" stroke-opacity="0.16" stroke-width="1.2"/>
-  <text x="488" y="76" fill="#2d3142" font-size="18" font-weight="700">2. Cloud AI + Rust (:9000)</text>
+  <rect x="460" y="36" width="360" height="236" rx="12" fill="#2d3142" fill-opacity="0.03" stroke="#2d3142" stroke-opacity="0.16" stroke-width="1.2"/>
+  <text x="488" y="76" fill="#2d3142" font-size="18" font-weight="700">2. Nube de Google</text>
+
+  <rect x="460" y="288" width="360" height="236" rx="12" fill="#2d3142" fill-opacity="0.03" stroke="#2d3142" stroke-opacity="0.16" stroke-width="1.2"/>
+  <text x="488" y="328" fill="#2d3142" font-size="18" font-weight="700">3. Laptop (mock) o Jetson</text>
 
   <rect x="884" y="36" width="360" height="488" rx="12" fill="#2d3142" fill-opacity="0.03" stroke="#2d3142" stroke-opacity="0.16" stroke-width="1.2"/>
-  <text x="912" y="76" fill="#2d3142" font-size="18" font-weight="700">3. Robot ROSOrin Pro</text>
+  <text x="912" y="76" fill="#2d3142" font-size="18" font-weight="700">4. Robot ROSOrin Pro</text>
 
-  <!-- Connectors -->
-  <line x1="368" y1="162" x2="488" y2="162" stroke="#2e5aa8" stroke-width="2" marker-end="url(#arch-arrow-blue)"/>
-  <rect x="382" y="128" width="92" height="26" rx="6" fill="#f5f5f5"/>
-  <text x="428" y="146" fill="#2e5aa8" font-size="15" font-weight="700" class="mono" text-anchor="middle">16 kHz</text>
+  <!-- Connectors: browser <-> Gemini (labels above each arrow) -->
+  <rect x="382" y="118" width="92" height="26" rx="6" fill="#f5f5f5"/>
+  <text x="428" y="136" fill="#2e5aa8" font-size="15" font-weight="700" class="mono" text-anchor="middle">16 kHz</text>
+  <line x1="368" y1="152" x2="488" y2="152" stroke="#2e5aa8" stroke-width="2" marker-end="url(#arch-arrow-blue)"/>
 
-  <line x1="488" y1="210" x2="368" y2="210" stroke="#eb6c36" stroke-width="2" marker-end="url(#arch-arrow-accent)"/>
-  <rect x="378" y="218" width="100" height="26" rx="6" fill="#f5f5f5"/>
-  <text x="428" y="236" fill="#eb6c36" font-size="15" font-weight="700" class="mono" text-anchor="middle">24 kHz</text>
+  <rect x="378" y="168" width="100" height="26" rx="6" fill="#f5f5f5"/>
+  <text x="428" y="186" fill="#eb6c36" font-size="15" font-weight="700" class="mono" text-anchor="middle">24 kHz</text>
+  <line x1="488" y1="202" x2="368" y2="202" stroke="#eb6c36" stroke-width="2" marker-end="url(#arch-arrow-accent)"/>
 
-  <path d="M 368,242 H 416 Q 428,242 428,254 V 380 Q 428,392 440,392 H 488" fill="none" stroke="#eb6c36" stroke-width="2" marker-end="url(#arch-arrow-accent)"/>
+  <!-- Connector: browser -> bridge (tool calls over HTTP with token) -->
+  <path d="M 368,240 H 416 Q 428,240 428,252 V 400 Q 428,412 440,412 H 488" fill="none" stroke="#eb6c36" stroke-width="2" marker-end="url(#arch-arrow-accent)"/>
+  <rect x="384" y="318" width="88" height="26" rx="6" fill="#f5f5f5"/>
+  <text x="428" y="336" fill="#eb6c36" font-size="15" font-weight="700" class="mono" text-anchor="middle">HTTP</text>
 
-  <line x1="488" y1="436" x2="368" y2="436" stroke="#4f5d75" stroke-width="2" stroke-dasharray="6,5" marker-end="url(#arch-arrow)"/>
-  <rect x="380" y="446" width="96" height="26" rx="6" fill="#f5f5f5"/>
-  <text x="428" y="464" fill="#4f5d75" font-size="15" font-weight="700" class="mono" text-anchor="middle">WS 20 Hz</text>
+  <!-- Connector: bridge -> 3D twin (telemetry) -->
+  <rect x="380" y="438" width="96" height="26" rx="6" fill="#f5f5f5"/>
+  <text x="428" y="456" fill="#4f5d75" font-size="15" font-weight="700" class="mono" text-anchor="middle">WS 20 Hz</text>
+  <line x1="488" y1="472" x2="368" y2="472" stroke="#4f5d75" stroke-width="2" stroke-dasharray="6,5" marker-end="url(#arch-arrow)"/>
 
-  <path d="M 792,392 H 840 Q 852,392 852,380 V 196 Q 852,184 864,184 H 912" fill="none" stroke="#4f5d75" stroke-width="2" marker-end="url(#arch-arrow)"/>
+  <!-- Connector: bridge -> robot -->
+  <path d="M 792,412 H 840 Q 852,412 852,400 V 196 Q 852,184 864,184 H 912" fill="none" stroke="#4f5d75" stroke-width="2" marker-end="url(#arch-arrow)"/>
 
   <line x1="1064" y1="262" x2="1064" y2="336" stroke="#eb6c36" stroke-width="2" marker-end="url(#arch-arrow-accent)"/>
   <rect x="1076" y="284" width="108" height="26" rx="6" fill="#f5f5f5"/>
@@ -58,26 +66,27 @@
 
   <!-- Nodes -->
   <rect x="64" y="110" width="304" height="152" rx="10" fill="#ffffff" stroke="#2e5aa8" stroke-width="1.6"/>
-  <text x="88" y="172" fill="#2d3142" font-size="22" font-weight="700">Cockpit y Voz Web</text>
+  <text x="88" y="172" fill="#2d3142" font-size="22" font-weight="700">Web y voz</text>
   <text x="88" y="210" fill="#4f5d75" font-size="16">Next.js 15 + Web Audio PCM</text>
 
   <rect x="64" y="336" width="304" height="152" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
-  <text x="88" y="398" fill="#2d3142" font-size="22" font-weight="700">Clon 3D (Three.js)</text>
-  <text x="88" y="436" fill="#4f5d75" font-size="16">16 mallas STL a 60 FPS</text>
+  <text x="88" y="398" fill="#2d3142" font-size="22" font-weight="700">Gemelo 3D (Three.js)</text>
+  <text x="88" y="436" fill="#4f5d75" font-size="16">16 mallas STL del fabricante</text>
 
-  <rect x="488" y="110" width="304" height="152" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
-  <text x="512" y="172" fill="#2d3142" font-size="22" font-weight="700">Gemini 3.8 Live</text>
-  <text x="512" y="210" fill="#4f5d75" font-size="16">Voz nativa y Tools asíncronos</text>
+  <rect x="488" y="100" width="304" height="148" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
+  <text x="512" y="160" fill="#2d3142" font-size="22" font-weight="700">Gemini 3.8 Live</text>
+  <text x="512" y="198" fill="#4f5d75" font-size="16">Voz nativa y tools bloqueantes</text>
 
-  <rect x="488" y="336" width="304" height="152" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
-  <text x="512" y="398" fill="#2d3142" font-size="22" font-weight="700">robot-bridge (Rust)</text>
-  <text x="512" y="436" fill="#4f5d75" font-size="16">Axum :9000 + Loop a 40 Hz</text>
+  <rect x="488" y="352" width="304" height="148" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
+  <text x="512" y="400" fill="#2d3142" font-size="22" font-weight="700">robot-bridge (Rust)</text>
+  <text x="512" y="436" fill="#4f5d75" font-size="16">Axum :9000 + loop de 40 Hz</text>
+  <text x="512" y="464" fill="#4f5d75" font-size="16">Token, freno y E-stop</text>
 
   <rect x="912" y="110" width="304" height="152" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
   <text x="936" y="172" fill="#2d3142" font-size="22" font-weight="700">ROS 2 Humble</text>
   <text x="936" y="210" fill="#4f5d75" font-size="16">Jetson Orin + LiDAR /scan</text>
 
   <rect x="912" y="336" width="304" height="152" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
-  <text x="936" y="398" fill="#2d3142" font-size="22" font-weight="700">STM32 + Actuadores</text>
-  <text x="936" y="436" fill="#4f5d75" font-size="16">6 Servos (1..5, 10) + Mecanum</text>
+  <text x="936" y="398" fill="#2d3142" font-size="22" font-weight="700">STM32 + actuadores</text>
+  <text x="936" y="436" fill="#4f5d75" font-size="16">6 servos (1..5, 10) + Mecanum</text>
 </svg>

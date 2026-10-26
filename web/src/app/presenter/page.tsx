@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { TelemetryState } from '@/lib/types';
 import { PRESET_REPOS } from '@/lib/repo-analyzer';
-import { FALLBACK_TELEMETRY, RobotBridgeClient } from '@/lib/robot-client';
+import { FALLBACK_TELEMETRY, RobotBridgeClient, describeBridgeError } from '@/lib/robot-client';
 
 export default function PresenterPage() {
   const [telemetry, setTelemetry] = useState<TelemetryState>(FALLBACK_TELEMETRY);
@@ -24,8 +24,9 @@ export default function PresenterPage() {
     const client = new RobotBridgeClient();
     try {
       await client.triggerGesture(item.suggestedGesture, 'stage_roast');
-    } catch {
-      // mock fallback
+    } catch (err) {
+      const { code, message } = describeBridgeError(err);
+      if (code !== 'disabled') console.warn(`[presenter] Gesto no enviado (${code}): ${message}`);
     }
   }
 
@@ -59,7 +60,7 @@ export default function PresenterPage() {
             }}
           />
           <h1 style={{ fontSize: 52, fontWeight: 800, letterSpacing: '-1px' }}>
-            ROSOrin Pro · Embodied Code Reviewer
+            ROSOrin Pro · Revisor de código físico
           </h1>
         </div>
         <Link
@@ -100,7 +101,7 @@ export default function PresenterPage() {
             className="mono"
             style={{ fontSize: 26, color: '#0F766E', fontWeight: 700, marginBottom: 16 }}
           >
-            {analysis.repo} · {analysis.dependencyCount} paquetes
+            {analysis.repo} · {analysis.dependencyCount ?? 'n/d'} paquetes
           </div>
           <p
             style={{

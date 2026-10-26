@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { getStoredOrEnvApiKey } from './ApiKeyCollapsible';
+import { API_KEY_UPDATED_EVENT, getEffectiveApiKey, getStoredApiKey, saveApiKey } from '@/lib/api-key';
+import type { LiveStatus } from '@/lib/live-connection';
 
 interface GeminiLiveConsoleProps {
-  status: 'idle' | 'connecting' | 'live' | 'rehearsal_voice';
+  status: LiveStatus;
   speaking?: boolean;
   externalActive?: boolean;
   micLevel?: number;
@@ -37,36 +38,24 @@ export function GeminiLiveConsole({
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [hasKey, setHasKey] = useState(true);
 
-  const refreshKeyStatus = () => {
-    if (typeof window === 'undefined') return;
-    const saved = window.localStorage.getItem('rosorin_gemini_api_key') || '';
-    setApiKeyDraft(saved);
-    const effective = getStoredOrEnvApiKey();
-    setHasKey(Boolean(effective));
-  };
-
   useEffect(() => {
+    const refreshKeyStatus = () => {
+      setApiKeyDraft(getStoredApiKey());
+      setHasKey(Boolean(getEffectiveApiKey()));
+    };
     refreshKeyStatus();
-    window.addEventListener('rosorin-api-key-updated', refreshKeyStatus);
+    window.addEventListener(API_KEY_UPDATED_EVENT, refreshKeyStatus);
     window.addEventListener('storage', refreshKeyStatus);
     return () => {
-      window.removeEventListener('rosorin-api-key-updated', refreshKeyStatus);
+      window.removeEventListener(API_KEY_UPDATED_EVENT, refreshKeyStatus);
       window.removeEventListener('storage', refreshKeyStatus);
     };
   }, []);
 
   const handleSaveKey = (e: React.FormEvent) => {
     e.preventDefault();
-    if (typeof window !== 'undefined') {
-      if (apiKeyDraft.trim()) {
-        window.localStorage.setItem('rosorin_gemini_api_key', apiKeyDraft.trim());
-      } else {
-        window.localStorage.removeItem('rosorin_gemini_api_key');
-      }
-      refreshKeyStatus();
-      window.dispatchEvent(new Event('rosorin-api-key-updated'));
-      setShowKeyInput(false);
-    }
+    saveApiKey(apiKeyDraft);
+    setShowKeyInput(false);
   };
 
   const handleSubmitQuestion = (e: React.FormEvent) => {
@@ -79,6 +68,34 @@ export function GeminiLiveConsole({
 
   const isActive = externalActive || speaking;
 
+  const statusLabel = speaking
+    ? 'Hablando…'
+    : status === 'connecting'
+      ? 'Conectando…'
+      : status === 'reconnecting'
+        ? 'Reconectando…'
+        : status === 'error'
+          ? 'Error de conexión'
+          : status === 'disconnected'
+            ? 'Desconectado'
+            : status === 'no_key'
+              ? 'Sin API key'
+              : status === 'live'
+                ? externalActive
+                  ? 'Escuchando tu micrófono'
+                  : 'Conectado'
+                : 'Listo';
+
+  const statusTone = speaking
+    ? 'bg-[#E8F0FE] text-[#1A73E8]'
+    : status === 'live'
+      ? 'bg-[#E6F4EA] text-[#1E8E3E]'
+      : status === 'error' || status === 'disconnected' || status === 'no_key'
+        ? 'bg-[#FCE8E6] text-[#D93025]'
+        : status === 'connecting' || status === 'reconnecting'
+          ? 'bg-[#FEF7E0] text-[#B06000]'
+          : 'bg-[#F1F3F4] text-[#5F6368]';
+
   return (
     <div className="rounded-2xl border border-[#DADCE0] bg-white p-6 text-[#202124] shadow-xs">
       {/* Header Row */}
@@ -87,21 +104,11 @@ export function GeminiLiveConsole({
           <span className="h-2.5 w-2.5 rounded-full bg-[#1A73E8]" />
           <span className="text-base font-bold text-[#202124]">Gemini Live</span>
           <span
-            className={`rounded-lg px-2.5 py-1 text-xs font-bold ${
-              speaking
-                ? 'bg-[#E8F0FE] text-[#1A73E8]'
-                : externalActive
-                  ? 'bg-[#E6F4EA] text-[#1E8E3E]'
-                  : status === 'live'
-                    ? 'bg-[#E6F4EA] text-[#1E8E3E]'
-                    : 'bg-[#F1F3F4] text-[#5F6368]'
-            }`}
+            role="status"
+            aria-live="polite"
+            className={`rounded-lg px-2.5 py-1 text-xs font-bold ${statusTone}`}
           >
-            {speaking
-              ? 'Hablando...'
-              : externalActive
-                ? 'Escuchando tu micrófono'
-                : 'Listo'}
+            {statusLabel}
           </span>
         </div>
 
@@ -179,7 +186,11 @@ export function GeminiLiveConsole({
               : 'No se pudo cargar GEMINI_API_KEY desde .env. Ingresa tu API Key aquí para guardarla en tu navegador:'}
           </p>
           <div className="flex items-center gap-2">
+            <label htmlFor="gemini-console-api-key" className="sr-only">
+              GEMINI_API_KEY
+            </label>
             <input
+              id="gemini-console-api-key"
               type="password"
               value={apiKeyDraft}
               onChange={(e) => setApiKeyDraft(e.target.value)}
@@ -197,7 +208,7 @@ export function GeminiLiveConsole({
       )}
 
       {micWarning && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#F9AB00] bg-[#FEF7E0] px-3.5 py-2.5 text-xs font-semibold text-[#B06000]">
+        <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#F9AB00] bg-[#FEF7E0] px-3.5 py-2.5 text-xs font-semibold text-[#B06000]">
           <span>{micWarning}</span>
         </div>
       )}
@@ -216,7 +227,11 @@ export function GeminiLiveConsole({
 
       {/* Follow-up Question Input & Quick Questions */}
       <form onSubmit={handleSubmitQuestion} className="mt-4 flex flex-col gap-2.5">
+        <label htmlFor="gemini-console-question" className="sr-only">
+          Pregunta para el robot
+        </label>
         <input
+          id="gemini-console-question"
           type="text"
           value={questionDraft}
           onChange={(e) => setQuestionDraft(e.target.value)}

@@ -34,6 +34,53 @@ export interface TelemetryState {
   lidar: LidarSectors;
   last_command_ms_ago: number;
   timestamp_ms: number;
+  /** E-stop latched by `POST /stop`; moving routes answer 423 until `POST /estop/release`. Optional: older bridges and the local fallback omit it. */
+  estop_latched?: boolean;
+  /** No recent LiDAR scan: the bridge blocks the chassis. */
+  lidar_stale?: boolean;
+  lidar_source?: 'mock' | 'ros2' | 'none';
+}
+
+export type BridgeErrorCode =
+  | 'disabled'
+  | 'network'
+  | 'timeout'
+  | 'unauthorized'
+  | 'estop_latched'
+  | 'forbidden'
+  | 'rate_limited'
+  | 'invalid_request'
+  | 'not_found'
+  | 'http';
+
+/** Outcome of a robot action, as reported to the UI and to Gemini tool responses. */
+export interface RobotActionResult {
+  ok: boolean;
+  /** `robot` when the bridge executed (or rejected) it; `simulator` when only the 3D twin moved. */
+  target: 'robot' | 'simulator';
+  code?: BridgeErrorCode;
+  message: string;
+}
+
+export interface RobotActionHandler {
+  triggerGesture: (name: string, mood?: string) => Promise<RobotActionResult>;
+  moveChassis: (
+    linear_x: number,
+    linear_y: number,
+    angular_z: number,
+    duration_ms?: number
+  ) => Promise<RobotActionResult>;
+}
+
+/** Bridge link state shown in the UI (TopNav, /face). */
+export interface BridgeUiState {
+  enabled: boolean;
+  connected: boolean;
+  authError: boolean;
+  estopLatched: boolean;
+  lidarStale: boolean;
+  lidarSource?: 'mock' | 'ros2' | 'none';
+  url: string;
 }
 
 export interface RepoFinding {
@@ -45,10 +92,12 @@ export interface RepoFinding {
 export interface RepoAnalysis {
   repo: string;
   description: string;
-  stars: number;
+  /** null when GitHub could not be queried (never invented). */
+  stars: number | null;
   language: string;
   stack: string[];
-  dependencyCount: number;
+  /** null when package.json could not be read (never invented). */
+  dependencyCount: number | null;
   hasTests: boolean;
   findings: RepoFinding[];
   suggestedGesture:
@@ -60,7 +109,7 @@ export interface RepoAnalysis {
   roastScore: number;
   roastHeadline: string;
   roastPromptContext: string;
-  origin: 'github_live' | 'preset_rehearsal';
+  origin: 'github_live' | 'preset_rehearsal' | 'unavailable';
 }
 
 export interface ToolCallLog {

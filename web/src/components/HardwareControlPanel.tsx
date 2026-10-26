@@ -22,13 +22,14 @@ const SERVO_AXES = [
   { id: 10, name: 'Pinza', min: 200, max: 750 },
 ];
 
-const GESTURE_PRESETS = [
-  { id: 'wave_hello', label: 'Saludo', key: 'W' },
-  { id: 'facepalm', label: 'Facepalm', key: 'F' },
-  { id: 'trash_toss', label: 'Tirar Basura', key: 'G' },
-  { id: 'chef_kiss', label: 'Chef Kiss', key: 'H' },
-  { id: 'victory_spin', label: 'Giro Victoria', key: 'V' },
-  { id: 'suspicious_inspect', label: 'Inspección', key: 'I' },
+/** `key` must match the keyboard handlers in Rosorin3DViewer and /robot (F, G, H, V). */
+const GESTURE_PRESETS: Array<{ id: string; label: string; key?: string }> = [
+  { id: 'wave_hello', label: 'Saludo' },
+  { id: 'facepalm', label: 'Mano a la frente', key: 'F' },
+  { id: 'trash_toss', label: 'Tirar a la basura', key: 'G' },
+  { id: 'chef_kiss', label: 'Beso de chef', key: 'H' },
+  { id: 'victory_spin', label: 'Giro de victoria', key: 'V' },
+  { id: 'suspicious_inspect', label: 'Inspección' },
 ];
 
 export function HardwareControlPanel({
@@ -44,8 +45,7 @@ export function HardwareControlPanel({
 
   const getServoValue = (id: number): number => {
     if (localSliders[id] !== undefined) return localSliders[id];
-    const target = (telemetry as unknown as { target_servos?: Record<string, number> })
-      .target_servos?.[String(id)];
+    const target = telemetry.target_servos?.[String(id)];
     if (target !== undefined) return target;
     return telemetry.servos?.[String(id)] ?? 500;
   };
@@ -130,12 +130,14 @@ export function HardwareControlPanel({
                         onClick={() =>
                           applyServoAbsolute(ax.id, Math.max(ax.min, val - 45), true)
                         }
+                        aria-label={`${ax.name}: menos`}
                         className="flex h-10 w-12 shrink-0 items-center justify-center rounded-xl border border-[#DADCE0] bg-white font-mono text-base font-bold text-[#202124] transition-colors hover:border-[#1A73E8] hover:text-[#1A73E8] active:bg-[#E8F0FE]"
                       >
                         −
                       </button>
                       <input
                         type="range"
+                        aria-label={`${ax.name} (servo ${ax.id})`}
                         min={ax.min}
                         max={ax.max}
                         value={val}
@@ -161,6 +163,7 @@ export function HardwareControlPanel({
                         onClick={() =>
                           applyServoAbsolute(ax.id, Math.min(ax.max, val + 45), true)
                         }
+                        aria-label={`${ax.name}: más`}
                         className="flex h-10 w-12 shrink-0 items-center justify-center rounded-xl border border-[#DADCE0] bg-white font-mono text-base font-bold text-[#202124] transition-colors hover:border-[#1A73E8] hover:text-[#1A73E8] active:bg-[#E8F0FE]"
                       >
                         +
@@ -265,9 +268,14 @@ export function HardwareControlPanel({
                   className="flex h-12 items-center justify-between rounded-xl border border-[#DADCE0] bg-[#F8F9FA] px-4 text-sm font-bold text-[#202124] transition-all hover:border-[#1A73E8] hover:bg-[#E8F0FE] hover:text-[#1A73E8] active:scale-95"
                 >
                   <span>{g.label}</span>
-                  <kbd className="rounded border border-[#DADCE0] bg-white px-1.5 py-0.5 font-mono text-xs text-[#5F6368]">
-                    {g.key}
-                  </kbd>
+                  {g.key && (
+                    <kbd
+                      aria-label={`Atajo: tecla ${g.key}`}
+                      className="rounded border border-[#DADCE0] bg-white px-1.5 py-0.5 font-mono text-xs text-[#5F6368]"
+                    >
+                      {g.key}
+                    </kbd>
+                  )}
                 </button>
               ))}
             </div>

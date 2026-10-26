@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { TelemetryState } from '@/lib/types';
-import { HardwareControlPanel } from './HardwareControlPanel';
+import { shouldIgnoreShortcut } from '@/lib/keyboard';
 
 export type SceneMode = 'sandbox' | 'roaster' | 'gatekeeper' | 'bughunter';
 export type StageSceneMode = SceneMode;
@@ -86,11 +86,11 @@ export function Rosorin3DViewer({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const telemetryRef = useRef<TelemetryState>(telemetry);
   const [meshesLoaded, setMeshesLoaded] = useState(0);
+  const [meshErrors, setMeshErrors] = useState<string[]>([]);
   const [lastKeyPressed, setLastKeyPressed] = useState<string>('');
   const [webcamActive, setWebcamActive] = useState(false);
   const [localLidarM, setLocalLidarM] = useState<number | null>(null);
   const webcamFrameCbRef = useRef(onWebcamFrame);
-  const liteMode = false;
 
   const jog = onJogServo ?? onServoJog;
   const move = onMoveChassis ?? onChassisMove;
@@ -115,14 +115,8 @@ export function Rosorin3DViewer({
 
   // Webcam lifecycle (Aurora 930 Pro 3D Camera on the wrist)
   useEffect(() => {
-    if (!webcamActive) {
-      if (videoRef.current?.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream.getTracks().forEach((t) => t.stop());
-        videoRef.current.srcObject = null;
-      }
-      return;
-    }
+    if (!webcamActive) return;
+    const video = videoRef.current;
 
     let cancelled = false;
     let activeStream: MediaStream | null = null;
@@ -131,27 +125,28 @@ export function Rosorin3DViewer({
     navigator.mediaDevices
       ?.getUserMedia({ video: { width: 320, height: 240 }, audio: false })
       .then((stream) => {
-        if (cancelled || !videoRef.current) {
+        if (cancelled || !video) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
         activeStream = stream;
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
+        video.srcObject = stream;
+        video.play().catch((err) => console.warn('[webcam] play() falló:', err));
 
         const canvas = document.createElement('canvas');
         canvas.width = 320;
         canvas.height = 240;
         const ctx = canvas.getContext('2d');
         frameTimer = setInterval(() => {
-          if (!videoRef.current || !ctx || !webcamFrameCbRef.current) return;
-          ctx.drawImage(videoRef.current, 0, 0, 320, 240);
+          if (!ctx || !webcamFrameCbRef.current) return;
+          ctx.drawImage(video, 0, 0, 320, 240);
           const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
           const b64 = dataUrl.split(',')[1];
           if (b64) webcamFrameCbRef.current(b64);
         }, 1000);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.warn('[webcam] No se pudo abrir la cámara:', err);
         setWebcamActive(false);
       });
 
@@ -161,8 +156,8 @@ export function Rosorin3DViewer({
       if (activeStream) {
         activeStream.getTracks().forEach((t) => t.stop());
       }
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
+      if (video) {
+        video.srcObject = null;
       }
     };
   }, [webcamActive]);
@@ -171,8 +166,7 @@ export function Rosorin3DViewer({
   useEffect(() => {
     if (!enableKeyboard) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (shouldIgnoreShortcut(e)) return;
 
       const key = e.key.toLowerCase();
       switch (key) {
@@ -234,46 +228,46 @@ export function Rosorin3DViewer({
         }
         case 'arrowup':
           e.preventDefault();
-          if (effectiveLidarM < 0.25) {
-            setLastKeyPressed('BLOQUEADO POR LIDAR (<0.25m)');
+          if (effectiveLidarM < 0.28) {
+            setLastKeyPressed('BLOQUEADO POR LIDAR (<0.28m)');
           } else {
-            setLastKeyPressed('Avanzar Mecanum');
+            setLastKeyPressed('Avanzar');
             move?.(0.15, 0, 0);
           }
           break;
         case 'arrowdown':
           e.preventDefault();
-          setLastKeyPressed('Retroceder Mecanum');
+          setLastKeyPressed('Retroceder');
           move?.(-0.15, 0, 0);
           break;
         case 'arrowleft':
           e.preventDefault();
-          setLastKeyPressed('Strafe Izquierda');
+          setLastKeyPressed('Deslizar a la izquierda');
           move?.(0, 0.15, 0);
           break;
         case 'arrowright':
           e.preventDefault();
-          setLastKeyPressed('Strafe Derecha');
+          setLastKeyPressed('Deslizar a la derecha');
           move?.(0, -0.15, 0);
           break;
         case 'f':
-          setLastKeyPressed('Gesto: Facepalm');
+          setLastKeyPressed('Gesto: mano a la frente');
           trigger?.('facepalm');
           break;
         case 'g':
-          setLastKeyPressed('Gesto: Trash Toss');
+          setLastKeyPressed('Gesto: tirar a la basura');
           trigger?.('trash_toss');
           break;
         case 'h':
-          setLastKeyPressed('Gesto: Chef Kiss');
+          setLastKeyPressed('Gesto: beso de chef');
           trigger?.('chef_kiss');
           break;
         case 'v':
-          setLastKeyPressed('Gesto: Victory Spin');
+          setLastKeyPressed('Gesto: giro de victoria');
           trigger?.('victory_spin');
           break;
         case '0':
-          setLastKeyPressed('Reset Home');
+          setLastKeyPressed('Posición inicial');
           setLocalLidarM(null);
           onResetScene?.();
           break;
@@ -298,7 +292,6 @@ export function Rosorin3DViewer({
   }, [webcamActive]);
 
   useEffect(() => {
-    if (liteMode) return;
     const container = mountRef.current;
     if (!container) return;
 
@@ -317,7 +310,7 @@ export function Rosorin3DViewer({
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap; // PCFSoft was removed in three r18x
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
@@ -578,6 +571,7 @@ export function Rosorin3DViewer({
     bughunterGroup.visible = sceneMode === 'bughunter';
     rosWorld.add(bughunterGroup);
 
+    const labelTextures: THREE.Texture[] = [];
     const createTotemLabelSprite = (title: string, accentHex: string) => {
       const canvas = document.createElement('canvas');
       canvas.width = 512;
@@ -605,6 +599,7 @@ export function Rosorin3DViewer({
       }
       const tex = new THREE.CanvasTexture(canvas);
       tex.needsUpdate = true;
+      labelTextures.push(tex);
       const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
       const sprite = new THREE.Sprite(mat);
       sprite.scale.set(0.13, 0.036, 1);
@@ -714,6 +709,7 @@ export function Rosorin3DViewer({
 
     let loadedCount = 0;
     let disposed = false;
+    setMeshErrors([]);
     for (const item of stlList) {
       loader.load(
         item.url,
@@ -736,14 +732,18 @@ export function Rosorin3DViewer({
           setMeshesLoaded(loadedCount);
         },
         undefined,
-        () => {
-          // Ignore individual mesh load error gracefully
+        (err) => {
+          if (disposed) return;
+          const file = item.url.split('/').pop() || item.url;
+          console.warn(`[3d] No se pudo cargar la malla ${item.url}:`, err);
+          setMeshErrors((prev) => (prev.includes(file) ? prev : [...prev, file]));
         }
       );
     }
 
     let animId = 0;
     let lastFrameTime = performance.now();
+    const ledColor = new THREE.Color();
     const animate = () => {
       animId = requestAnimationFrame(animate);
       const now = performance.now();
@@ -756,9 +756,9 @@ export function Rosorin3DViewer({
       camCone.visible = webcamActiveRef.current;
 
       if (st.rgb) {
-        const c = new THREE.Color(st.rgb[0] / 255, st.rgb[1] / 255, st.rgb[2] / 255);
-        ledRingMat.color.copy(c);
-        ledRingMat.emissive.copy(c);
+        ledColor.setRGB(st.rgb[0] / 255, st.rgb[1] / 255, st.rgb[2] / 255);
+        ledRingMat.color.copy(ledColor);
+        ledRingMat.emissive.copy(ledColor);
       }
 
       const targetX = st.odometry?.x_m || 0;
@@ -885,9 +885,10 @@ export function Rosorin3DViewer({
           }
         }
       });
+      for (const tex of labelTextures) tex.dispose();
       renderer.dispose();
     };
-  }, [sceneMode, liteMode]);
+  }, [sceneMode]);
 
   const gripperPulse = telemetry.servos?.['10'] ?? 500;
 
@@ -902,6 +903,11 @@ export function Rosorin3DViewer({
               Simulador 3D{' '}
               <span className="font-normal text-[#5F6368]">({meshesLoaded}/16 piezas)</span>
             </span>
+            {meshErrors.length > 0 && (
+              <span role="alert" className="text-xs font-bold text-[#D93025]">
+                No cargó: {meshErrors.join(', ')}
+              </span>
+            )}
           </div>
           <div className="h-4 w-px bg-[#DADCE0]" />
           <span className="text-xs font-medium text-[#5F6368]">
@@ -913,6 +919,7 @@ export function Rosorin3DViewer({
           <button
             type="button"
             onClick={handleToggleObstacle}
+            aria-pressed={lidarBlocked}
             className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition-colors ${
               lidarBlocked
                 ? 'border-[#D93025] bg-[#D93025] text-white'
@@ -927,13 +934,14 @@ export function Rosorin3DViewer({
           <button
             type="button"
             onClick={() => setWebcamActive((v) => !v)}
+            aria-pressed={webcamActive}
             className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition-colors ${
               webcamActive
                 ? 'border-[#1A73E8] bg-[#1A73E8] text-white'
                 : 'border-[#DADCE0] bg-[#F8F9FA] text-[#202124] hover:border-[#1A73E8]'
             }`}
           >
-            {webcamActive ? 'Webcam: Activa' : 'Webcam'}
+            {webcamActive ? 'Cámara web: activa' : 'Cámara web'}
           </button>
 
           {onResetScene && (
@@ -942,7 +950,7 @@ export function Rosorin3DViewer({
               onClick={onResetScene}
               className="rounded-lg border border-[#DADCE0] bg-[#F8F9FA] px-3 py-1.5 text-xs font-bold text-[#5F6368] hover:border-[#1A73E8] hover:text-[#1A73E8]"
             >
-              Reset
+              Reiniciar
             </button>
           )}
         </div>

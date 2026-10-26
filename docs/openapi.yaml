@@ -1,44 +1,160 @@
 openapi: 3.1.0
 info:
-  title: ROSOrin Pro Rust Bridge API (rosorin-bridge)
-  version: 1.0.0
-  description: >
-    Especificación formal HTTP REST y WebSocket del puente determinista en Rust (`rosorin-bridge`)
-    para el robot manipulador móvil Hiwonder ROSOrin Pro y su simulador cinemático 3D.
+  title: API de rosorin-bridge
+  version: 1.1.0
+  summary: Bridge HTTP y WebSocket en Rust para el Hiwonder ROSOrin Pro.
+  description: |
+    Contrato HTTP del binario `rosorin-bridge` (carpeta `robot-bridge/`), que mueve el chasis Mecanum,
+    el brazo (servos 1 a 5 y pinza 10), los LEDs, el buzzer y el HUD de `/face`, y transmite la telemetría.
+
+    **Seguridad**
+    - Por defecto escucha en `127.0.0.1`. Fuera de loopback exige `BRIDGE_TOKEN` (sale con código 2 sin él,
+      salvo `--insecure-no-token`).
+    - Con token definido, todas las rutas lo piden menos `GET /health` y los preflight `OPTIONS`.
+      Va en `x-bridge-token` o `Authorization: Bearer`; `?token=` solo se acepta en `GET /ws`.
+    - El header `Host` debe ser una IP, `localhost` o un nombre de `BRIDGE_ALLOWED_HOSTS` (si no, 403 `forbidden_host`).
+    - Si viene `Origin`, debe ser una IP de loopback o privada, `localhost`, `jsconfmx26.web.app`,
+      `jsconfmx26.firebaseapp.com` o un origen exacto de `BRIDGE_ALLOWED_ORIGINS` (si no, 403 `forbidden_origin`).
+    - Límite global de 30 POST/s con ráfaga de 60; `/stop` y `/estop/release` no cuentan.
+    - Cuerpos de máximo 8 KiB (413).
+
+    **Paro de emergencia:** `POST /stop` enclava la E-stop y las rutas de movimiento responden 423 hasta
+    `POST /estop/release`.
+
+    **Errores:** los del bridge son JSON `{status, message}`. Los 400 por JSON mal formado, 413, 415 y 422
+    los genera axum y su cuerpo es texto plano.
+
+    **WebSocket `/ws`:** descrito en la operación `GET /ws`.
   license:
     name: MIT
-    url: https://opensource.org/licenses/MIT
+    identifier: MIT
   contact:
     name: Adrián Catalán (@adriancs.tech)
     url: https://github.com/ykro/rosorin-jsconf
 servers:
   - url: http://localhost:9000
-    description: Simulador cinemático local en laptop (--backend mock)
+    description: Bridge en tu laptop (--backend mock, solo loopback)
   - url: http://{robot_ip}:9000
-    description: Robot físico Hiwonder ROSOrin Pro en red Wi-Fi (--backend ros2 | serial)
+    description: Bridge en el robot (--backend ros2 | serial, 0.0.0.0 con token)
     variables:
       robot_ip:
-        default: localhost
-        description: Dirección IP del Jetson Orin Nano en la red local
+        default: 192.168.1.20
+        description: IP del Jetson Orin Nano en la red local
+security:
+  - bridgeToken: []
+  - bearerToken: []
+tags:
+  - name: estado
+    description: Salud, telemetría y cámara
+  - name: movimiento
+    description: Rutas que mueven el robot (423 con la E-stop enclavada)
+  - name: perifericos
+    description: HUD, LEDs y simulación
+  - name: seguridad
+    description: Paro de emergencia
 paths:
+  /health:
+    get:
+      tags: [estado]
+      summary: Comprobar que el bridge está vivo
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: El bridge responde
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    const: ok
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /status:
     get:
-      summary: Obtener estado instantáneo de telemetría
+      tags: [estado]
+      summary: Obtener la telemetría actual
       operationId: getStatus
       responses:
         '200':
-          description: Instantánea actual del estado del robot o simulador
+          description: Telemetría del robot o del simulador
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TelemetryState'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /camera/frame:
+    get:
+      tags: [estado]
+      summary: Obtener el último cuadro de la cámara o una vista sintética
+      operationId: getCameraFrame
+      description: >
+        Con `ros2` devuelve el último JPEG de `/depth_cam/rgb0/image_raw` (hasta 2 por segundo). Sin imagen
+        devuelve un SVG sintético. Pide token: en el navegador usa `fetch` con el header, no un `<img src>` directo.
+      responses:
+        '200':
+          description: Imagen JPEG de la cámara o SVG sintético
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                contentMediaType: image/jpeg
+            image/svg+xml:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /ws:
+    get:
+      tags: [estado]
+      summary: Abrir el WebSocket de telemetría y comandos
+      operationId: openWebSocket
+      description: |
+        Upgrade a WebSocket. El token se acepta en header o en `?token=` (solo en esta ruta).
+        Mensajes y tramas de máximo 64 KiB.
+
+        **Servidor → cliente:** un `TelemetryState` al conectar y luego uno cada 50 ms (20 Hz).
+        Los errores de comandos llegan como `WsErrorEvent` (`{"event":"error","op":…,"status":…,"message":…}`).
+        La telemetría nunca trae la clave `event`.
+
+        **Cliente → servidor:** `WsClientCommand` con el discriminador `op`: `cmd_vel`, `gesture`, `arm`, `jog`,
+        `reset_scene` o `stop`. Se comportan igual que sus rutas HTTP; todas menos `stop` cuentan para el
+        límite de peticiones. No hay `op` para liberar la E-stop.
+      security:
+        - bridgeToken: []
+        - bearerToken: []
+        - queryToken: []
+      parameters:
+        - name: Upgrade
+          in: header
+          required: true
+          schema:
+            const: websocket
+      responses:
+        '101':
+          description: Conexión WebSocket establecida
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /cmd_vel:
     post:
-      summary: Comandar velocidad en el chasis omnidireccional Mecanum
+      tags: [movimiento]
+      summary: Mover el chasis Mecanum por un tiempo acotado
       operationId: postCmdVel
       description: >
-        Aplica velocidades lineales (`±0.25 m/s`) y angulares (`±0.80 rad/s`) durante `100..2500 ms`
-        sujetas al freno autónomo por LiDAR (`front_m < 0.28 m` a 40 Hz) y al deadman watchdog (`600 ms`).
+        Recorta a ±0.25 m/s (±0.15 m/s con el backend serial, que no tiene LiDAR) y ±0.8 rad/s.
+        `duration_ms` se recorta a 100..2500 y por defecto vale el watchdog (600 ms). Mientras está vigente,
+        el loop reenvía la velocidad cada ~100 ms. Freno por eje en cada tick de 40 Hz: `vx>0` con front,
+        `vx<0` con back, `vy>0` con left y `vy<0` con right por debajo de 0.28 m; con cualquier sector por
+        debajo de 0.28 m, |wz| ≤ 0.3. Con `ros2` y sin scan en más de 300 ms la velocidad aplicada es 0.
       requestBody:
         required: true
         content:
@@ -47,18 +163,32 @@ paths:
               $ref: '#/components/schemas/CmdVelRequest'
       responses:
         '200':
-          description: Velocidad aplicada
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ActionResponse'
+          $ref: '#/components/responses/Action'
+        '400':
+          $ref: '#/components/responses/MalformedJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '423':
+          $ref: '#/components/responses/EstopLatched'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /arm:
     post:
-      summary: Posicionar múltiples servos del brazo 6-DOF
+      tags: [movimiento]
+      summary: Mover varios servos del brazo
       operationId: postArm
       description: >
-        Valida que cada ID pertenezca a `{1, 2, 3, 4, 5, 10}` e interpola hacia los pulsos objetivo
-        a 900 pulsos/s en el loop de 40 Hz aplicando `clamp_servo_pulse`.
+        Entre 1 y 6 servos con IDs de {1, 2, 3, 4, 5, 10} (si no, 400). Cada posición se recorta al rango
+        del servo y `duration_ms` a 120..5000. La telemetría interpola a |Δ|/duración pulsos por segundo,
+        recortado a 150..1800.
       requestBody:
         required: true
         content:
@@ -67,17 +197,31 @@ paths:
               $ref: '#/components/schemas/ArmRequest'
       responses:
         '200':
-          description: Trayectoria de brazo aceptada
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ActionResponse'
+          $ref: '#/components/responses/Action'
         '400':
-          description: ID de servo inválido (fuera de {1, 2, 3, 4, 5, 10})
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '423':
+          $ref: '#/components/responses/EstopLatched'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /servo/jog:
     post:
-      summary: Ajustar incrementalmente el pulso de un servo individual
+      tags: [movimiento]
+      summary: Ajustar el pulso de un servo
       operationId: postServoJog
+      description: >
+        `id` en {1, 2, 3, 4, 5, 10} y `delta` en -300..300 (si no, 400). El pulso final se recorta al rango
+        del servo y se aplica en 120 ms.
       requestBody:
         required: true
         content:
@@ -86,17 +230,62 @@ paths:
               $ref: '#/components/schemas/ServoJogRequest'
       responses:
         '200':
-          description: Pulso incrementado/decrementado dentro de límites seguros
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ActionResponse'
+          $ref: '#/components/responses/Action'
         '400':
-          description: ID de servo inválido (fuera de {1, 2, 3, 4, 5, 10})
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '423':
+          $ref: '#/components/responses/EstopLatched'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /arm/jog:
+    post:
+      tags: [movimiento]
+      summary: Alias de /servo/jog
+      operationId: postArmJog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServoJogRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Action'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '423':
+          $ref: '#/components/responses/EstopLatched'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /gesture:
     post:
-      summary: Ejecutar una coreografía física compuesta
+      tags: [movimiento]
+      summary: Ejecutar una coreografía
       operationId: postGesture
+      description: >
+        Acepta los 21 gestos y sus alias (sin distinguir mayúsculas); un nombre desconocido da 404.
+        La respuesta llega de inmediato y los pasos corren en segundo plano hasta que otro comando o /stop
+        los cancela.
       requestBody:
         required: true
         content:
@@ -105,49 +294,50 @@ paths:
               $ref: '#/components/schemas/GestureRequest'
       responses:
         '200':
-          description: Coreografía iniciada en segundo plano
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ActionResponse'
-  /hud:
+          $ref: '#/components/responses/Action'
+        '400':
+          $ref: '#/components/responses/MalformedJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '423':
+          $ref: '#/components/responses/EstopLatched'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /scene/reset:
     post:
-      summary: Actualizar el rostro expresivo y teleprompter (/face)
-      operationId: postHud
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/HudUpdateRequest'
+      tags: [movimiento]
+      summary: Volver a la posición inicial
+      operationId: postSceneReset
+      description: >
+        Detiene el chasis, lleva el brazo a `home`, pone la odometría en (0, 0, 0), `held_object` en
+        `deploy_key` y `pointed_totem` en null.
       responses:
         '200':
-          description: HUD actualizado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ActionResponse'
-  /rgb:
-    post:
-      summary: Cambiar el color de los LEDs WS2812 del robot
-      operationId: postRgb
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RgbRequest'
-      responses:
-        '200':
-          description: Color RGB aplicado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ActionResponse'
+          $ref: '#/components/responses/Action'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '423':
+          $ref: '#/components/responses/EstopLatched'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /buzzer:
     post:
-      summary: Emitir tono en el buzzer de la placa STM32
+      tags: [movimiento]
+      summary: Hacer sonar el buzzer del STM32
       operationId: postBuzzer
+      description: '`repeat` se limita a 5 y `on_ms`/`off_ms` a 2000.'
       requestBody:
         required: true
         content:
@@ -156,15 +346,93 @@ paths:
               $ref: '#/components/schemas/BuzzerRequest'
       responses:
         '200':
-          description: Buzzer activado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ActionResponse'
+          $ref: '#/components/responses/Action'
+        '400':
+          $ref: '#/components/responses/MalformedJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '423':
+          $ref: '#/components/responses/EstopLatched'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /hud:
+    post:
+      tags: [perifericos]
+      summary: Actualizar el HUD de /face
+      operationId: postHud
+      description: >
+        Actualiza solo los campos enviados. `headline` y `subtext` se cortan a 200 caracteres (un `headline`
+        vacío se ignora) y `mood` a 64. Funciona con la E-stop enclavada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HudUpdateRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Action'
+        '400':
+          $ref: '#/components/responses/MalformedJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /rgb:
+    post:
+      tags: [perifericos]
+      summary: Cambiar el color de los LEDs
+      operationId: postRgb
+      description: >
+        Funciona con la E-stop enclavada. En el backend serial la trama de LEDs aún no está implementada:
+        solo cambia la telemetría.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RgbRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Action'
+        '400':
+          $ref: '#/components/responses/MalformedJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /simulate/lidar:
     post:
-      summary: Simular distancia frontal de obstáculo en el LiDAR (solo modo mock)
+      tags: [perifericos]
+      summary: Simular distancias del LiDAR (solo mock)
       operationId: postSimulateLidar
+      description: >
+        Solo con `--backend mock`; en otro backend responde 403 `forbidden`. Cada sector se recorta a
+        0.05..5.0 m y el freno se vuelve a evaluar en el momento.
       requestBody:
         required: true
         content:
@@ -173,75 +441,175 @@ paths:
               $ref: '#/components/schemas/LidarSimRequest'
       responses:
         '200':
-          description: Distancia frontal simulada actualizada
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ActionResponse'
+          $ref: '#/components/responses/Action'
+        '400':
+          $ref: '#/components/responses/MalformedJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '403':
-          description: Prohibido en hardware real (solo disponible en --backend mock)
-  /scene/reset:
-    post:
-      summary: Reiniciar odometría, motores y pose neutral del brazo
-      operationId: postSceneReset
-      responses:
-        '200':
-          description: Escena reiniciada a valores iniciales
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ActionResponse'
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /stop:
     post:
-      summary: Parada de emergencia inmediata de chasis y brazo
+      tags: [seguridad]
+      summary: Paro de emergencia (enclava la E-stop)
       operationId: postStop
+      description: >
+        Cancela el gesto activo, pone el chasis en 0, apaga el buzzer y congela el brazo donde está (no lo
+        lleva a `home`). `estop_latched` pasa a true y `active_gesture` a `stopped`. No cuenta para el límite
+        de peticiones.
       responses:
         '200':
-          description: Motores detenidos y brazo en posición segura
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ActionResponse'
-  /camera/frame:
-    get:
-      summary: Obtener último frame de la cámara 3D Aurora 930 o vista sintética
-      operationId: getCameraFrame
+          $ref: '#/components/responses/Action'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /estop/release:
+    post:
+      tags: [seguridad]
+      summary: Liberar la E-stop
+      operationId: postEstopRelease
+      description: Única forma de liberar la E-stop. No cuenta para el límite de peticiones.
       responses:
         '200':
-          description: Imagen JPEG de la cámara o SVG sintético
-          content:
-            image/jpeg:
-              schema:
-                type: string
-                format: binary
-            image/svg+xml:
-              schema:
-                type: string
+          $ref: '#/components/responses/Action'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 components:
+  securitySchemes:
+    bridgeToken:
+      type: apiKey
+      in: header
+      name: x-bridge-token
+      description: Valor de BRIDGE_TOKEN.
+    bearerToken:
+      type: http
+      scheme: bearer
+      description: 'Authorization: Bearer <BRIDGE_TOKEN>.'
+    queryToken:
+      type: apiKey
+      in: query
+      name: token
+      description: Solo se acepta en GET /ws.
+  responses:
+    Action:
+      description: Comando aceptado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ActionResponse'
+    InvalidRequest:
+      description: Parámetros fuera del contrato (`invalid_request`) o JSON mal formado (texto plano de axum)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: invalid_request
+            message: delta fuera de rango (-300..300)
+        text/plain:
+          schema:
+            type: string
+    MalformedJson:
+      description: JSON mal formado (texto plano generado por axum)
+      content:
+        text/plain:
+          schema:
+            type: string
+          example: 'Failed to parse the request body as JSON: key must be a string at line 1 column 2'
+    Unauthorized:
+      description: Falta el token o no coincide
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: unauthorized
+            message: Falta el token del bridge o no coincide (Authorization Bearer o x-bridge-token).
+    Forbidden:
+      description: Host u origen no permitidos, o /simulate/lidar fuera de mock
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: forbidden_origin
+            message: Origen no permitido. Agrégalo a BRIDGE_ALLOWED_ORIGINS si es tuyo.
+    NotFound:
+      description: Gesto desconocido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: not_found
+            message: Gesto desconocido
+    PayloadTooLarge:
+      description: Cuerpo de más de 8 KiB (texto plano de axum)
+      content:
+        text/plain:
+          schema:
+            type: string
+    UnsupportedMediaType:
+      description: Falta `Content-Type application/json` (texto plano de axum)
+      content:
+        text/plain:
+          schema:
+            type: string
+    UnprocessableEntity:
+      description: JSON válido con tipos o campos incorrectos (texto plano de axum)
+      content:
+        text/plain:
+          schema:
+            type: string
+    EstopLatched:
+      description: E-stop enclavada; libérala con POST /estop/release
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: estop_latched
+            message: Paro de emergencia activo. POST /estop/release para liberar.
+    RateLimited:
+      description: Más de 30 POST/s (ráfaga de 60)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: rate_limited
+            message: Demasiadas solicitudes de movimiento. Intenta de nuevo en un momento.
   schemas:
     CmdVelRequest:
       type: object
       properties:
         linear_x:
           type: number
-          default: 0.0
-          minimum: -0.25
-          maximum: 0.25
+          default: 0
+          description: m/s; se recorta a ±0.25 (±0.15 con serial)
         linear_y:
           type: number
-          default: 0.0
-          minimum: -0.25
-          maximum: 0.25
+          default: 0
+          description: m/s; se recorta a ±0.25 (±0.15 con serial)
         angular_z:
           type: number
-          default: 0.0
-          minimum: -0.8
-          maximum: 0.8
+          default: 0
+          description: rad/s; se recorta a ±0.8
         duration_ms:
           type: integer
-          default: 600
-          minimum: 100
-          maximum: 2500
+          minimum: 0
+          description: Se recorta a 100..2500; por defecto el watchdog (600 ms)
     ServoTarget:
       type: object
       required: [id, position]
@@ -251,8 +619,9 @@ components:
           enum: [1, 2, 3, 4, 5, 10]
         position:
           type: integer
-          minimum: 100
-          maximum: 900
+          minimum: 0
+          maximum: 65535
+          description: Se recorta al rango del servo (por ejemplo 220..780 en el servo 2)
     ArmRequest:
       type: object
       required: [servos]
@@ -260,10 +629,13 @@ components:
         duration_ms:
           type: integer
           default: 500
-          minimum: 120
-          maximum: 5000
+          minimum: 0
+          maximum: 65535
+          description: Se recorta a 120..5000
         servos:
           type: array
+          minItems: 1
+          maxItems: 6
           items:
             $ref: '#/components/schemas/ServoTarget'
     ServoJogRequest:
@@ -283,7 +655,8 @@ components:
       properties:
         name:
           type: string
-          enum:
+          description: Gesto o alias (sin distinguir mayúsculas)
+          examples:
             - home
             - facepalm
             - trash_toss
@@ -307,6 +680,7 @@ components:
             - bumblebee_sassy
         mood:
           type: string
+          maxLength: 64
     HudUpdateRequest:
       type: object
       properties:
@@ -316,10 +690,13 @@ components:
           type: boolean
         headline:
           type: string
+          description: Se corta a 200 caracteres; vacío se ignora
         subtext:
           type: string
+          description: Se corta a 200 caracteres
         mood:
           type: string
+          description: Se corta a 64 caracteres
     RgbRequest:
       type: object
       required: [r, g, b]
@@ -342,25 +719,42 @@ components:
         freq_hz:
           type: integer
           default: 1900
+          minimum: 0
+          maximum: 65535
         on_ms:
           type: integer
           default: 150
+          minimum: 0
+          maximum: 65535
+          description: Se limita a 2000
         off_ms:
           type: integer
           default: 50
+          minimum: 0
+          maximum: 65535
+          description: Se limita a 2000
         repeat:
           type: integer
           default: 1
+          minimum: 0
+          maximum: 65535
+          description: Se limita a 5
     LidarSimRequest:
       type: object
       required: [front_m]
       properties:
         front_m:
           type: number
-          minimum: 0.05
-          maximum: 5.0
+          description: Se recorta a 0.05..5.0
+        left_m:
+          type: number
+        right_m:
+          type: number
+        back_m:
+          type: number
     OdometryState:
       type: object
+      description: Integrada desde la velocidad comandada, no desde encoders
       required: [x_m, y_m, yaw_rad, vx, vy, wz]
       properties:
         x_m:
@@ -377,18 +771,28 @@ components:
           type: number
     LidarSummary:
       type: object
+      description: Distancia mínima por sector; con lidar_source `none` los valores no son reales
       required: [front_m, left_m, right_m, back_m, obstacle_alert]
       properties:
         front_m:
           type: number
+          minimum: 0.05
+          maximum: 12.0
         left_m:
           type: number
+          minimum: 0.05
+          maximum: 12.0
         right_m:
           type: number
+          minimum: 0.05
+          maximum: 12.0
         back_m:
           type: number
+          minimum: 0.05
+          maximum: 12.0
         obstacle_alert:
           type: boolean
+          description: true si algún sector está a menos de 0.35 m (siempre false con lidar_source `none`)
     TelemetryState:
       type: object
       required:
@@ -410,25 +814,39 @@ components:
         - lidar
         - last_command_ms_ago
         - timestamp_ms
+        - estop_latched
+        - lidar_stale
+        - lidar_source
       properties:
         backend:
           type: string
+          description: >
+            mock, mock (serial-fallback), mock (ros2-fallback), serial, o el nombre que reporta
+            ros2_worker.py (stm32-board (/dev/rrc @ 1Mbps) o ros2-topics)
+          examples: [mock, serial, stm32-board (/dev/rrc @ 1Mbps), ros2-topics]
         connected:
           type: boolean
         battery_mv:
           type: integer
+          description: Solo es real con el worker conectado al STM32; si no, queda en 11850
         servos:
           type: object
           additionalProperties:
             type: integer
+            minimum: 100
+            maximum: 900
         target_servos:
           type: object
           additionalProperties:
             type: integer
+            minimum: 100
+            maximum: 900
         rgb:
           type: array
           items:
             type: integer
+            minimum: 0
+            maximum: 255
           minItems: 3
           maxItems: 3
         active_gesture:
@@ -436,9 +854,11 @@ components:
         mood:
           type: string
         held_object:
-          type: [string, 'null']
+          type: string
+          examples: [deploy_key, released_approved, released_rejected]
         pointed_totem:
           type: [string, 'null']
+          enum: [cloud_run, gemini_live, firestore, null]
         speaking:
           type: boolean
         listening:
@@ -453,16 +873,113 @@ components:
           $ref: '#/components/schemas/LidarSummary'
         last_command_ms_ago:
           type: integer
+          minimum: 0
         timestamp_ms:
           type: integer
+          minimum: 0
+        estop_latched:
+          type: boolean
+        lidar_stale:
+          type: boolean
+          description: Con ros2, true si no hay scan en más de 300 ms (chasis bloqueado)
+        lidar_source:
+          type: string
+          enum: [mock, ros2, none]
     ActionResponse:
       type: object
       required: [status, action, telemetry]
       properties:
         status:
-          type: string
           const: ok
         action:
           type: string
+          examples: ['cmd_vel(vx=0.14, vy=0.00, wz=0.00)', estop_release]
         telemetry:
           $ref: '#/components/schemas/TelemetryState'
+    ErrorResponse:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          enum:
+            - invalid_request
+            - unauthorized
+            - forbidden_host
+            - forbidden_origin
+            - forbidden
+            - not_found
+            - estop_latched
+            - rate_limited
+        message:
+          type: string
+    WsClientCommand:
+      description: Mensaje del cliente por /ws
+      oneOf:
+        - type: object
+          required: [op]
+          properties:
+            op:
+              const: cmd_vel
+            linear_x:
+              type: number
+            linear_y:
+              type: number
+            angular_z:
+              type: number
+            duration_ms:
+              type: integer
+        - type: object
+          required: [op, name]
+          properties:
+            op:
+              const: gesture
+            name:
+              type: string
+            mood:
+              type: string
+        - type: object
+          required: [op, servos]
+          properties:
+            op:
+              const: arm
+            duration_ms:
+              type: integer
+            servos:
+              type: array
+              items:
+                $ref: '#/components/schemas/ServoTarget'
+        - type: object
+          required: [op, id, delta]
+          properties:
+            op:
+              const: jog
+            id:
+              type: integer
+            delta:
+              type: integer
+        - type: object
+          required: [op]
+          properties:
+            op:
+              const: reset_scene
+        - type: object
+          required: [op]
+          properties:
+            op:
+              const: stop
+    WsErrorEvent:
+      description: Error de un comando recibido por /ws
+      type: object
+      required: [event, op, status, message]
+      properties:
+        event:
+          const: error
+        op:
+          type: string
+          description: Operación que falló, o `unknown` si el mensaje no era un comando válido
+        status:
+          type: string
+          enum: [estop_latched, rate_limited, invalid_request, not_found]
+        message:
+          type: string

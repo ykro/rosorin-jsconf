@@ -1,23 +1,24 @@
-# Guía de Onboarding y Ejecución
+# Guía de onboarding y modos de ejecución
 
-![Modos de Ejecución: Simulador en Laptop vs Conexión a Robot Físico](./assets/onboarding-modes.svg)
+![Modos de ejecución: simulador en la laptop y laptop conectada al robot](./assets/onboarding-modes.svg)
 
-Puedes ejecutar el proyecto en **dos modos** utilizando exactamente el mismo código TypeScript y el mismo binario compilado en Rust (`rosorin-bridge`):
+El mismo código TypeScript y el mismo binario de Rust (`rosorin-bridge`, en la carpeta `robot-bridge/`) sirven para dos modos:
 
-1. **Modo 1 · Simulador 3D en tu Laptop (`--mock`)**: Ejecuta la cinemática Mecanum, la interpolación de los 6 servos y los sensores simulados en tu propia laptop sin necesidad del robot físico.
-2. **Modo 2 · Laptop Conectada al Robot Físico por Wi-Fi (`--robot-ip <IP>`)**: La interfaz web, el visor 3D a `60 FPS` y la captura de micrófono corren en tu laptop (`http://localhost:3000`) y envían los comandos físicos por Wi-Fi hacia el puente del robot (`http://<IP_DEL_ROBOT>:9000`).
-
----
-
-## 1. Requisitos Previos
-
-- **Node.js** `>= 22.6` y `npm`
-- **Rust** (`cargo` `>= 1.75`) — `./run.sh` lo instala automáticamente si no está presente.
-- **API Key de Gemini**: Puedes ingresarla directamente en la barra superior de la aplicación web (se guarda en `localStorage` bajo `rosorin_gemini_api_key`) o copiar `web/.env.example` a `web/.env.local` para desarrollo local.
+1. **Simulador en tu laptop (`--mock`).** El bridge simula el chasis Mecanum, los 6 servos y el LiDAR en memoria. No necesitas robot.
+2. **Laptop conectada al robot por Wi-Fi (`--robot-ip <IP>`).** La web, el gemelo 3D y el micrófono corren en tu laptop (`http://localhost:3000`) y los comandos viajan por Wi-Fi al bridge del robot (`http://<IP_DEL_ROBOT>:9000`), protegido con token.
 
 ---
 
-## 2. Modo 1: Correr Todo en tu Laptop (Simulador 3D)
+## 1. Requisitos
+
+- **Node.js 22** ([`.nvmrc`](../.nvmrc); `web/package.json` exige `>= 22.6`) y `npm`.
+- **Rust con `cargo >= 1.87`**. Si falta, `./run.sh` pregunta antes de instalarlo con rustup; en una terminal no interactiva aborta salvo con `--yes` o `ASSUME_YES=1`. Lo mismo hace con Node (vía fnm).
+- **API key de Gemini** de [Google AI Studio](https://aistudio.google.com/apikey). Pégala en el navegador (botón «Ingresar API Key» de la consola de cada demo, o panel «Gemini Live API Key» en `/demo`); se guarda en `localStorage` como `rosorin_gemini_api_key`. Para desarrollo local puedes copiar [`web/.env.example`](../web/.env.example) a `web/.env.local` y llenar `NEXT_PUBLIC_GEMINI_API_KEY`, pero no hagas `npm run build` ni despliegues con ella: quedaría en el bundle público.
+- **En el robot:** Ubuntu 22.04 con ROS 2 Humble y el SDK de Hiwonder (lo usa `robot-bridge/scripts/ros2_worker.py`).
+
+---
+
+## 2. Modo 1: todo en tu laptop
 
 ```bash
 git clone https://github.com/ykro/rosorin-jsconf.git
@@ -25,66 +26,147 @@ cd rosorin-jsconf
 ./run.sh --mock
 ```
 
-Este comando levanta automáticamente dos procesos locales:
-- **Puente cinemático en Rust (`cargo run -- --backend mock`)**: `http://localhost:9000` (con stream WebSocket a `20 Hz` en `ws://localhost:9000/ws`).
-- **Aplicación Web Next.js 15**: `http://localhost:3000`.
+Levanta dos procesos:
 
-### Rutas disponibles en el navegador
-- `http://localhost:3000` — **Hub Completo con Clon 3D** (control manual de servos `1..5` y pinza `10`, cruceta Mecanum, telemetría LiDAR y acceso a los 4 demos).
-- `http://localhost:3000/robot` — **Hub Ligero sin 3D** (controles de hardware de alto contraste sin carga WebGL).
-- `http://localhost:3000/demos/roaster` — **Demo A · Repo Roaster**
-- `http://localhost:3000/demos/gatekeeper` — **Demo B · Physical CI/CD Gatekeeper**
-- `http://localhost:3000/demos/bughunter` — **Demo C · Spatial Bug Hunter**
-- `http://localhost:3000/demos/bumblebee` — **Demo D · Modo Bumblebee Radio** (`168 clips`: `95 ES` / `73 EN`)
-- `http://localhost:3000/face` — **Rostro Expresivo y Pantalla Táctil Integrada**
-- `http://localhost:3000/props` — **Plantillas Imprimibles 1:1** (`rosorin-stage-props-print.pdf`).
+- **Bridge en Rust** (`cargo run --release -- --backend mock --host 127.0.0.1 --port 9000`): `http://localhost:9000`, con telemetría por WebSocket a 20 Hz en `ws://localhost:9000/ws`. Solo escucha en loopback y, en este modo, no pide token.
+- **Web Next.js 15** en `http://localhost:3000`, también solo en `127.0.0.1`.
+
+`run.sh` imprime la URL que debes abrir. En mock es `http://localhost:3000/`.
+
+Prueba el bridge desde la terminal:
+
+```bash
+curl http://localhost:9000/health      # {"status":"ok"}
+curl http://localhost:9000/status      # telemetría completa
+```
+
+### Rutas de la web
+
+| Ruta | Para qué |
+|---|---|
+| `/` y `/simulator` | Inicio con enlaces a slides, simulador y código. |
+| `/demo` | Simulador 3D con control de servos 1 a 5 y pinza 10, cruceta Mecanum, LiDAR y accesos a las demos. |
+| `/robot` | Consola ligera sin WebGL. |
+| `/demos/roaster` | Demo A · Repo Roaster. |
+| `/demos/gatekeeper` | Demo B · Gatekeeper CI/CD. |
+| `/demos/bughunter` | Demo C · Bug Hunter. |
+| `/demos/bumblebee` | Demo D · Bumblebee Radio (168 clips: 95 ES / 73 EN). |
+| `/face` | Rostro para la pantalla táctil de 7" del robot. |
+| `/presenter` | Pantalla del presentador. |
+| `/props` | Props imprimibles a escala 1:1 (`rosorin-stage-props-print.pdf`). |
 
 ---
 
-## 3. Modo 2: Conectar tu Laptop al Robot Físico por Wi-Fi
+## 3. Modo 2: tu laptop conectada al robot
 
-### Paso 1: Iniciar el puente en el Jetson Orin Nano del Robot
-Conéctate por SSH al Jetson Orin Nano del ROSOrin Pro y ejecuta:
+### Paso 1: actualizar el repo en el robot
 
-```bash
-cd ~/Desktop/rosorin-jsconf
-git pull
-./run.sh
-```
-
-En el robot, `./run.sh` detecta automáticamente el entorno **ROS 2 Humble** y la placa **STM32** (`/dev/rrc` @ `1 Mbps`), libera los servicios en segundo plano que acaparan el puerto serial y levanta `rosorin-bridge` en el puerto `:9000`.
-
-Puedes verificar desde tu laptop que el puente del robot responde consultando su estado:
+Conéctate por SSH al Jetson Orin Nano del ROSOrin Pro. El historial del repositorio se reescribió (se sacaron los MP3), así que `git pull` falla en copias viejas. Actualiza así:
 
 ```bash
-curl http://<IP_DEL_ROBOT>:9000/status
+cd <ruta-del-repo>
+git fetch origin
+git reset --hard origin/main   # descarta cambios locales sin commit
 ```
 
-### Paso 2: Levantar la Web en tu Laptop con `--robot-ip`
-En tu laptop, ejecuta `./run.sh` pasando la dirección IP del robot con la bandera `--robot-ip` (o `--ip`):
+### Paso 2: levantar el bridge en el robot
+
+```bash
+make robot            # equivale a ./run.sh --bridge-only
+```
+
+En el robot, `run.sh`:
+
+- Carga ROS 2 Humble (`/opt/ros/humble`, `~/ros2_ws`, `~/mission_ws`) y elige el backend `ros2` (o `serial` si no hay ROS 2 pero existe `/dev/rrc` o `/dev/ttyACM0`). Como el backend se autodetectó, pasa `--allow-mock-fallback`: si el hardware no arranca, cae a mock y lo avisa.
+- Toma el token de `BRIDGE_TOKEN` o de `.bridge-token`; si no existe, genera uno con `openssl rand -hex 16` y lo guarda en `.bridge-token` con permisos `600`.
+- Detiene con `sudo` `button_scan.service` y `start_app_node.service`, que ocupan `/dev/rrc`. Mientras corre el bridge, el botón físico de fábrica no actúa: usa el paro de emergencia de la web.
+- No toca `wifi.service`. Si existe `~/.openclaw/workspace/ESTOP_LOCK` (el candado de paro de otra app), aborta sin borrarlo.
+- Levanta `rosorin-bridge` en `0.0.0.0:9000` con el token por variable de entorno (no aparece en `ps`).
+
+Si corres `./run.sh` en el robot sin `--bridge-only`, también levanta la web en el propio robot (`127.0.0.1:3000`, modo ligero). Para la pantalla de 7" está `./iniciar-robot.sh`, que arranca bridge y web si hace falta y abre `/face?token=<token>` en modo kiosco.
+
+### Paso 3: traer el token a tu laptop
+
+```bash
+scp <usuario>@<IP_DEL_ROBOT>:<ruta-del-repo>/.bridge-token .bridge-token
+chmod 600 .bridge-token
+```
+
+También puedes exportarlo a mano: `BRIDGE_TOKEN=<token> ./run.sh --robot-ip <IP_DEL_ROBOT>`.
+
+Comprueba que el bridge responde:
+
+```bash
+curl http://<IP_DEL_ROBOT>:9000/health                                        # público
+curl -H "x-bridge-token: $(cat .bridge-token)" http://<IP_DEL_ROBOT>:9000/status
+```
+
+### Paso 4: levantar la web en tu laptop
 
 ```bash
 ./run.sh --robot-ip <IP_DEL_ROBOT>
 ```
 
-También puedes cambiar el puente en caliente desde cualquier ruta del navegador agregando el parámetro `?bridge=`:
-- `http://localhost:3000?bridge=http://<IP_DEL_ROBOT>:9000`
-- `http://localhost:3000/robot?bridge=http://<IP_DEL_ROBOT>:9000`
+Sin token, el script se detiene y te dice cómo traerlo. Con token, imprime una URL como:
+
+```text
+http://localhost:3000/?token=<token>&bridge=http://<IP_DEL_ROBOT>:9000
+```
+
+Ábrela. La web guarda el token en `localStorage` (`ROSORIN_BRIDGE_TOKEN`) y la URL del bridge (`ROSORIN_BRIDGE_URL`), y quita el token de la barra de direcciones. Desde ahí lo manda como `x-bridge-token` en cada petición y como `?token=` al abrir `/ws`.
+
+Otras formas de pasar el token o el bridge:
+
+- Pulsa la píldora del robot en la barra superior: abre un panel con la URL del bridge, el token, «Conectar al robot» y «Paro de emergencia».
+- `?bridge=http://<IP>:9000` en cualquier ruta cambia el bridge (solo acepta `localhost` o IPs de la red local); `?bridge=reset` y `?token=reset` borran lo guardado.
+
+Nunca pongas el token en una variable `NEXT_PUBLIC_*`: se incrusta en el bundle.
+
+> [!IMPORTANT]
+> **¿Por qué `http://localhost:3000` y no la IP del robot en el navegador?** El micrófono (`getUserMedia`) solo funciona en contextos seguros: `https://` o `http://localhost`. Además, el sitio público (`https://jsconfmx26.web.app`) no sirve para el robot físico: su CSP solo permite `localhost:9000` y `127.0.0.1:9000`, y una página `https://` no puede llamar a una IP `http://` de la red local.
 
 ---
 
-## 4. Banderas Soportadas por `./run.sh`
+## 4. Paro de emergencia
 
-| Bandera | Ejemplo | Descripción |
+- **Activar:** botón «Paro de emergencia» del panel del robot, botón **PARO** en `/face`, `make reset` en la máquina del bridge o `curl -X POST -H "x-bridge-token: <token>" http://<IP>:9000/stop`.
+- **Efecto:** motores a 0, brazo congelado donde está (no vuelve a `home`) y E-stop enclavada. Toda ruta de movimiento responde `423 estop_latched` y la web muestra el banner «Paro de emergencia activo».
+- **Liberar:** botón «Liberar» del banner, `make release` o `curl -X POST -H "x-bridge-token: <token>" http://<IP>:9000/estop/release`.
+
+---
+
+## 5. Banderas de `./run.sh`
+
+`./run.sh --help` muestra la misma lista. Una bandera desconocida es un error.
+
+| Bandera | Ejemplo | Qué hace |
 |---|---|---|
-| `--mock` | `./run.sh --mock` | Fuerza el simulador cinemático en memoria (`--backend mock`) en `localhost:9000`. |
-| `--robot-ip <IP>` / `--ip <IP>` | `./run.sh --robot-ip 10.0.0.42` | Inicia el frontend en tu laptop (`localhost:3000`) conectado al `robot-bridge` remoto del robot en `<IP>:9000`. |
-| `--ros2` | `./run.sh --ros2` | Fuerza el backend de tópicos de ROS 2 Humble (`ros2_worker.py`). |
-| `--serial` | `./run.sh --serial` | Fuerza comunicación serial binaria directa con la placa STM32 (`/dev/rrc` a `1 Mbps`). |
-| `--bridge-only` | `./run.sh --bridge-only` | Compila y ejecuta únicamente el servidor `rosorin-bridge` en Rust sin iniciar Next.js. |
-| `--web-port <PORT>` | `./run.sh --web-port 3001` | Cambia el puerto HTTP de la aplicación Next.js (por defecto `3000`). |
-| `--bridge-port <PORT>` | `./run.sh --bridge-port 9001` | Cambia el puerto HTTP/WS de `rosorin-bridge` (por defecto `9000`). |
+| `--mock` | `./run.sh --mock` | Fuerza el backend mock. Bridge en `127.0.0.1`. |
+| `--serial` | `./run.sh --serial` | Fuerza el backend serial directo al STM32 (`/dev/rrc`, 1 Mbps). No tiene LiDAR: velocidad lineal máxima 0.15 m/s. Si falla, el bridge sale con error. |
+| `--ros2` | `./run.sh --ros2` | Fuerza el backend ROS 2 (`ros2_worker.py`). Si falla, el bridge sale con error. |
+| `--bridge-only` | `./run.sh --bridge-only` | Solo el bridge, sin la web. Escucha en `0.0.0.0` con token. |
+| `--robot-ip <IP>` / `--ip <IP>` | `./run.sh --robot-ip 10.0.0.42` | Solo la web en tu laptop, contra el bridge de `<IP>:9000`. Exige token. |
+| `--port <W:B>` / `-p` | `./run.sh --port 3001:9001` | Puertos de web y bridge. Con un solo número decide por el valor (menor a 6000 es la web). |
+| `--web-port <P>` | `./run.sh --web-port 3001` | Puerto de la web (3000 por defecto). |
+| `--bridge-port <P>` | `./run.sh --bridge-port 9001` | Puerto del bridge (9000 por defecto). |
+| `--web-lan` | `./run.sh --mock --web-lan` | Expone la web en `0.0.0.0`. Por defecto solo `127.0.0.1`. |
+| `--yes` / `-y` | `./run.sh --yes` | Instala Rust o Node sin preguntar si faltan. |
+| `--help` / `-h` | `./run.sh --help` | Muestra la ayuda. |
 
-> [!IMPORTANT]
-> **¿Por qué abrir `http://localhost:3000` en la laptop usando `--robot-ip` en lugar de abrir la IP remota en el navegador?**
-> Los navegadores modernos restringen `navigator.mediaDevices.getUserMedia` (el micrófono para Gemini Live) a contextos seguros (`https://` o `http://localhost`). Al correr `./run.sh --robot-ip <IP_DEL_ROBOT>` en tu laptop, el navegador opera sobre `http://localhost:3000` con acceso total al micrófono y GPU local a `60 FPS`, mientras despacha las acciones físicas por Wi-Fi a `<IP_DEL_ROBOT>:9000`.
+Variables de entorno que lee `run.sh`: `BRIDGE_TOKEN`, `ROBOT_BACKEND` (explícito, sin caída a mock), `ROBOT_IP`, `WEB_PORT`, `BRIDGE_PORT`, `ASSUME_YES`, `WEB_LAN`. Las del bridge están en [`robot-bridge/.env.example`](../robot-bridge/.env.example) y las de la web en [`web/.env.example`](../web/.env.example).
+
+---
+
+## 6. Problemas comunes
+
+| Síntoma | Causa y solución |
+|---|---|
+| El bridge sale con código `2` | Escucha fuera de loopback sin `BRIDGE_TOKEN`. Define el token o usa `--host 127.0.0.1`. |
+| El bridge sale con código `1` | El backend pedido (`--serial`, `--ros2` o `ROBOT_BACKEND`) no arrancó, o el nombre no existe. |
+| Banner «El bridge pide token» | Falta el token o no coincide. Pégalo en el panel del robot o abre la web con `?token=`. |
+| `403 forbidden_origin` o `forbidden_host` | La página o el nombre del robot no están permitidos. Agrega el origen a `BRIDGE_ALLOWED_ORIGINS` o el nombre (por ejemplo `rosorin.local`) a `BRIDGE_ALLOWED_HOSTS`. |
+| Banner «LiDAR sin datos: chasis bloqueado» | Con `ros2` no llega `/scan` desde hace más de 300 ms (o el worker murió). El brazo sigue funcionando; revisa el driver del LiDAR con `ros2 topic hz /scan`. |
+| El robot no avanza aunque no hay nada enfrente | Revisa la sombra del brazo: si el brazo aparece entre 0.12 m y 0.28 m frente al LiDAR, el freno se activa. Ajusta `ARM_SHADOW_MAX_M` y `ARM_SHADOW_HALF_ANGLE_DEG`. |
+| Todo responde `423` | La E-stop está enclavada. Libérala con «Liberar» o `make release`. |
+| `429 rate_limited` | Más de 30 POST por segundo (ráfaga de 60). `/stop` siempre pasa. |
+| `git pull` falla en el robot | El historial se reescribió: `git fetch origin && git reset --hard origin/main`. |

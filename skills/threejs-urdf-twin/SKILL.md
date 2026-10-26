@@ -1,39 +1,66 @@
 ---
 name: threejs-urdf-twin
-description: Use when building a 60 FPS 3D Digital Twin in Three.js from manufacturer URDF/STL CAD meshes — fixing inverted STL normals (DoubleSide + computeVertexNormals), nested kinematic joint chains (J1..J5 + parallel gripper), and real-time 20 Hz WebSocket servo interpolation.
+description: Úsalo al construir un gemelo digital en Three.js a partir de mallas STL de un paquete URDF del fabricante — normales invertidas (DoubleSide + computeVertexNormals), cadena de articulaciones URDF (J1..J5 y pinza paralela), suavizado independiente de los FPS desde telemetría WebSocket a 20 Hz, mallas que no cargan y liberación de recursos.
 ---
 
-# Three.js URDF/STL Digital Twin for Robotics (`threejs-urdf-twin`)
+# Gemelo digital en Three.js desde URDF y STL (`threejs-urdf-twin`)
 
-## Overview
+## Resumen
 
-When rendering manufacturer CAD `.stl` meshes from a ROS 2 URDF package inside a browser with Three.js, raw meshes frequently appear transparent or inside-out due to mirrored CAD exports and Z-up vs Y-up coordinate frames. This skill codifies the exact patterns used in `web/src/components/Rosorin3DViewer.tsx` to build a 60 FPS interactive 3D digital twin synchronized over WebSocket (`20 Hz`) with a `40 Hz` Rust kinematics bridge.
+Las mallas `.stl` de un paquete URDF suelen verse transparentes o al revés en el navegador: caras con orientación inconsistente, normales sin calcular y ejes Z-up de ROS contra Y-up de Three.js. Este skill resume cómo lo resuelve `web/src/components/Rosorin3DViewer.tsx`, que dibuja el ROSOrin Pro con 16 mallas y lo mueve con la telemetría que el bridge en Rust manda por WebSocket a 20 Hz.
 
-## 1. Fixing Transparent / Inside-Out CAD `.stl` Meshes
+## 1. Mallas transparentes o al revés
 
-Manufacturer `.stl` exports (such as `r_in_link.stl`, `r_out_link.stl`, `l_in_link.stl`, `l_out_link.stl`, and chassis assemblies) often have inconsistent face winding or uncomputed normals:
-1. Always call `geometry.computeVertexNormals()` immediately inside the `STLLoader.load()` callback.
-2. Always set `side: THREE.DoubleSide` on every `THREE.MeshStandardMaterial` and attach subtle edge lines (`THREE.EdgesGeometry(geometry, 35)`) for crisp industrial silhouette definition.
-3. Rotate the root ROS coordinate group by `rosWorld.rotation.x = -Math.PI / 2` so ROS standard coordinates (`+X` forward, `+Y` left, `+Z` up) map cleanly onto Three.js Y-up space.
+1. Llama a `geometry.computeVertexNormals()` dentro del callback de `STLLoader.load()`.
+2. Usa `side: THREE.DoubleSide` en los materiales y agrega aristas (`THREE.EdgesGeometry(geometry, 35)`) para marcar la silueta.
+3. Rota el grupo raíz de ROS con `rosWorld.rotation.x = -Math.PI / 2` para que `+X` adelante, `+Y` izquierda, `+Z` arriba quede bien en el espacio Y-up.
+4. Maneja el error de carga: si una malla no existe, la UI muestra «No cargó: <archivo>» en lugar de quedarse a medias sin aviso.
+
+Así está en el componente:
 
 ```typescript
-loader.load(item.url, (geometry) => {
-  geometry.computeVertexNormals();
-  const mesh = new THREE.Mesh(geometry, item.mat);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
+loader.load(
+  item.url,
+  (geometry) => {
+    if (disposed) {
+      geometry.dispose();
+      return;
+    }
+    geometry.computeVertexNormals();
+    const mesh = new THREE.Mesh(geometry, item.mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
 
-  const edges = new THREE.EdgesGeometry(geometry, 35);
-  const lines = new THREE.LineSegments(edges, solidEdgeMat);
-  mesh.add(lines);
+    const edges = new THREE.EdgesGeometry(geometry, 35);
+    const lines = new THREE.LineSegments(edges, solidEdgeMat);
+    mesh.add(lines);
 
-  item.target.add(mesh);
-});
+    item.target.add(mesh);
+    loadedCount += 1;
+    setMeshesLoaded(loadedCount);
+  },
+  undefined,
+  (err) => {
+    if (disposed) return;
+    const file = item.url.split('/').pop() || item.url;
+    console.warn(`[3d] No se pudo cargar la malla ${item.url}:`, err);
+    setMeshErrors((prev) => (prev.includes(file) ? prev : [...prev, file]));
+  }
+);
 ```
 
-## 2. Exact URDF Kinematic Chain & `pulseToRadians` (`web/src/components/Rosorin3DViewer.tsx`)
+`disposed` evita agregar a una escena ya destruida una malla que terminó de cargar tarde.
 
-Instead of recalculating world matrices manually, mirror the exact URDF `xyz`, `rpy` (`ZYX` intrinsic order), and rotation `axis` using `createUrdfJoint`:
+Para las sombras usa `THREE.PCFShadowMap`: three 0.186 avisa que `PCFSoftShadowMap` ya no existe.
+
+```typescript
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap; // PCFSoft was removed in three r18x
+```
+
+## 2. Cadena URDF y conversión de pulsos
+
+En lugar de calcular matrices a mano, replica el `xyz`, el `rpy` (orden `ZYX`) y el `axis` de cada articulación del URDF:
 
 ```typescript
 interface JointNode {
@@ -76,13 +103,35 @@ function pulseToRadians(id: number, pulse: number): number {
 }
 ```
 
-### Symmetric 4-Bar Parallel Linkage for Gripper (`Servo ID 10`)
+Los servos usan pulsos `0..1000` para `0..240°`, con `500` al centro.
 
-In the animation loop (`60 FPS`), damp each joint angle toward its target (`0.2` factor) and drive all 6 linkage pivots of the parallel gripper (`rJoint`, `rInJoint`, `rOutJoint`, `lJoint`, `lInJoint`, `lOutJoint`) from `pulseToRadians(10, p10)` so both claws stay parallel as they open (`220`) and close (`680`):
+## 3. Suavizado independiente de los FPS
+
+La telemetría llega a 20 Hz y el navegador dibuja a su propia tasa (60, 120 Hz…). Un factor fijo por cuadro (`* 0.2`) haría que el gemelo se mueva más rápido en pantallas de 120 Hz. El componente calcula el factor con el `dt` real del cuadro:
+
+```typescript
+const now = performance.now();
+const dt = Math.min(0.1, Math.max(0.001, (now - lastFrameTime) / 1000));
+lastFrameTime = now;
+const lerpAlpha = 1 - Math.exp(-12 * dt);
+```
+
+y lo aplica igual a la posición del chasis y a cada articulación:
+
+```typescript
+for (const [jn, targetRad] of joints) {
+  jn.currentAngle += (targetRad - jn.currentAngle) * lerpAlpha;
+  jn.pivot.setRotationFromAxisAngle(jn.axis, jn.currentAngle);
+}
+```
+
+### Pinza paralela de 4 barras (servo 10)
+
+Las 6 articulaciones de la pinza se mueven desde un solo ángulo para que ambas garras queden paralelas al abrir (220) y cerrar (680):
 
 ```typescript
 const gRad = pulseToRadians(10, p10);
-rJoint.currentAngle += (gRad - rJoint.currentAngle) * 0.25;
+rJoint.currentAngle += (gRad - rJoint.currentAngle) * lerpAlpha;
 const openAngle = rJoint.currentAngle;
 rJoint.pivot.setRotationFromAxisAngle(rJoint.axis, openAngle);
 rInJoint.pivot.setRotationFromAxisAngle(rInJoint.axis, openAngle);
@@ -93,7 +142,39 @@ lInJoint.pivot.setRotationFromAxisAngle(lInJoint.axis, -openAngle);
 lOutJoint.pivot.setRotationFromAxisAngle(lOutJoint.axis, openAngle);
 ```
 
-## 3. Dual-Backend Parity (`--backend mock` vs `--backend ros2`)
+## 4. Liberar recursos
 
-- Keep physical trajectory interpolation in the Rust bridge (`40 Hz` tick, `900.0 * dt_s` pulses/s, `Arc<Mutex<TelemetryState>>`) and apply visual damping in `requestAnimationFrame` (`60 FPS`).
-- Broadcast `TelemetryState` over WebSocket at `20 Hz` (`ws://<host>:9000/ws`) so the 3D model moves identically whether connected to the laptop simulator (`--backend mock`) or the physical robot (`--backend ros2` / `--backend serial`).
+Al desmontar, libera geometrías, materiales, texturas y el renderer. `material.dispose()` no libera las texturas que usa el material, por eso las `CanvasTexture` de las etiquetas se guardan en `labelTextures` y se liberan aparte:
+
+```typescript
+return () => {
+  disposed = true;
+  resizeObserver.disconnect();
+  cancelAnimationFrame(animId);
+  controls.dispose();
+  scene.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (mesh.geometry) {
+      mesh.geometry.dispose();
+    }
+    if (mesh.material) {
+      if (Array.isArray(mesh.material)) {
+        mesh.material.forEach((m) => m.dispose());
+      } else {
+        mesh.material.dispose();
+      }
+    }
+  });
+  for (const tex of labelTextures) tex.dispose();
+  renderer.dispose();
+};
+```
+
+Reutiliza objetos en el loop de animación (por ejemplo un solo `THREE.Color` para el LED) en vez de crear uno por cuadro.
+
+## 5. Misma telemetría para simulador y robot
+
+- La trayectoria de los servos la calcula el bridge en Rust (loop de 40 Hz, cada servo a `|Δ| / duración` pulsos por segundo, recortado a `150..1800`). El navegador solo suaviza.
+- La telemetría llega por `ws://<host>:9000/ws?token=<t>` a 20 Hz, igual con `--backend mock` que con `ros2` o `serial`. Los mensajes que traen la clave `event` son errores de comandos, no telemetría.
+- **En el bridge, la odometría solo se integra desde la velocidad comandada** (no desde encoders): ningún gesto aplica «saltos» de posición. Los `point_*` (Bug Hunter) se desplazan con su velocidad real.
+- Sin bridge, `use-robot-telemetry.ts` simula una telemetría local para que el gemelo siga respondiendo. Ahí los `point_*` tampoco tocan la odometría, pero otros gestos (`wave_hello`, los `bumblebee_*`…) todavía aplican desplazamientos aproximados (`LOCAL_GESTURE_TARGETS`), así que la pose local puede diferir de la del bridge.

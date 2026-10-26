@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Los 3 Loops Concurrentes en Tokio y Memoria Compartida</title>
+  <title>Tareas concurrentes en Tokio y estado compartido</title>
   <style>
     body {
       margin: 0;
@@ -28,8 +28,8 @@
 <body>
   <div class="diagram-container">
     <svg viewBox="0 0 1280 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="rust-control-loops-title rust-control-loops-desc" id="rust-control-loops-root">
-  <title id="rust-control-loops-title">Los 3 Loops Concurrentes en Tokio y Memoria Compartida</title>
-  <desc id="rust-control-loops-desc">Tres tareas asíncronas en Tokio sincronizan el navegador a 20 Hz, reciben comandos WebSocket/REST y ejecutan la cinemática a 40 Hz sobre Arc Mutex TelemetryState.</desc>
+  <title id="rust-control-loops-title">Tareas concurrentes en Tokio y estado compartido</title>
+  <desc id="rust-control-loops-desc">Una tarea de Tokio corre el loop de 40 Hz y publica la telemetría cada 2 ticks; cada cliente WebSocket tiene una tarea de envío y otra de recepción; axum atiende HTTP; un hilo aparte escribe al hardware. Todo comparte el RobotController con un Mutex de MotionGate y otro de TelemetryState.</desc>
   <defs>
     <style>
       #rust-control-loops-root {
@@ -72,23 +72,26 @@
 
   <!-- Node 2: Task 1 -->
   <rect x="368" y="96" width="368" height="84" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
-  <text x="392" y="134" fill="#2d3142" font-size="20" font-weight="700">1. Broadcast WS (20 Hz)</text>
-  <text x="392" y="162" fill="#4f5d75" font-size="16">Envía snapshot cada 50 ms</text>
+  <text x="392" y="134" fill="#2d3142" font-size="20" font-weight="700">1. Envío WS por cliente</text>
+  <text x="392" y="162" fill="#4f5d75" font-size="16">Snapshot cada 50 ms (20 Hz)</text>
 
   <!-- Node 3: Task 2 -->
   <rect x="368" y="202" width="368" height="84" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
-  <text x="392" y="240" fill="#2d3142" font-size="20" font-weight="700">2. Receptor REST y WS</text>
+  <text x="392" y="240" fill="#2d3142" font-size="20" font-weight="700">2. HTTP y recepción WS</text>
   <text x="392" y="268" fill="#4f5d75" font-size="16" class="mono">cmd_vel · gesture · arm · stop</text>
 
   <!-- Node 4: Task 3 -->
   <rect x="368" y="308" width="368" height="84" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
-  <text x="392" y="346" fill="#2d3142" font-size="20" font-weight="700">3. Loop Físico (40 Hz)</text>
-  <text x="392" y="374" fill="#4f5d75" font-size="16">Cinemática y seguridad cada 25 ms</text>
+  <text x="392" y="346" fill="#2d3142" font-size="20" font-weight="700">3. Loop de control (40 Hz)</text>
+  <text x="392" y="374" fill="#4f5d75" font-size="16">tick(dt) y broadcast cada 2 ticks</text>
 
   <!-- Node 5: Shared State -->
   <rect x="800" y="184" width="416" height="120" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
-  <text x="824" y="236" fill="#2d3142" font-size="20" font-weight="700" class="mono">Arc&lt;Mutex&lt;TelemetryState&gt;&gt;</text>
-  <text x="824" y="274" fill="#4f5d75" font-size="16">Servos, Odometría y 4 sectores LiDAR</text>
+  <text x="824" y="236" fill="#2d3142" font-size="20" font-weight="700" class="mono">Arc&lt;RobotController&gt;</text>
+  <text x="824" y="274" fill="#4f5d75" font-size="16">Mutex&lt;MotionGate&gt; + Mutex&lt;TelemetryState&gt;</text>
+
+  <!-- Writer thread (outside the Tokio runtime) -->
+  <text x="364" y="448" fill="#4f5d75" font-size="15">Fuera de Tokio: un hilo escribe al serial o al stdin del worker (solo la última velocidad).</text>
 </svg>
   </div>
 </body>

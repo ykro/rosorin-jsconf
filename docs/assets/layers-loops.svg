@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg viewBox="0 0 1280 540" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="layers-loops-title layers-loops-desc" id="layers-loops-root">
   <title id="layers-loops-title">Capas del Sistema y Loops Concurrentes en Tiempo Real</title>
-  <desc id="layers-loops-desc">Desacoplamiento entre la inferencia multimodal en la nube (~350 ms), la interfaz web (60 FPS), el puente determinista en Rust (40 Hz) y el bus serial del robot (1 Mbps).</desc>
+  <desc id="layers-loops-desc">Desacoplamiento entre la inferencia multimodal en la nube (~350 ms), la interfaz web (60 FPS), el bridge en Rust (40 Hz) y el bus serial del robot (1 Mbps).</desc>
   <defs>
     <style>
       #layers-loops-root {
@@ -31,12 +31,12 @@
 
   <!-- Layer 3 -->
   <rect x="64" y="200" width="604" height="84" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
-  <text x="88" y="238" fill="#2d3142" font-size="20" font-weight="700">Capa 3 · Cockpit Web (Next.js 15)</text>
-  <text x="88" y="266" fill="#4f5d75" font-size="16">Clon 3D Three.js y Barge-In a 60 FPS</text>
+  <text x="88" y="238" fill="#2d3142" font-size="20" font-weight="700">Capa 3 · Web y gemelo 3D (Next.js 15)</text>
+  <text x="88" y="266" fill="#4f5d75" font-size="16">Three.js, voz 16/24 kHz y barge-in</text>
 
   <!-- Layer 2 -->
   <rect x="64" y="300" width="604" height="84" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
-  <text x="88" y="338" fill="#2d3142" font-size="20" font-weight="700">Capa 2 · Puente Rust (rosorin-bridge :9000)</text>
+  <text x="88" y="338" fill="#2d3142" font-size="20" font-weight="700">Capa 2 · Bridge en Rust (rosorin-bridge :9000)</text>
   <text x="88" y="366" fill="#4f5d75" font-size="16">Cinemática a 40 Hz (25 ms) y WS a 20 Hz</text>
 
   <!-- Layer 1 -->
@@ -55,9 +55,9 @@
 
   <rect x="756" y="300" width="460" height="84" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
   <text x="780" y="338" fill="#2d3142" font-size="20" font-weight="700">3. Escudo LiDAR (&lt; 0.28 m)</text>
-  <text x="780" y="366" fill="#4f5d75" font-size="16">Frena avance vx &gt; 0 automáticamente</text>
+  <text x="780" y="366" fill="#4f5d75" font-size="16">Frena por eje (vx, vy) y limita wz</text>
 
   <rect x="756" y="400" width="460" height="84" rx="10" fill="#ffffff" stroke="#2e5aa8" stroke-width="1.6"/>
-  <text x="780" y="438" fill="#2d3142" font-size="20" font-weight="700">4. Compuerta Acústica (1,200 ms)</text>
+  <text x="780" y="438" fill="#2d3142" font-size="20" font-weight="700">4. Compuerta acústica (1200 ms)</text>
   <text x="780" y="466" fill="#4f5d75" font-size="16">Silencia el mic al mover los servos</text>
 </svg>

@@ -5,8 +5,12 @@ import dynamic from 'next/dynamic';
 import { TopNav } from '@/components/TopNav';
 import { ApiKeyCollapsible } from '@/components/ApiKeyCollapsible';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
+import { useLiteMode } from '@/lib/use-lite-mode';
+import type { LiveStatus } from '@/lib/live-connection';
 import {
+  BUMBLEBEE_DANCE_LABELS,
   BumblebeeRadioSession,
+  type PlaybackStatus,
   type RadioTurnLog,
   type SongClip,
 } from '@/lib/bumblebee-radio';
@@ -27,32 +31,46 @@ const QUICK_PROMPTS = [
 ];
 
 const DANCE_PRESETS = [
-  { id: 'bumblebee_hype', label: 'Fiesta Hype', color: 'bg-[#FBBC04] text-[#202124]' },
-  { id: 'bumblebee_groove', label: 'Ritmo Funk', color: 'bg-[#1A73E8] text-white' },
-  { id: 'bumblebee_rock_out', label: 'Rock Headbang', color: 'bg-[#EA4335] text-white' },
-  { id: 'bumblebee_romance', label: 'Romance FM', color: 'bg-[#E91E63] text-white' },
-  { id: 'bumblebee_sassy', label: 'Giro Sassy', color: 'bg-[#34A853] text-white' },
-  { id: 'bumblebee_sad_droop', label: 'Violines Tristes', color: 'bg-[#5F6368] text-white' },
+  { id: 'bumblebee_hype', color: 'bg-[#FBBC04] text-[#202124]' },
+  { id: 'bumblebee_groove', color: 'bg-[#1A73E8] text-white' },
+  { id: 'bumblebee_rock_out', color: 'bg-[#C5221F] text-white' },
+  { id: 'bumblebee_romance', color: 'bg-[#C2185B] text-white' },
+  { id: 'bumblebee_sassy', color: 'bg-[#188038] text-white' },
+  { id: 'bumblebee_sad_droop', color: 'bg-[#5F6368] text-white' },
 ];
 
-export default function BumblebeeDemoPage() {
-  const {
-    telemetry,
-    bridgeConnected,
-    jogServo,
-    moveChassis,
-    simulateLidar,
-    triggerGesture,
-    resetScene,
-  } = useRobotTelemetry();
+const CLIP_UNAVAILABLE_NOTICE =
+  'Clip no disponible en esta versión pública: se reproduce un barrido de radio.';
 
-  const [isLite, setIsLite] = useState(
-    process.env.NEXT_PUBLIC_LITE_MODE === '1'
-  );
+function dialLabel(playback: PlaybackStatus, connection: LiveStatus, micOpen: boolean): string {
+  if (playback === 'playing') return 'AL AIRE · BAILANDO';
+  if (playback === 'tuning') return 'SINTONIZANDO DIAL…';
+  switch (connection) {
+    case 'connecting':
+      return 'CONECTANDO A GEMINI LIVE…';
+    case 'reconnecting':
+      return 'RECONECTANDO…';
+    case 'error':
+      return 'ERROR DE CONEXIÓN · SOLO TEXTO';
+    case 'disconnected':
+      return 'DESCONECTADO';
+    case 'no_key':
+      return 'SIN API KEY · SOLO TEXTO';
+    case 'live':
+      return micOpen ? 'MIC ABIERTO (AudioWorklet 16 kHz)' : 'CONECTADO · SIN MICRÓFONO';
+    default:
+      return 'EN ESPERA';
+  }
+}
+
+export default function BumblebeeDemoPage() {
+  const robot = useRobotTelemetry();
+  const { telemetry, jogServo, moveChassis, simulateLidar, triggerGesture, resetScene } = robot;
+  const isLite = useLiteMode();
   const [catalog, setCatalog] = useState<SongClip[]>([]);
-  const [radioStatus, setRadioStatus] = useState<
-    'idle' | 'connecting' | 'live' | 'tuning' | 'playing'
-  >('idle');
+  const [connectionStatus, setConnectionStatus] = useState<LiveStatus>('idle');
+  const [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>('idle');
+  const [clipUnavailable, setClipUnavailable] = useState(false);
   const [conversationActive, setConversationActive] = useState(false);
   const [userTranscript, setUserTranscript] = useState('');
   const [nowPlaying, setNowPlaying] = useState<SongClip | null>(null);
@@ -68,32 +86,25 @@ export default function BumblebeeDemoPage() {
   const sessionRef = useRef<BumblebeeRadioSession | null>(null);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('lite') === '1' || process.env.NEXT_PUBLIC_LITE_MODE === '1') {
-        setIsLite(true);
-      } else {
-        window.localStorage.removeItem('ROSORIN_LITE_MODE');
-        setIsLite(false);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
     fetch('/songs/catalog.json')
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data: SongClip[]) => {
         setCatalog(data);
         sessionRef.current?.setCatalog(data);
       })
-      .catch(() => {});
+      .catch((err) => console.warn('[bumblebee] No se pudo cargar /songs/catalog.json:', err));
   }, []);
 
   useEffect(() => {
     const session = new BumblebeeRadioSession(
       { triggerGesture, moveChassis },
       {
-        onStatus: (st) => setRadioStatus(st),
+        onConnectionStatus: setConnectionStatus,
+        onPlaybackStatus: setPlaybackStatus,
+        onClipUnavailable: (clip) => setClipUnavailable(Boolean(clip)),
         onConversationActiveChange: (act) => setConversationActive(act),
         onUserTranscript: (txt) => setUserTranscript(txt),
         onNowPlaying: (clip, freq, cap) => {
@@ -112,9 +123,10 @@ export default function BumblebeeDemoPage() {
     sessionRef.current = session;
 
     return () => {
-      session.stopRadioConversation();
+      session.dispose();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // The catalog is pushed with setCatalog() below; recreating the session for it would drop the conversation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- catalog intentionally excluded
   }, [triggerGesture, moveChassis]);
 
   useEffect(() => {
@@ -126,7 +138,7 @@ export default function BumblebeeDemoPage() {
   const handleToggleConversation = async () => {
     if (!sessionRef.current) return;
     if (conversationActive) {
-      sessionRef.current.stopRadioConversation();
+      sessionRef.current.stopRadioConversation('user');
     } else {
       await sessionRef.current.startRadioConversation();
       await sessionRef.current.respondWithMusic(
@@ -178,7 +190,7 @@ export default function BumblebeeDemoPage() {
           <button
             type="button"
             onClick={handleToggleConversation}
-            className={`flex-1 rounded-xl px-5 py-3.5 text-sm font-extrabold shadow-xs transition-all active:scale-98 ${
+            className={`flex-1 rounded-xl px-5 py-3.5 text-sm font-extrabold shadow-xs transition-all active:scale-95 ${
               conversationActive
                 ? 'bg-[#D93025] text-white hover:bg-[#B31412]'
                 : 'bg-[#F9AB00] text-[#202124] hover:bg-[#EA8600]'
@@ -201,12 +213,16 @@ export default function BumblebeeDemoPage() {
         </div>
 
         {/* FM Tuner Display */}
-        <div className="mt-3.5 rounded-xl border border-[#202124] bg-[#111318] p-4 text-white">
+        <div
+          className="mt-3.5 rounded-xl border border-[#202124] bg-[#111318] p-4 text-white"
+          aria-label="Dial de la radio"
+        >
           <div className="flex items-center justify-between border-b border-white/10 pb-2">
             <div className="flex items-center gap-2">
               <span
+                aria-hidden="true"
                 className={`h-2.5 w-2.5 rounded-full ${
-                  radioStatus === 'playing'
+                  playbackStatus === 'playing'
                     ? 'animate-ping bg-[#FBBC04]'
                     : conversationActive
                       ? 'bg-[#34A853]'
@@ -216,14 +232,12 @@ export default function BumblebeeDemoPage() {
               <span className="font-mono text-xs font-bold tracking-wider text-[#FBBC04]">
                 {frequencyMhz}
               </span>
-              <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-white/80">
-                {radioStatus === 'playing'
-                  ? 'AL AIRE · BAILANDO'
-                  : radioStatus === 'tuning'
-                    ? 'SINTONIZANDO DIAL...'
-                    : conversationActive
-                      ? 'MIC ABIERTO (AudioWorklet 16 kHz)'
-                      : 'EN ESPERA'}
+              <span
+                role="status"
+                aria-live="polite"
+                className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-white/80"
+              >
+                {dialLabel(playbackStatus, connectionStatus, conversationActive)}
               </span>
             </div>
 
@@ -247,12 +261,21 @@ export default function BumblebeeDemoPage() {
                   {nowPlaying.title} — {nowPlaying.artist}
                 </span>
                 <span className="shrink-0 rounded bg-[#FBBC04] px-2 py-0.5 font-mono text-[10px] font-extrabold uppercase text-[#202124]">
-                  {nowPlaying.lang === 'es' ? 'ES' : 'EN'} · {nowPlaying.gesture}
+                  {nowPlaying.lang === 'es' ? 'ES' : 'EN'} ·{' '}
+                  {BUMBLEBEE_DANCE_LABELS[nowPlaying.gesture] ?? nowPlaying.gesture}
                 </span>
               </div>
               <p className="mt-1.5 font-display text-base font-extrabold leading-snug text-white">
                 “{nowPlaying.lyrics}”
               </p>
+              {clipUnavailable && (
+                <p
+                  role="status"
+                  className="mt-2 rounded-lg border border-[#FBBC04] bg-[#FBBC04]/15 px-2.5 py-1.5 text-[11px] font-semibold text-[#FDE293]"
+                >
+                  {CLIP_UNAVAILABLE_NOTICE}
+                </p>
+              )}
             </div>
           ) : (
             <p className="mt-2.5 text-xs leading-relaxed text-white/80">{radioCaption}</p>
@@ -266,7 +289,7 @@ export default function BumblebeeDemoPage() {
         </div>
 
         {micWarning && (
-          <p className="mt-3 rounded-xl border border-[#F9AB00] bg-[#FEF7E0] px-3.5 py-2 text-xs font-medium text-[#B06000]">
+          <p role="alert" className="mt-3 rounded-xl border border-[#F9AB00] bg-[#FEF7E0] px-3.5 py-2 text-xs font-medium text-[#B06000]">
             {micWarning}
           </p>
         )}
@@ -281,7 +304,11 @@ export default function BumblebeeDemoPage() {
           }}
           className="mt-3.5 flex gap-2"
         >
+          <label htmlFor="bumblebee-prompt-input" className="sr-only">
+            Mensaje para Bumblebee
+          </label>
           <input
+            id="bumblebee-prompt-input"
             type="text"
             value={customPrompt}
             onChange={(e) => setCustomPrompt(e.target.value)}
@@ -333,7 +360,7 @@ export default function BumblebeeDemoPage() {
               }}
               className={`rounded-xl px-3 py-2 text-xs font-extrabold shadow-2xs transition-transform active:scale-95 ${d.color}`}
             >
-              🕺 {d.label}
+              🕺 {BUMBLEBEE_DANCE_LABELS[d.id]}
             </button>
           ))}
         </div>
@@ -381,7 +408,7 @@ export default function BumblebeeDemoPage() {
   if (isLite) {
     return (
       <div className="flex min-h-screen w-screen flex-col bg-[#F8F9FA] text-[#202124]">
-        <TopNav bridgeConnected={bridgeConnected} liteMode={true} />
+        <TopNav robot={robot} liteMode={true} />
         <main className="mx-auto w-full max-w-2xl flex-1 p-6">{controlsColumn}</main>
       </div>
     );
@@ -389,7 +416,7 @@ export default function BumblebeeDemoPage() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#F8F9FA] text-[#202124]">
-      <TopNav bridgeConnected={bridgeConnected} liteMode={false} />
+      <TopNav robot={robot} liteMode={false} />
       <main className="flex h-[calc(100vh-56px)] w-full overflow-hidden">
         <aside className="flex w-[460px] shrink-0 flex-col overflow-y-auto border-r border-[#DADCE0] bg-[#F8F9FA] p-4">
           {controlsColumn}

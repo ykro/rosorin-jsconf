@@ -46,20 +46,17 @@ const HUB_DEMOS = [
 ];
 
 export default function DemoSimulatorPage() {
-  const {
-    telemetry,
-    bridgeConnected,
-    jogServo,
-    setServoPulse,
-    moveChassis,
-    simulateLidar,
-    triggerGesture,
-    resetScene,
-  } = useRobotTelemetry();
+  const robot = useRobotTelemetry();
+  const { telemetry, jogServo, setServoPulse, moveChassis, simulateLidar, triggerGesture, resetScene } =
+    robot;
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_LITE_MODE !== '1') {
-      window.localStorage.removeItem('ROSORIN_LITE_MODE');
+    if (process.env.NEXT_PUBLIC_LITE_MODE !== '1') {
+      try {
+        window.localStorage.removeItem('ROSORIN_LITE_MODE');
+      } catch (err) {
+        console.warn('[demo] localStorage no disponible:', err);
+      }
     }
   }, []);
 
@@ -69,7 +66,7 @@ export default function DemoSimulatorPage() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#F8F9FA] text-[#202124]">
-      <TopNav bridgeConnected={bridgeConnected} liteMode={false} />
+      <TopNav robot={robot} liteMode={false} />
 
       <main className="flex h-[calc(100vh-56px)] w-full overflow-hidden">
         {/* Left Side: Collapsible API Key + 4 Demo Buttons + Hardware Control Panel */}

@@ -1,49 +1,111 @@
-# Rust para Web Developers: Cómo funciona `robot-bridge`
+# Rust para web developers: cómo funciona `robot-bridge`
 
-![Modelo Mental: De TypeScript y Node.js a Rust en el Robot](./assets/rust-mental-model.svg)
+![Modelo mental: de Node.js y TypeScript a Rust](./assets/rust-mental-model.svg)
 
-Si vienes del mundo de **TypeScript, Node.js y Next.js**, el código de [`robot-bridge/`](../robot-bridge/src/main.rs) es sorprendentemente familiar. No necesitas ser experto en sistemas embebidos para entenderlo: cumple exactamente el rol de un servidor **Express + `ws`** ligero en el puerto **`:9000`** (`BRIDGE_PORT`), pero compilado a código nativo con garantías en tiempo de ejecución para proteger los motores físicos del robot.
+Si vienes de TypeScript y Node.js, [`robot-bridge/`](../robot-bridge/src/main.rs) se parece a un servidor Express con `ws` en el puerto 9000. La diferencia es que está compilado a código nativo y que sus reglas de seguridad no dependen de que el cliente se porte bien.
 
 ---
 
-## 1. El Modelo Mental: De Node.js a Rust
+## 1. Equivalencias
 
-| Concepto en Web (Node.js / TS) | Equivalente en `robot-bridge` (Rust) | ¿Por qué importa en robótica física? |
+| En Node.js / TypeScript | En `robot-bridge` | Por qué importa con un robot |
 | :--- | :--- | :--- |
-| **Node.js Event Loop** (`async/await`) | **`tokio` runtime** (`#[tokio::main]`) | Ejecuta tareas I/O concurrentes y timers exactos de `25 ms` (`40 Hz`) y `50 ms` (`20 Hz`) sin deriva temporal. |
-| **Express / Fastify + `ws`** | **`axum`** (`Router`, `WebSocketUpgrade`) | Levanta los endpoints HTTP REST y `/ws` en el puerto `:9000` con latencia sub-milisegundo. |
-| **Estado global en memoria** (`let state = {...}`) | **`Arc<Mutex<TelemetryState>>`** (en `BridgeService` / `AppState`) | El compilador garantiza en tiempo de compilación que ningún hilo corrompa la telemetría mientras otro la actualiza. |
-| **Zod + `JSON.parse()`** | **`serde` + `serde_json`** (`#[derive(Deserialize)]`) | Deserializa y valida tipos estrictamente antes de tocar un solo registro del hardware. |
-| **Driver Serial en JS (`serialport`)** | **Crate `serialport` (`1,000,000 bps`)** | Escribe tramas binarias `0xAA 0x55` con `CRC8` directamente en `/dev/rrc` (STM32) sin sobrecarga. |
-| **Garbage Collector (V8)** | **Ownership & Lifetimes (RAII)** | **0 ms de pausas de GC**. En un lazo de control a `40 Hz`, una pausa de 30 ms detendría un servo a mitad de trayectoria. |
+| Event loop (`async`/`await`) | Runtime de `tokio` (`#[tokio::main]`) | Corre el loop de control, el servidor HTTP y los WebSockets en el mismo proceso. |
+| Express + `ws` | `axum` (`Router`, `WebSocketUpgrade`, `middleware::from_fn_with_state`) | Rutas tipadas y capas de seguridad (host/origen, CORS, límite de cuerpo, token, rate limit) en orden fijo. |
+| Estado global (`let state = {…}`) | `Arc<RobotController>` con `Mutex<MotionGate>` y `Arc<Mutex<TelemetryState>>` | El compilador no deja compartir datos entre hilos sin un candado. |
+| Zod + `JSON.parse()` | `serde` (`#[derive(Deserialize)]`) | Un tipo incorrecto se rechaza con `422` antes de llegar al handler. |
+| `serialport` en Node | Crate `serialport` (1 000 000 bps) | Escribe las tramas `0xAA 0x55` con CRC8 al STM32. |
+| Recolector de basura de V8 | *Ownership* y RAII | El loop de 40 Hz no tiene pausas de GC. |
 
 ---
 
-## 2. Los 3 Loops Concurrentes en Memoria Compartida
+## 2. Qué corre en paralelo
 
-![Los 3 Loops Concurrentes en Tokio y Memoria Compartida](./assets/rust-control-loops.svg)
+![Tareas concurrentes en Tokio y estado compartido](./assets/rust-control-loops.svg)
 
-Cuando arrancas `cargo run -- --backend mock` (o `./run.sh --mock` en tu laptop, o el binario en el Jetson Orin Nano), `robot-bridge` inicializa `BridgeService` dentro de `AppState` con una única instancia de **`Arc<Mutex<TelemetryState>>`** y coordina tres tareas asíncronas (`tokio::spawn`) en paralelo:
+Al arrancar (`cargo run -- --backend mock`, `./run.sh --mock` o el binario en el Jetson), `main` crea un `RobotController` y lo comparte con `Arc`. Luego corren:
 
-1. **WebSocket Broadcast (`20 Hz` / cada `50 ms`)**: Cada 2 ticks del reloj de `40 Hz`, clona una instantánea de `TelemetryState` (`servos`, `target_servos`, `odometry`, batería y los **4 sectores del LiDAR** `front_m`, `left_m`, `right_m`, `back_m` + `obstacle_alert`) y la publica por un canal `tokio::sync::broadcast` a todos los clientes WebSocket conectados en `/ws`.
-2. **Receptor de Comandos HTTP REST y WebSocket (`WsClientCommand`)**: Escucha peticiones REST y mensajes WebSocket etiquetados con `"op"` (`cmd_vel`, `gesture`, `arm`, `jog`, `reset_scene`, `stop`), adquiere el `Mutex` durante microsegundos y actualiza las metas del robot.
-3. **Kinematics & Safety Loop (`40 Hz` / cada `25 ms`)**: Ejecuta `service.tick(0.025)` para integrar la odometría cinemática $(x, y, \theta)$ de las 4 llantas Mecanum, interpolar suavemente los pulsos de los 6 servos hacia su `target_servos` (`900 pulsos/s`) y aplicar las **4 barreras de seguridad física**.
+1. **Una tarea `tokio::spawn` para el loop de control.** Un `tokio::time::interval` de 25 ms llama a `tick(dt_s)` y, cada 2 ticks, publica la telemetría en un canal `broadcast`. El `dt` se mide de verdad y se acota, así que un tick que llega tarde no hace saltar la odometría:
+
+   ```rust
+   let dt_s = now
+       .duration_since(last_tick)
+       .as_secs_f32()
+       .clamp(0.005, 0.100);
+   last_tick = now;
+   tick_robot.tick(dt_s);
+   step += 1;
+   if step.is_multiple_of(2) {
+       let _ = tx.send(tick_robot.snapshot());
+   }
+   ```
+
+2. **El servidor `axum`.** Atiende cada petición HTTP en las tareas que `axum` crea por conexión.
+3. **Dos tareas por cada cliente WebSocket.** Una reenvía la telemetría del `broadcast` y los eventos de error; la otra lee los comandos (`cmd_vel`, `gesture`, `arm`, `jog`, `reset_scene`, `stop`).
+4. **Un hilo del sistema operativo para escribir al hardware.** Con `serial` escribe en `/dev/rrc`; con `ros2` escribe JSON en el stdin de `ros2_worker.py`. Si se juntan varias velocidades, solo escribe la última. Un error de escritura pone `connected = false`.
+5. **La supervisión.** `main` espera con `tokio::select!` al loop, al servidor y a las señales. Si el loop termina o hace *panic*, detiene los motores y sale con código 70.
+
+### Los dos candados
+
+- **`Mutex<MotionGate>`** decide qué llega a los motores: guarda si la E-stop está enclavada, la época del gesto activo (cada comando nuevo la incrementa y cancela el gesto anterior), el plazo del `cmd_vel` vigente y el último envío al driver. Revisar la E-stop y encolar el comando ocurren con este candado tomado, así un gesto viejo no puede mover el robot después de un `/stop`.
+- **`Arc<Mutex<TelemetryState>>`** guarda lo que se reporta: servos, odometría, LiDAR, HUD y banderas. El orden de toma es siempre *gate* → *state*.
+
+Son `std::sync::Mutex`, no `tokio::sync::Mutex`: se toman por microsegundos y nunca a través de un `.await`.
+
+### Qué hace `tick(dt_s)`
+
+1. **Seguridad** (`enforce_motion_safety`): si venció el plazo del comando, pone la velocidad en 0 (sin enclavar). Si el LiDAR está sin datos, la deja en 0. Si no, aplica el freno por eje. Mientras haya un comando vigente, reenvía la velocidad al driver cada ~100 ms.
+2. **Integración**: suma `velocidad × dt` a la odometría (no hay encoders en la telemetría) y mueve cada servo hacia su objetivo a su velocidad en pulsos por segundo.
+
+La velocidad de cada servo se calcula al recibir `/arm`: `|Δ| / duración`, recortada a `150..1800` pulsos por segundo.
 
 ---
 
-## 3. Las 4 Barreras de Seguridad (Por qué Rust protege al hardware)
+## 3. Las barreras entre el modelo y los motores
 
-![Pipeline de 4 Barreras de Seguridad de Hardware en Rust](./assets/rust-safety-pipeline.svg)
+![Barreras de seguridad del bridge](./assets/rust-safety-pipeline.svg)
 
-Cuando conectas un LLM multimodal como **Gemini 3.8 Live** a un robot real, nunca debes permitir que la salida de una red neuronal controle directamente el bus serial de los motores. `robot-bridge` actúa como un **firewall determinista de hardware** en cuatro etapas:
+Gemini Live nunca habla directo con el bus serie. Cada comando pasa por estas barreras:
 
-1. **Tipado Estricto y Validación de IDs (`serde` + `is_valid_servo_id`)**: Solo se aceptan los IDs físicos reales **`{1, 2, 3, 4, 5, 10}`**; cualquier otro ID (como el clásico error de enviar `ID 6` a la pinza) o JSON fuera de rango devuelve `400 Bad Request` antes de tocar `TelemetryState`.
-2. **Clamping de Rango Físico por Articulación (`clamp_servo_pulse`)**: Cada servo tiene su propio rango mecánico seguro en la escala `0..1000`:
-   - `J1 (ID 1)`: **`120..880`** (base yaw)
-   - `J2 (ID 2)`: **`220..780`** (hombro — protege contra colisión con la torre LiDAR MS200)
-   - `J3 (ID 3)`: **`150..850`** (codo)
-   - `J4 (ID 4)`: **`150..850`** (muñeca pitch)
-   - `J5 (ID 5)`: **`100..900`** (muñeca roll)
-   - `Pinza (ID 10)`: **`200..750`** (`220` abierta, `680` cerrada sujetando la llave)
-3. **Reflejo Autónomo de LiDAR (`< 0.28 m` a `40 Hz`)**: Tanto al recibir `set_velocity` como en cada iteración de `tick()` a `40 Hz`, si `lidar.front_m < 0.28 m` (alimentado por `/scan` en `ros2_worker.py`, o por `/simulate/lidar` exclusivamente en modo `mock`) mientras el robot intenta avanzar (`linear_x > 0`), Rust anula inmediatamente `vx = 0.0` y envía velocidad cero a los motores sin esperar respuesta de la nube ni del navegador.
-4. **Deadman Watchdog (`600 ms`) y Límites de Chasis**: Las velocidades se recortan a **`±0.25 m/s`** (`linear_x`, `linear_y`) y **`±0.80 rad/s`** (`angular_z`), con `duration_ms` entre **`100..2500 ms`** (`600 ms` por defecto). Si el Wi-Fi del escenario falla o expira la ventana del comando, el bucle de `40 Hz` detiene los 4 motores Mecanum automáticamente.
+1. **Tipos e IDs.** `serde` rechaza tipos incorrectos con `422`. `is_valid_servo_id` solo acepta `{1, 2, 3, 4, 5, 10}` (la pinza es el 10, no el 6) y `/arm` pide entre 1 y 6 servos; si no, `400 invalid_request`. En `/servo/jog`, un `delta` fuera de `-300..300` también es `400`.
+2. **Recorte por articulación** (`clamp_servo_pulse`): las posiciones fuera de rango no son error, se recortan.
+   - Servo 1 (base): `120..880`
+   - Servo 2 (hombro): `220..780`, para no golpear la torre del LiDAR
+   - Servos 3 y 4 (codo y muñeca): `150..850`
+   - Servo 5 (giro de muñeca): `100..900`
+   - Servo 10 (pinza): `200..750` (220 abierta, 680 cerrada sobre la llave)
+3. **Freno por eje del LiDAR.** Se aplica al recibir la velocidad y en cada tick. Esta es la función, tal cual está en `backend.rs`:
+
+   ```rust
+   pub fn apply_lidar_brake(l: &LidarSectors, vx: f32, vy: f32, wz: f32) -> (f32, f32, f32, bool) {
+       let (mut vx, mut vy, mut wz) = (vx, vy, wz);
+       let mut braked = false;
+       if (vx > 0.0 && l.front_m < LIDAR_BRAKE_M) || (vx < 0.0 && l.back_m < LIDAR_BRAKE_M) {
+           vx = 0.0;
+           braked = true;
+       }
+       if (vy > 0.0 && l.left_m < LIDAR_BRAKE_M) || (vy < 0.0 && l.right_m < LIDAR_BRAKE_M) {
+           vy = 0.0;
+           braked = true;
+       }
+       if l.min_m() < LIDAR_BRAKE_M && wz.abs() > LIDAR_BRAKE_MAX_WZ {
+           wz = wz.signum() * LIDAR_BRAKE_MAX_WZ;
+           braked = true;
+       }
+       (vx, vy, wz, braked)
+   }
+   ```
+
+   `LIDAR_BRAKE_M` es 0.28 m y `LIDAR_BRAKE_MAX_WZ` 0.3 rad/s. Con `ros2`, si el último scan tiene más de 300 ms la velocidad es 0 sin importar el sector. Los datos vienen de `/scan` vía `ros2_worker.py`, o de `/simulate/lidar` en mock.
+4. **Límites de chasis y watchdog.** Las velocidades se recortan a `±0.25 m/s` y `±0.8 rad/s` (`±0.15 m/s` lineal con `serial`), y cada comando dura `100..2500 ms` (600 ms si no dices). Al vencer, el loop pone el chasis en 0.
+5. **E-stop enclavada.** Después de `POST /stop`, toda ruta de movimiento responde `423` hasta `POST /estop/release`.
+
+---
+
+## 4. Para seguir leyendo
+
+- [`robot-bridge/src/main.rs`](../robot-bridge/src/main.rs): rutas, middlewares, WebSocket y el loop.
+- [`robot-bridge/src/backend.rs`](../robot-bridge/src/backend.rs): `MotionGate`, freno, watchdog, backends y el hilo escritor.
+- [`robot-bridge/src/protocol.rs`](../robot-bridge/src/protocol.rs): tramas del STM32, cinemática Mecanum y límites.
+- [`docs/API.md`](./API.md): el contrato completo.
+- Corre `make test` para ver los tests de cada barrera.

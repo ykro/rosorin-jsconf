@@ -1,124 +1,160 @@
 ---
 name: rosorin-pro
-description: Use when writing code for the Hiwonder ROSOrin Pro mobile manipulator robot — Mecanum chassis control, 6-DOF bus servo robotic arm, Aurora 930 / Astra 3D depth camera, LiDAR scan filtering, STM32 ros_robot_controller serial protocol (1Mbps), ROS 2 Humble topics, or the Rust robot-bridge.
+description: Úsalo al escribir código para el manipulador móvil Hiwonder ROSOrin Pro o para el bridge en Rust de este repo — chasis Mecanum, brazo de servos de bus (IDs 1 a 5 y pinza 10), LiDAR por sectores, cámara 3D, protocolo serie del STM32 (1 Mbps, CRC8), tópicos de ROS 2 Humble, ros2_worker.py, E-stop enclavada y token del bridge.
 ---
 
-# Hiwonder ROSOrin Pro — Robot Control & ROS 2 Reference
+# Hiwonder ROSOrin Pro: control del robot y del bridge
 
-## Overview
+## Resumen
 
-Hiwonder ROSOrin Pro is an Embodied AI mobile manipulator combining a **Mecanum omnidirectional chassis** with a **6-DOF serial bus servo robotic arm** (5-DOF arm + 1-DOF parallel gripper), running Ubuntu 22.04 and **ROS 2 Humble** on an **NVIDIA Jetson Orin Nano** (or Raspberry Pi 5) paired with an **STM32** real-time co-controller (`ros_robot_controller`).
+El ROSOrin Pro combina un **chasis Mecanum** con un **brazo de servos de bus** (5 articulaciones más una pinza paralela). Corre Ubuntu 22.04 y **ROS 2 Humble** en un **NVIDIA Jetson Orin Nano**, con un coprocesador **STM32** (`ros_robot_controller`) por UART.
 
-Official repositories:
-- `https://github.com/Hiwonder/ROSOrin-Pro` (branch `orin-nano`)
-- `https://github.com/Hiwonder/ROSOrin` (branch `ROS2` — chassis-only standard version)
+Repositorios del fabricante:
+- `https://github.com/Hiwonder/ROSOrin-Pro` (rama `orin-nano`)
+- `https://github.com/Hiwonder/ROSOrin` (rama `ROS2`, versión solo chasis)
 
-## Hardware Quick Reference
+En este repo nada le habla directo al hardware salvo `robot-bridge` (Rust, binario `rosorin-bridge`, puerto 9000) y su worker `robot-bridge/scripts/ros2_worker.py`.
 
-| Subsystem | Specification | ROS 2 / Device Interface |
+## Hardware
+
+| Subsistema | Detalle | Interfaz |
 |---|---|---|
-| Host Compute | NVIDIA Jetson Orin Nano (8GB) / RPi 5 | Ubuntu 22.04 LTS, ROS 2 Humble |
-| Co-Controller | STM32 (`ros_robot_controller`) | `/dev/rrc` (symlink to `/dev/ttyACM0`), `1,000,000` baud, 8N1 (`serialport` crate) |
-| Chassis | 4x 520 metal DC encoder motors (1:90), Mecanum wheels | `wheelbase=0.17706m`, `track_width=0.17165m`, `wheel_diameter=0.08m` |
-| Robotic Arm | 6-DOF intelligent serial bus servos (HTS-21H / HX-12H) | IDs `1..5` (arm joints), ID `10` (gripper). Range `0..1000` pulse (`500` = center) |
-| 3D Depth Camera | Deptrum Aurora 930 Pro / Orbbec Astra | `/depth_cam/rgb0/image_raw`, `/depth_cam/depth0/image_raw` (640x480 @ 15fps) |
-| LiDAR | LD19 / MS200 / COIN-D6 ToF | `/scan_raw` -> `laser_filters` (masks arm occlusion) -> `/scan` (4 sectors: `front_m`, `left_m`, `right_m`, `back_m`; brake at `< 0.28 m`) |
-| Audio / Voice | WonderEcho Pro AI voice box + USB speaker | `/dev/ring_mic` (115200 baud) / ALSA default audio (`1,200 ms` post-servo mic suppression) |
-| Peripherals | 6-axis IMU, programmable Buzzer, WS2812 RGB LEDs, 7" Touch Display (`/face`) | Controlled via STM32 `ros_robot_controller` and `rosorin-bridge :9000` |
-| Battery | 11.1V 6000mAh 3S Li-ion | Reported in mV (`12600` full, `11100` nominal, `<10200` low warning) |
+| Cómputo | NVIDIA Jetson Orin Nano | Ubuntu 22.04, ROS 2 Humble |
+| Coprocesador | STM32 (`ros_robot_controller`) | `/dev/rrc` (enlace a `/dev/ttyACM0`), 1 000 000 baudios, 8N1 |
+| Chasis | 4 motores DC con encoder, ruedas Mecanum | `wheelbase=0.17706 m`, `track_width=0.17165 m`, `wheel_diameter=0.08 m` |
+| Brazo | Servos de bus | IDs `1..5` (articulaciones) e ID `10` (pinza). Pulsos `0..1000`, `500` al centro (`0..240°`) |
+| Cámara 3D | Deptrum Aurora 930 Pro / Orbbec Astra | `/depth_cam/rgb0/image_raw` |
+| LiDAR | LD19 / MS200 | `/scan` (`sensor_msgs/LaserScan`), que el worker resume en 4 sectores |
+| Periféricos | Buzzer, LEDs RGB, pantalla táctil de 7" | Buzzer y LEDs por el STM32; la pantalla muestra la ruta web `/face` |
+| Batería | 3S Li-ion | El worker la lee del STM32 en mV y descarta lecturas fuera de `8000..14000` |
 
-## Control Approaches: Rust Serial vs ROS 2 Bridge vs Mock
+## Backends del bridge
 
-| Approach | Latency | When to Use |
-|---|---|---|
-| **Rust Serial Direct (`/dev/rrc`)** | `<1 ms` | Stage demos where SLAM/Nav2 is not needed; zero ROS 2 middleware overhead |
-| **Rust + ROS 2 Worker (`rclpy` / topics)** | `5–15 ms` | When camera (`/depth_cam/...`), LiDAR (`/scan`), or Nav2 must run alongside arm/chassis |
-| **Mock Mode (`--backend mock`)** | `<1 ms` | Local development on a laptop (`./run.sh --mock`) and rehearsals without hardware |
+| Backend | Cómo habla con el hardware | LiDAR | Cuándo usarlo |
+|---|---|---|---|
+| `ros2` | Lanza `python3 ros2_worker.py`. Si puede abrir `/dev/rrc`, usa el SDK oficial (`Board("/dev/rrc", 1000000)`); si otro nodo lo tiene, publica en tópicos de ROS 2. En ambos casos se suscribe a `/scan` y a la cámara. | Sí, falla cerrado | En el robot (es lo que autodetecta `run.sh`). |
+| `serial` | Escribe tramas binarias directo en `/dev/rrc` desde un hilo propio. | No: `lidar_source: "none"` y velocidad lineal máxima 0.15 m/s | Pruebas sin ROS 2. La trama de LEDs no está implementada y la batería no se lee. |
+| `mock` | Nada; simula en memoria. | Simulado con `POST /simulate/lidar` | Laptop y ensayos (`./run.sh --mock`). |
 
-> **CRITICAL RULE:** Do not run `ros_robot_controller_node.py` and direct `/dev/rrc` serial mode simultaneously — both open `/dev/rrc` at 1,000,000 baud and will collide on serial reads. Pick `--backend ros2` if `ros_robot_controller` is launched, or `--backend serial` if controlling the STM32 directly from Rust.
+Un backend pedido de forma explícita (`--backend`, `ROBOT_BACKEND`, `--serial`, `--ros2`) **no cae a mock** si falla: el bridge sale con código 1. Solo con `--allow-mock-fallback` (lo pasa `run.sh` al autodetectar) prueba serial → ros2 → mock.
 
-## 6-DOF Robotic Arm Servo Mapping & Safe Bounds (`clamp_servo_pulse`)
+> **Regla:** no abras `/dev/rrc` dos veces. Si `ros_robot_controller_node` está corriendo, el worker publica en tópicos; si quieres `serial`, detén ese nodo. `run.sh` detiene `button_scan.service` y `start_app_node.service` por esa razón.
 
-All bus servos use pulse units `0..1000` (where `500` is the neutral center, `0..1000` corresponds to `0..240 deg`). Only servo IDs `{1, 2, 3, 4, 5, 10}` are accepted by `robot-bridge` (`400 Bad Request` on any other ID).
+## Servos y límites (`clamp_servo_pulse` en `protocol.rs`)
 
-| Joint Name | Servo ID | Role | Center Pulse | Safe Clamped Range | Notes |
-|---|---|---|---|---|---|
-| `joint1` | `1` | Base pan (yaw) | `500` | `120..880` | `500` faces forward |
-| `joint2` | `2` | Shoulder pitch | `500` | `220..780` | `<220` risks hitting LiDAR tower |
-| `joint3` | `3` | Elbow pitch | `500` | `150..850` | Folds/extends forearm |
-| `joint4` | `4` | Wrist pitch | `500` | `150..850` | Angles camera/gripper up or down |
-| `joint5` | `5` | Wrist roll | `500` | `100..900` | Rotates gripper/hand |
-| `r_joint` | `10` | Parallel Gripper | `500` | `200..750` | `220` = open wide, `680` = closed on deploy key |
+Solo se aceptan los IDs `{1, 2, 3, 4, 5, 10}`. Cualquier otro ID en `/arm` o `/servo/jog` da `400 invalid_request`. Las posiciones fuera de rango no dan error: se recortan.
 
-> **Important:** The gripper servo is **ID 10**, NOT ID 6 (even though `.d6a` SQLite action files store it in column `Servo6`). Always map the 6th degree of freedom to bus servo ID `10`.
+| Articulación | ID | Rol | Rango permitido | Nota |
+|---|---|---|---|---|
+| `joint1` | `1` | Base (giro) | `120..880` | `500` mira al frente |
+| `joint2` | `2` | Hombro | `220..780` | Más abajo golpea la torre del LiDAR |
+| `joint3` | `3` | Codo | `150..850` | |
+| `joint4` | `4` | Muñeca | `150..850` | Inclina cámara y pinza |
+| `joint5` | `5` | Giro de muñeca | `100..900` | |
+| `r_joint` | `10` | Pinza paralela | `200..750` | `220` abierta, `680` cerrada sobre la llave |
 
-## Chassis Velocity & LiDAR Guardrails (`robot-bridge :9000`)
+> **La pinza es el servo 10, no el 6**, aunque los archivos de acciones `.d6a` la guarden en la columna `Servo6`.
 
-- **Linear velocity (`linear_x`, `linear_y`)**: clamped to **`[-0.25, 0.25] m/s`**.
-- **Angular velocity (`angular_z`)**: clamped to **`[-0.80, 0.80] rad/s`**.
-- **Command duration (`duration_ms`)**: clamped to **`100..2500 ms`** (default deadman watchdog **`600 ms`**).
-- **Autonomous LiDAR brake (`< 0.28 m`)**: Evaluated at **`40 Hz`** in both `tick()` and `set_velocity()`. If `lidar.front_m < 0.28` while `linear_x > 0`, forward velocity is immediately zeroed. Note that `POST /simulate/lidar` is enabled only in `--backend mock` (`403 Forbidden` on hardware).
+`/arm` acepta de 1 a 6 servos, `duration_ms` se recorta a `120..5000` y `/servo/jog` exige `delta` en `-300..300`.
 
-## ROS 2 Humble Topics & Message Types
+## Chasis y seguridad (`robot-bridge :9000`)
 
-### 1. Chassis Velocity (`/cmd_vel` & `/controller/cmd_vel`)
-- `/cmd_vel` (`geometry_msgs/msg/Twist`): Clamped by `odom_publisher_node` to `linear.x, linear.y in [-0.2, 0.2] m/s`, `angular.z in [-0.5, 0.5] rad/s`.
-- `/controller/cmd_vel` (`geometry_msgs/msg/Twist`): Unclamped velocity input to Mecanum kinematics.
+- **Velocidades:** `linear_x` y `linear_y` en `±0.25 m/s`, `angular_z` en `±0.8 rad/s` (con `serial`, lineales en `±0.15 m/s`).
+- **Duración:** `duration_ms` se recorta a `100..2500`; por defecto vale el watchdog (`CMD_VEL_WATCHDOG_MS`, 600 ms). Al vencer, el chasis se detiene. Mientras está vigente, el bridge reenvía la velocidad cada ~100 ms.
+- **Watchdog del worker:** `WATCHDOG_TIMEOUT_S = 0.50` en `ros2_worker.py`. Si pasan 500 ms sin comandos con el robot en movimiento, pone los motores en 0. Al cerrarse su stdin (el bridge murió) también.
+- **Freno por eje** (`apply_lidar_brake`, umbral `LIDAR_BRAKE_M = 0.28`): `vx > 0` se anula con `front_m`, `vx < 0` con `back_m`, `vy > 0` con `left_m` y `vy < 0` con `right_m`. Si cualquier sector está por debajo de 0.28 m, `|wz|` se limita a 0.3. Se aplica al recibir el comando y en cada tick de 40 Hz.
+- **`obstacle_alert`:** cualquier sector por debajo de 0.35 m.
+- **LiDAR que falla cerrado (solo `ros2`):** sin scan en más de 300 ms, o con el worker muerto, la velocidad aplicada es 0 y `lidar_stale = true`. Al arrancar el chasis queda bloqueado hasta el primer scan.
+- **E-stop enclavada:** `POST /stop` detiene motores, congela el brazo donde está y bloquea `/cmd_vel`, `/arm`, `/servo/jog`, `/arm/jog`, `/gesture`, `/scene/reset` y `/buzzer` con `423 estop_latched` hasta `POST /estop/release`.
+- **`POST /simulate/lidar`** solo existe en mock (`403` en hardware).
+
+## Token y red
+
+- El bridge escucha en `127.0.0.1` por defecto. En el robot `run.sh` lo levanta en `0.0.0.0` con `BRIDGE_TOKEN` (generado en `.bridge-token`, permisos 600). Sin token fuera de loopback, el bridge sale con código 2.
+- Manda el token como `x-bridge-token: <t>` o `Authorization: Bearer <t>`. `?token=` solo vale en `/ws`. `GET /health` es público.
+- `Host` debe ser una IP, `localhost` o un nombre de `BRIDGE_ALLOWED_HOSTS`; `Origin`, una IP privada o de loopback, `localhost`, el sitio de la charla o uno de `BRIDGE_ALLOWED_ORIGINS`.
+- Límite global: 30 POST/s con ráfaga de 60 (`/stop` y `/estop/release` exentos).
 
 ```bash
-ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.15, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
+TOKEN=$(cat .bridge-token)
+curl -X POST -H "x-bridge-token: $TOKEN" -H 'content-type: application/json' \
+  -d '{"linear_x":0.1,"duration_ms":500}' http://<IP>:9000/cmd_vel
+curl -X POST -H "x-bridge-token: $TOKEN" http://<IP>:9000/stop
+curl -X POST -H "x-bridge-token: $TOKEN" http://<IP>:9000/estop/release
 ```
 
-### 2. Bus Servo Control (`/ros_robot_controller/bus_servo/set_position`)
-Message type: `ros_robot_controller_msgs/msg/ServosPosition`
-```bash
-ros2 topic pub --once /ros_robot_controller/bus_servo/set_position ros_robot_controller_msgs/msg/ServosPosition \
-  "{duration: 0.6, position: [{id: 1, position: 500}, {id: 2, position: 620}, {id: 3, position: 300}, {id: 4, position: 350}, {id: 5, position: 500}, {id: 10, position: 500}]}"
-```
+## Lo que hace `ros2_worker.py`
 
-### 3. Buzzer & RGB LEDs
-- `/ros_robot_controller/set_buzzer` (`ros_robot_controller_msgs/msg/BuzzerState`): `{freq: 1900, on_time: 0.15, off_time: 0.05, repeat: 2}`
-- `/ros_robot_controller/set_rgb` (`ros_robot_controller_msgs/msg/RGBStates`): `{states: [{index: 0, red: 255, green: 40, blue: 40}]}`
+Protocolo: un JSON por línea en stdin (`{"op":"cmd_vel"|"arm"|"buzzer"|"rgb",…}`) y un JSON por línea en stdout (`{"event":"backend"|"lidar"|"battery"|"camera_jpeg",…}`). La primera línea siempre es `{"event":"backend","name":…}`; el bridge la espera hasta 20 s.
 
-### 4. Telemetry & Perception Topics
-- `/ros_robot_controller/battery` (`std_msgs/msg/UInt16`): Battery voltage in millivolts (e.g. `11850` = 11.85V).
-- `/ros_robot_controller/imu_raw` (`sensor_msgs/msg/Imu`): 6-axis IMU (`imu_link`).
-- `/scan` (`sensor_msgs/msg/LaserScan`): Filtered 360-degree LiDAR scan (summarized by `ros2_worker.py` into `front_m`, `left_m`, `right_m`, `back_m`).
-- `/depth_cam/rgb0/image_raw` (`sensor_msgs/msg/Image`): 640x480 RGB camera stream from Aurora 930 Pro / Astra.
+- **Con el SDK (`Board`):** `name = "stm32-board (/dev/rrc @ 1Mbps)"`. Mueve motores con `set_motor_speed`, servos con `bus_servo_set_position`, buzzer y LEDs con el SDK, y lee la batería cada 2 s.
+- **Con tópicos (si `/dev/rrc` está ocupado):** `name = "ros2-topics"`. Publica:
+  - `/controller/cmd_vel` (`geometry_msgs/msg/Twist`)
+  - `/servo_controller` (`servo_controller_msgs/msg/ServosPosition`, `position_unit = "pulse"`)
+  - `/ros_robot_controller/set_buzzer` (`ros_robot_controller_msgs/msg/BuzzerState`)
+- **Suscripciones** (con `qos_profile_sensor_data`, que acepta publicadores *best-effort* y *reliable*):
+  - `/scan`: como máximo 20 eventos `lidar` por segundo.
+  - `/depth_cam/rgb0/image_raw`: JPEG en base64, como máximo 2 por segundo (requiere `cv2`).
+- **Sectores** (REP-103: ángulo 0 al frente, positivo a la izquierda): frente `|θ| ≤ 45°`, izquierda `45°..135°`, derecha `-135°..-45°`, atrás el resto. Cada sector reporta el eco válido más cercano; sin ecos, `4.0` m.
+- **Sombra del brazo:** los ecos más cercanos que `ARM_SHADOW_MAX_M` (0.12 m) dentro de ±`ARM_SHADOW_HALF_ANGLE_DEG` (35°) se consideran el propio brazo y se ignoran si el sector tiene otros ecos. Si solo quedan ecos filtrados, se reporta el más cercano (falla cerrado). `ARM_SHADOW_MAX_M=0` desactiva el filtro. **Calíbralo en el robot** con `ros2 topic echo /scan`.
 
-## STM32 Binary Serial Protocol (`/dev/rrc` @ 1,000,000 baud)
+Tests sin rclpy: `python3 -m unittest discover -s robot-bridge/scripts -p 'test_*.py'`.
 
-When using `--backend serial` in `robot-bridge`, packets use the following frame:
+## Protocolo serie del STM32 (`/dev/rrc` a 1 000 000 baudios)
+
+Con `--backend serial`, cada trama es:
+
 ```text
 [0xAA, 0x55, func_id: u8, data_len: u8, ...data_bytes, crc8: u8]
 ```
-- `crc8` is computed over `[func_id, data_len, ...data_bytes]` using the Dallas/Maxim 1-Wire lookup table (`crc8_table` in `ros_robot_controller_sdk.py`).
-- **Function IDs (`PacketFunction`)**:
-  - `0x00`: `SYS` (Battery voltage report: sub-cmd `0x04` + `u16` little-endian mV)
-  - `0x01`: `LED` (`<BHHH`: `led_id: u8, on_ms: u16, off_ms: u16, repeat: u16`)
-  - `0x02`: `BUZZER` (`<HHHH`: `freq_hz: u16, on_ms: u16, off_ms: u16, repeat: u16`)
-  - `0x03`: `MOTOR` (`[0x01, count: u8, ...(motor_idx_0_based: u8, rps: f32_le)]`)
-  - `0x05`: `BUS_SERVO` (`[0x01, dur_lo: u8, dur_hi: u8, count: u8, ...(servo_id: u8, pulse: u16_le)]`)
-  - `0x07`: `IMU` (Report: `<6f` little-endian `ax, ay, az, gx, gy, gz`)
 
-### Mecanum Kinematics (Speed m/s to Motor RPS)
-With `wheelbase = 0.17706`, `track_width = 0.17165`, `wheel_diameter = 0.08`, and `k = (wheelbase + track_width) / 2.0 = 0.174355`:
+- `crc8` se calcula sobre `[func_id, data_len, ...data_bytes]` con la tabla Dallas/Maxim (`CRC8_TABLE` en `protocol.rs`, igual a `crc8_table` de `ros_robot_controller_sdk.py`).
+- Funciones (`PacketFunction`):
+  - `0x00` `SYS` (reporte de batería: subcomando `0x04` + `u16` little-endian en mV)
+  - `0x01` `LED`
+  - `0x02` `BUZZER` (`<HHHH`: `freq_hz, on_ms, off_ms, repeat`)
+  - `0x03` `MOTOR` (`[0x01, count, …(motor_idx_base_0: u8, rps: f32_le)]`)
+  - `0x05` `BUS_SERVO` (`[0x01, dur_lo, dur_hi, count, …(servo_id: u8, pulse: u16_le)]`)
+  - `0x07` `IMU`
+
+### Cinemática Mecanum (m/s a vueltas por segundo)
+
+Así está en `mecanum_ik` de `protocol.rs`:
+
 ```rust
-let v1 = linear_x - linear_y - angular_z * k;
-let v2 = linear_x + linear_y - angular_z * k;
-let v3 = linear_x + linear_y + angular_z * k;
-let v4 = linear_x - linear_y + angular_z * k;
-let to_rps = |v: f32| v / (std::f32::consts::PI * 0.08);
-// Note: Right-side motors (3 and 4) are inverted in mounting:
-let rps = [to_rps(v1), to_rps(v2), -to_rps(v3), -to_rps(v4)];
+pub fn mecanum_ik(linear_x: f32, linear_y: f32, angular_z: f32) -> [f32; 4] {
+    let (vx, vy, wz) = clamp_velocity(linear_x, linear_y, angular_z);
+    let k = (WHEELBASE_M + TRACK_WIDTH_M) / 2.0;
+    let m1 = vx - vy - wz * k;
+    let m2 = vx + vy - wz * k;
+    let m3 = vx + vy + wz * k;
+    let m4 = vx - vy + wz * k;
+    let circumference = PI * WHEEL_DIAMETER_M;
+    [
+        m1 / circumference,
+        m2 / circumference,
+        -m3 / circumference,
+        -m4 / circumference,
+    ]
+}
 ```
 
-## Common Mistakes
+Los motores 3 y 4 (lado derecho) están montados invertidos.
 
-| Mistake | Fix |
+## Referencia del stack de Hiwonder (no lo usa el bridge)
+
+Útil si trabajas directo con los nodos del fabricante: `odom_publisher_node` recorta `/cmd_vel` a `±0.2 m/s` y `±0.5 rad/s`, y `/controller/cmd_vel` entra sin recorte a la cinemática. El bridge aplica sus propios límites antes de llegar a cualquiera de los dos.
+
+## Errores comunes
+
+| Error | Solución |
 |---|---|
-| Sending gripper commands to Servo ID 6 | Gripper is **Servo ID 10** (`1..5` are arm joints, `10` is gripper; any other ID returns `400 Bad Request`) |
-| Using `mecanum.py` default `wheel_diameter=0.0065` | Typo in Hiwonder's default arg; real value in `odom_publisher_node.py` is `0.08` (80mm) |
-| Running `/cmd_vel` without a watchdog | Always auto-zero motors after `600ms` without command so the robot never falls off a stage table |
-| Lowering `joint2` below `220` pulse with `joint1` centered | Clashes with chassis LiDAR housing; clamp `joint2` to `220..780` |
-| Running direct `/dev/rrc` while `ros_robot_controller_node` is active | Use `--backend ros2` when ROS 2 bringup is running, or stop bringup to use `--backend serial` |
+| Mandar la pinza al servo 6 | La pinza es el **servo 10**. Otro ID da `400`. |
+| Usar `wheel_diameter=0.0065` de `mecanum.py` | Es un error en el valor por defecto de Hiwonder; el real es `0.08` (80 mm). |
+| Mover el chasis sin plazo | Siempre manda `duration_ms` o deja que el watchdog (600 ms) corte. |
+| Bajar `joint2` de 220 | Choca con la torre del LiDAR; el bridge lo recorta. |
+| Abrir `/dev/rrc` con `ros_robot_controller_node` activo | Usa `ros2` (el worker publica en tópicos) o detén ese nodo para `serial`. |
+| Reintentar un movimiento que dio `423` | La E-stop está enclavada a propósito. Avisa y espera `POST /estop/release`. |
+| Llamar al bridge sin token desde la LAN | Manda `x-bridge-token`; `401` significa token faltante o distinto. |
+| Asumir que el avance está libre porque el frente lo está | El freno es por eje: un `vy` hacia una pared lateral también se anula, y girar se limita a 0.3 rad/s cerca de obstáculos. |
+| Usar `ros2` sin `/scan` publicándose | El chasis queda bloqueado (`lidar_stale`). Revisa `ros2 topic hz /scan`. |

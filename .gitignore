@@ -14,3 +14,6 @@ web/.env.*
 !web/.env.example
 *.log
 web/public/songs/clips/*.mp3
+__pycache__/
+*.pyc
+.bridge-token

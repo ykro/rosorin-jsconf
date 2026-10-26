@@ -29,7 +29,7 @@
   <div class="diagram-container">
     <svg viewBox="0 0 1280 480" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="onb-modes-title onb-modes-desc" id="onboarding-modes-root">
   <title id="onb-modes-title">Modos de Ejecución en Laptop y Hardware Físico</title>
-  <desc id="onb-modes-desc">Comparación entre el modo simulador en laptop (--mock) y el modo híbrido conectando la laptop al robot físico por Wi-Fi mediante la bandera --robot-ip.</desc>
+  <desc id="onb-modes-desc">Modo 1: web y bridge mock en la laptop (localhost:3000 y localhost:9000, sin token). Modo 2: la web corre en la laptop y manda comandos por Wi-Fi al bridge del robot en IP:9000 con el token que genera make robot.</desc>
   <defs>
     <style>
       #onboarding-modes-root {
@@ -71,16 +71,16 @@
 
   <!-- Mode 1 Boxes -->
   <rect x="64" y="106" width="232" height="144" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
-  <text x="84" y="164" fill="#2d3142" font-size="21" font-weight="700">Web + Clon 3D</text>
+  <text x="84" y="164" fill="#2d3142" font-size="21" font-weight="700">Web + gemelo 3D</text>
   <text x="84" y="202" fill="#4f5d75" font-size="16" class="mono">localhost:3000</text>
 
   <rect x="356" y="106" width="232" height="144" rx="10" fill="#ffffff" stroke="#2e5aa8" stroke-width="1.6"/>
-  <text x="376" y="164" fill="#2d3142" font-size="21" font-weight="700">Mock Bridge</text>
+  <text x="376" y="164" fill="#2d3142" font-size="21" font-weight="700">Bridge mock</text>
   <text x="376" y="202" fill="#2e5aa8" font-size="16" class="mono">localhost:9000</text>
 
   <rect x="64" y="280" width="524" height="132" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
   <text x="88" y="336" fill="#2d3142" font-size="22" font-weight="700" class="mono">$ ./run.sh --mock</text>
-  <text x="88" y="376" fill="#4f5d75" font-size="16">Corre todo en tu laptop sin robot físico</text>
+  <text x="88" y="376" fill="#4f5d75" font-size="16">Todo en tu laptop: sin robot y sin token</text>
 
   <!-- Mode 2 Boxes -->
   <rect x="692" y="106" width="232" height="144" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
@@ -89,11 +89,11 @@
 
   <rect x="984" y="106" width="232" height="144" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
   <text x="1004" y="164" fill="#2d3142" font-size="21" font-weight="700">ROSOrin Pro</text>
-  <text x="1004" y="202" fill="#eb6c36" font-size="16" class="mono">&lt;IP&gt;:9000</text>
+  <text x="1004" y="202" fill="#eb6c36" font-size="16" class="mono">&lt;IP&gt;:9000 + token</text>
 
   <rect x="692" y="280" width="524" height="132" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
   <text x="716" y="336" fill="#2d3142" font-size="22" font-weight="700" class="mono">$ ./run.sh --robot-ip &lt;IP&gt;</text>
-  <text x="716" y="376" fill="#4f5d75" font-size="16">Conecta tu laptop al robot por Wi-Fi</text>
+  <text x="716" y="376" fill="#4f5d75" font-size="16">Con el .bridge-token del robot (make robot)</text>
 </svg>
   </div>
 </body>

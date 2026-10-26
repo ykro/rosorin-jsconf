@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { TopNav } from '@/components/TopNav';
 import { HardwareControlPanel } from '@/components/HardwareControlPanel';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
+import { shouldIgnoreShortcut } from '@/lib/keyboard';
 
 const LITE_DEMOS = [
   {
@@ -38,26 +39,20 @@ const LITE_DEMOS = [
 ];
 
 export default function RobotLiteHubPage() {
-  const {
-    telemetry,
-    bridgeConnected,
-    jogServo,
-    setServoPulse,
-    moveChassis,
-    triggerGesture,
-    resetScene,
-  } = useRobotTelemetry();
+  const robot = useRobotTelemetry();
+  const { telemetry, jogServo, setServoPulse, moveChassis, triggerGesture, resetScene } = robot;
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    try {
       window.localStorage.setItem('ROSORIN_LITE_MODE', '1');
+    } catch (err) {
+      console.warn('[robot] localStorage no disponible:', err);
     }
   }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (shouldIgnoreShortcut(e)) return;
 
       const key = e.key.toLowerCase();
       switch (key) {
@@ -136,7 +131,7 @@ export default function RobotLiteHubPage() {
 
   return (
     <div className="flex min-h-screen w-screen flex-col bg-[#F8F9FA] text-[#202124]">
-      <TopNav bridgeConnected={bridgeConnected} liteMode={true} />
+      <TopNav robot={robot} liteMode={true} />
 
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-5 p-6">
         {/* 4 Large Google-Colored Stage Launch Buttons */}

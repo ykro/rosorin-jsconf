@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust (build, test, clippy)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: robot-bridge
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Instalar toolchain estable con clippy
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            robot-bridge/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('robot-bridge/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - run: cargo build --locked
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
+
+  rust-msrv:
+    name: Rust 1.87 (rust-version)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: robot-bridge
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Instalar Rust 1.87
+        run: rustup toolchain install 1.87.0 --profile minimal
+      - run: cargo +1.87.0 check --locked --all-targets
+
+  python:
+    name: Worker de ROS 2 (sin rclpy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.10' # Ubuntu 22.04 / ROS 2 Humble
+      - name: Tests del worker
+        working-directory: robot-bridge
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+
+  web:
+    name: Web (tsc, tests, lint, css, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run lint
+      - run: npm run check:css
+      - run: npm run build

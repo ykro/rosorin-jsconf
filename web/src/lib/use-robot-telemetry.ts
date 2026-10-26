@@ -1,8 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FALLBACK_TELEMETRY, RobotBridgeClient } from './robot-client';
-import type { TelemetryState } from './types';
+import {
+  BRIDGE_AUTH_ERROR_EVENT,
+  FALLBACK_TELEMETRY,
+  RobotBridgeClient,
+  describeBridgeError,
+} from './robot-client';
+import { isBridgeEnabled, onBridgeConfigChange, resolveBridgeUrl } from './bridge-config';
+import type { BridgeUiState, RobotActionResult, TelemetryState } from './types';
 
 function clampServoForHardware(id: number, pulse: number): number {
   const p = Math.round(pulse);
@@ -96,19 +102,16 @@ const LOCAL_GESTURE_TARGETS: Record<
   },
   point_cloud_run: {
     servos: { '1': 610, '2': 350, '3': 270, '4': 350, '5': 500, '10': 660 },
-    odometry: { x_m: 0.04, y_m: 0.20, yaw_rad: 0 },
     rgb: [43, 74, 203],
     pointed_totem: 'cloud_run',
   },
   point_gemini_live: {
     servos: { '1': 500, '2': 340, '3': 260, '4': 340, '5': 500, '10': 660 },
-    odometry: { x_m: 0.06, y_m: 0, yaw_rad: 0 },
     rgb: [15, 118, 110],
     pointed_totem: 'gemini_live',
   },
   point_firestore: {
     servos: { '1': 390, '2': 350, '3': 270, '4': 350, '5': 500, '10': 660 },
-    odometry: { x_m: 0.04, y_m: -0.20, yaw_rad: 0 },
     rgb: [180, 83, 9],
     pointed_totem: 'firestore',
   },
@@ -280,11 +283,30 @@ const LOCAL_CHOREOGRAPHIES: Record<
   ],
 };
 
+
+const SIMULATOR_ONLY: RobotActionResult = {
+  ok: true,
+  target: 'simulator',
+  message: 'Sin robot físico conectado: la acción se mostró solo en el simulador 3D.',
+};
+
+function initialBridgeState(): BridgeUiState {
+  return {
+    enabled: false,
+    connected: false,
+    authError: false,
+    estopLatched: false,
+    lidarStale: false,
+    url: '',
+  };
+}
+
 export function useRobotTelemetry() {
   const [telemetry, setTelemetry] = useState<TelemetryState>(FALLBACK_TELEMETRY);
-  const [bridgeConnected, setBridgeConnected] = useState(false);
+  const [bridge, setBridge] = useState<BridgeUiState>(initialBridgeState);
   const bridgeRef = useRef<RobotBridgeClient | null>(null);
   const connectedRef = useRef(false);
+  const authErrorRef = useRef(false);
   const lastFrameAtRef = useRef(0);
   const choreoTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
 
@@ -293,81 +315,137 @@ export function useRobotTelemetry() {
   }
 
   useEffect(() => {
-    const client = new RobotBridgeClient(
-      undefined,
-      (t) => {
-        lastFrameAtRef.current = Date.now();
-        setTelemetry(t);
-        setBridgeConnected(true);
-        connectedRef.current = true;
-      },
-      (isConnected) => {
-        if (!isConnected) {
-          setBridgeConnected(false);
-          connectedRef.current = false;
-        }
-      }
-    );
-    bridgeRef.current = client;
-    client.connectWebSocket();
+    let client: RobotBridgeClient | null = null;
+
+    const setLink = (connected: boolean, authError: boolean) => {
+      connectedRef.current = connected;
+      authErrorRef.current = authError;
+      setBridge((prev) =>
+        prev.connected === connected && prev.authError === authError
+          ? prev
+          : {
+              ...prev,
+              connected,
+              authError,
+              ...(connected ? {} : { estopLatched: false, lidarStale: false, lidarSource: undefined }),
+            }
+      );
+    };
+
+    const start = () => {
+      client?.disconnect();
+      const enabled = isBridgeEnabled();
+      setBridge((prev) => ({ ...prev, enabled, url: resolveBridgeUrl() }));
+      setLink(false, false);
+      client = new RobotBridgeClient(
+        undefined,
+        (t) => {
+          lastFrameAtRef.current = Date.now();
+          setTelemetry(t);
+          const estopLatched = Boolean(t.estop_latched);
+          const lidarStale = Boolean(t.lidar_stale);
+          setBridge((prev) =>
+            prev.estopLatched === estopLatched &&
+            prev.lidarStale === lidarStale &&
+            prev.lidarSource === t.lidar_source
+              ? prev
+              : { ...prev, estopLatched, lidarStale, lidarSource: t.lidar_source }
+          );
+        },
+        (link) => setLink(link.connected, link.authError)
+      );
+      bridgeRef.current = client;
+      client.connectWebSocket();
+    };
+
+    start();
+    const unsubscribe = onBridgeConfigChange(start);
+    const onAuthError = () => {
+      // Stop the WebSocket loop until the token changes (onBridgeConfigChange restarts it).
+      client?.disconnect();
+      setLink(false, true);
+    };
+    window.addEventListener(BRIDGE_AUTH_ERROR_EVENT, onAuthError);
 
     const watchdog = setInterval(() => {
       if (connectedRef.current && Date.now() - lastFrameAtRef.current > 1500) {
-        connectedRef.current = false;
-        setBridgeConnected(false);
+        setLink(false, authErrorRef.current);
       }
     }, 500);
 
     return () => {
       clearInterval(watchdog);
-      client.disconnect();
+      unsubscribe();
+      window.removeEventListener(BRIDGE_AUTH_ERROR_EVENT, onAuthError);
+      client?.disconnect();
     };
   }, []);
 
-  const jogServo = useCallback(async (id: number, delta: number) => {
-    setTelemetry((prev) => {
-      const cur = prev.servos[String(id)] ?? 500;
-      const next = clampServoForHardware(id, cur + delta);
-      return {
-        ...prev,
-        servos: { ...prev.servos, [String(id)]: next },
-        active_gesture: `jog_id_${id}`,
-      };
-    });
-    if (bridgeRef.current) {
-      try {
-        await bridgeRef.current.jogServo(id, delta);
-      } catch {
-        // local fallback already applied
+  /**
+   * Sends an action to the bridge when the robot is connected. With no robot the
+   * 3D twin already moved, so the result is "simulator". Errors are never swallowed:
+   * they are logged and returned (401, 423 E-stop, timeouts…).
+   */
+  const sendToBridge = useCallback(
+    async (label: string, fn: (c: RobotBridgeClient) => Promise<unknown>): Promise<RobotActionResult> => {
+      const client = bridgeRef.current;
+      if (authErrorRef.current) {
+        return {
+          ok: false,
+          target: 'robot',
+          code: 'unauthorized',
+          message: 'El bridge pide token: la acción no llegó al robot.',
+        };
       }
-    }
-  }, []);
+      if (!client || !connectedRef.current) return SIMULATOR_ONLY;
+      try {
+        await fn(client);
+        return { ok: true, target: 'robot', message: 'Ejecutado en el robot.' };
+      } catch (err) {
+        const { code, message } = describeBridgeError(err);
+        console.warn(`[robot] ${label} falló (${code}): ${message}`);
+        if (code === 'estop_latched') {
+          setBridge((prev) => (prev.estopLatched ? prev : { ...prev, estopLatched: true }));
+        }
+        return { ok: false, target: 'robot', code, message };
+      }
+    },
+    []
+  );
 
-  const setServoPulse = useCallback(async (id: number, pulse: number, duration_ms = 250) => {
-    const clamped = clampServoForHardware(id, pulse);
-    setTelemetry((prev) => ({
-      ...prev,
-      servos: { ...prev.servos, [String(id)]: clamped },
-      active_gesture: `set_id_${id}`,
-    }));
-    if (bridgeRef.current) {
-      try {
-        await bridgeRef.current.setArm([{ id, position: clamped }], duration_ms);
-      } catch {
-        // local fallback already applied
-      }
-    }
-  }, []);
+  const jogServo = useCallback(
+    async (id: number, delta: number) => {
+      setTelemetry((prev) => {
+        const cur = prev.servos[String(id)] ?? 500;
+        const next = clampServoForHardware(id, cur + delta);
+        return {
+          ...prev,
+          servos: { ...prev.servos, [String(id)]: next },
+          active_gesture: `jog_id_${id}`,
+        };
+      });
+      return sendToBridge(`jog servo ${id}`, (c) => c.jogServo(id, delta));
+    },
+    [sendToBridge]
+  );
+
+  const setServoPulse = useCallback(
+    async (id: number, pulse: number, duration_ms = 250) => {
+      const clamped = clampServoForHardware(id, pulse);
+      setTelemetry((prev) => ({
+        ...prev,
+        servos: { ...prev.servos, [String(id)]: clamped },
+        active_gesture: `set_id_${id}`,
+      }));
+      return sendToBridge(`servo ${id}`, (c) => c.setArm([{ id, position: clamped }], duration_ms));
+    },
+    [sendToBridge]
+  );
 
   const moveChassis = useCallback(
-    async (vx: number, vy: number, wz: number, durationMs = 420) => {
-      if (bridgeRef.current && connectedRef.current) {
-        try {
-          await bridgeRef.current.moveChassis(vx, vy, wz, durationMs);
-          return;
-        } catch {
-          // fall through to local offline integration
-        }
+    async (vx: number, vy: number, wz: number, durationMs = 420): Promise<RobotActionResult> => {
+      if (connectedRef.current || authErrorRef.current) {
+        return sendToBridge('cmd_vel', (c) => c.moveChassis(vx, vy, wz, durationMs));
       }
       const dt = durationMs / 1000;
       setTelemetry((prev) => {
@@ -384,97 +462,104 @@ export function useRobotTelemetry() {
           odometry: { x_m, y_m, yaw_rad, vx: safeVx, vy, wz },
         };
       });
+      return SIMULATOR_ONLY;
     },
-    []
+    [sendToBridge]
   );
 
-  const simulateLidar = useCallback(async (front_m: number) => {
-    const clamped = Math.max(0.08, Math.min(2.5, front_m));
-    const alert = clamped < 0.28;
-    setTelemetry((prev) => ({
-      ...prev,
-      lidar: {
-        ...prev.lidar,
-        front_m: clamped,
-        obstacle_alert: alert,
-      },
-      rgb: alert ? [220, 38, 38] : [43, 74, 203],
-      active_gesture: alert ? 'lidar_safety_stop' : prev.active_gesture,
-    }));
-    if (bridgeRef.current) {
-      try {
-        await bridgeRef.current.simulateLidarDistance(clamped);
-      } catch {
-        // local fallback already applied
+  const simulateLidar = useCallback(
+    async (front_m: number) => {
+      const clamped = Math.max(0.08, Math.min(2.5, front_m));
+      const alert = clamped < 0.28;
+      setTelemetry((prev) => ({
+        ...prev,
+        lidar: {
+          ...prev.lidar,
+          front_m: clamped,
+          obstacle_alert: alert,
+        },
+        rgb: alert ? [220, 38, 38] : [43, 74, 203],
+        active_gesture: alert ? 'lidar_safety_stop' : prev.active_gesture,
+      }));
+      return sendToBridge('simulate/lidar', (c) => c.simulateLidarDistance(clamped));
+    },
+    [sendToBridge]
+  );
+
+  const triggerGesture = useCallback(
+    async (gesture: string, mood = 'stage'): Promise<RobotActionResult> => {
+      for (const t of choreoTimersRef.current) {
+        clearTimeout(t);
       }
-    }
-  }, []);
+      choreoTimersRef.current = [];
 
-  const triggerGesture = useCallback(async (gesture: string, mood = 'stage') => {
-    for (const t of choreoTimersRef.current) {
-      clearTimeout(t);
-    }
-    choreoTimersRef.current = [];
-
-    const choreo = LOCAL_CHOREOGRAPHIES[gesture];
-    if (choreo && choreo.length > 0) {
-      for (const step of choreo) {
-        const timer = setTimeout(() => {
+      const choreo = LOCAL_CHOREOGRAPHIES[gesture];
+      if (choreo && choreo.length > 0) {
+        for (const step of choreo) {
+          const timer = setTimeout(() => {
+            setTelemetry((prev) => ({
+              ...prev,
+              servos: { ...prev.servos, ...step.servos },
+              odometry: step.odometry
+                ? { ...prev.odometry, ...step.odometry }
+                : prev.odometry,
+              rgb: step.rgb,
+              active_gesture: gesture,
+              mood,
+            }));
+          }, step.delayMs);
+          choreoTimersRef.current.push(timer);
+        }
+      } else {
+        const preset = LOCAL_GESTURE_TARGETS[gesture];
+        if (preset) {
           setTelemetry((prev) => ({
             ...prev,
-            servos: { ...prev.servos, ...step.servos },
-            odometry: step.odometry
-              ? { ...prev.odometry, ...step.odometry }
+            servos: { ...prev.servos, ...preset.servos },
+            odometry: preset.odometry
+              ? { ...prev.odometry, ...preset.odometry }
               : prev.odometry,
-            rgb: step.rgb,
+            rgb: preset.rgb,
             active_gesture: gesture,
             mood,
+            held_object: preset.held_object ?? prev.held_object,
+            pointed_totem:
+              preset.pointed_totem !== undefined ? preset.pointed_totem : prev.pointed_totem,
           }));
-        }, step.delayMs);
-        choreoTimersRef.current.push(timer);
+        }
       }
-    } else {
-      const preset = LOCAL_GESTURE_TARGETS[gesture];
-      if (preset) {
-        // Add a brief pre-swing if already in the same gesture so repeated calls visibly move
-        setTelemetry((prev) => ({
-          ...prev,
-          servos: { ...prev.servos, ...preset.servos },
-          odometry: preset.odometry
-            ? { ...prev.odometry, ...preset.odometry }
-            : prev.odometry,
-          rgb: preset.rgb,
-          active_gesture: gesture,
-          mood,
-          held_object: preset.held_object ?? prev.held_object,
-          pointed_totem:
-            preset.pointed_totem !== undefined ? preset.pointed_totem : prev.pointed_totem,
-        }));
-      }
-    }
-    if (bridgeRef.current) {
-      try {
-        await bridgeRef.current.triggerGesture(gesture, mood);
-      } catch {
-        // local fallback already applied
-      }
-    }
-  }, []);
+      return sendToBridge(`gesture ${gesture}`, (c) => c.triggerGesture(gesture, mood));
+    },
+    [sendToBridge]
+  );
 
   const resetScene = useCallback(async () => {
     setTelemetry(FALLBACK_TELEMETRY);
-    if (bridgeRef.current) {
-      try {
-        await bridgeRef.current.resetScene();
-      } catch {
-        // local fallback already applied
-      }
+    return sendToBridge('scene/reset', (c) => c.resetScene());
+  }, [sendToBridge]);
+
+  /** Latches the E-stop on the bridge (`POST /stop`). */
+  const emergencyStop = useCallback(async () => {
+    const result = await sendToBridge('stop', (c) => c.emergencyStop());
+    if (result.ok && result.target === 'robot') {
+      setBridge((prev) => ({ ...prev, estopLatched: true }));
     }
-  }, []);
+    return result;
+  }, [sendToBridge]);
+
+  /** Releases a latched E-stop (`POST /estop/release`). */
+  const releaseEstop = useCallback(async () => {
+    const result = await sendToBridge('estop/release', (c) => c.releaseEstop());
+    if (result.ok && result.target === 'robot') {
+      setBridge((prev) => ({ ...prev, estopLatched: false }));
+    }
+    return result;
+  }, [sendToBridge]);
 
   return {
     telemetry,
-    bridgeConnected,
+    bridge,
+    bridgeConnected: bridge.connected,
     bridgeRef,
     client: bridgeRef.current,
     jogServo,
@@ -483,5 +568,9 @@ export function useRobotTelemetry() {
     simulateLidar,
     triggerGesture,
     resetScene,
+    emergencyStop,
+    releaseEstop,
   };
 }
+
+export type RobotLink = ReturnType<typeof useRobotTelemetry>;

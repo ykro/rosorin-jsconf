@@ -1,79 +1,53 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-
-export function getStoredOrEnvApiKey(): string {
-  if (typeof window !== 'undefined') {
-    const stored = window.localStorage.getItem('rosorin_gemini_api_key');
-    if (stored && stored.trim()) return stored.trim();
-  }
-  if (process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
-    return process.env.NEXT_PUBLIC_GEMINI_API_KEY.trim();
-  }
-  return '';
-}
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  API_KEY_UPDATED_EVENT,
+  getApiKeySource,
+  getStoredApiKey,
+  saveApiKey,
+  type ApiKeySource,
+} from '@/lib/api-key';
 
 export function ApiKeyCollapsible() {
   const [open, setOpen] = useState(false);
   const [keyInput, setKeyInput] = useState('');
   const [hasKey, setHasKey] = useState(false);
-  const [sourceLabel, setSourceLabel] = useState<'none' | 'env' | 'browser'>('none');
+  const [sourceLabel, setSourceLabel] = useState<ApiKeySource>('none');
   const [savedNotice, setSavedNotice] = useState(false);
-
-  const syncKeyState = () => {
-    if (typeof window === 'undefined') return;
-    const stored = window.localStorage.getItem('rosorin_gemini_api_key')?.trim() || '';
-    const envKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY?.trim() || '';
-    if (stored) {
-      setHasKey(true);
-      setSourceLabel('browser');
-      setKeyInput(stored);
-    } else if (envKey) {
-      setHasKey(true);
-      setSourceLabel('env');
-      setKeyInput('');
-    } else {
-      setHasKey(false);
-      setSourceLabel('none');
-      setKeyInput('');
-    }
-  };
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    const syncKeyState = () => {
+      const source = getApiKeySource();
+      setSourceLabel(source);
+      setHasKey(source !== 'none');
+      setKeyInput(source === 'browser' ? getStoredApiKey() : '');
+    };
     syncKeyState();
-    const onStorage = () => syncKeyState();
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('rosorin-api-key-updated', onStorage);
+    window.addEventListener('storage', syncKeyState);
+    window.addEventListener(API_KEY_UPDATED_EVENT, syncKeyState);
     return () => {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('rosorin-api-key-updated', onStorage);
+      window.removeEventListener('storage', syncKeyState);
+      window.removeEventListener(API_KEY_UPDATED_EVENT, syncKeyState);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     };
   }, []);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (typeof window === 'undefined') return;
-    const trimmed = keyInput.trim();
-    if (trimmed) {
-      window.localStorage.setItem('rosorin_gemini_api_key', trimmed);
-    } else {
-      window.localStorage.removeItem('rosorin_gemini_api_key');
-    }
-    syncKeyState();
-    window.dispatchEvent(new Event('rosorin-api-key-updated'));
+    saveApiKey(keyInput);
     setSavedNotice(true);
-    setTimeout(() => {
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => {
       setSavedNotice(false);
       setOpen(false);
     }, 900);
   };
 
   const handleClear = () => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.removeItem('rosorin_gemini_api_key');
+    saveApiKey('');
     setKeyInput('');
-    syncKeyState();
-    window.dispatchEvent(new Event('rosorin-api-key-updated'));
   };
 
   return (
@@ -81,6 +55,7 @@ export function ApiKeyCollapsible() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
       >
         <div className="flex items-center gap-2.5">
@@ -121,7 +96,11 @@ export function ApiKeyCollapsible() {
             <code className="font-mono text-[#202124]">localStorage</code> de tu navegador (nunca se sube al repositorio ni al servidor).
           </p>
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            <label htmlFor="api-key-collapsible-input" className="sr-only">
+              GEMINI_API_KEY
+            </label>
             <input
+              id="api-key-collapsible-input"
               type="password"
               value={keyInput}
               onChange={(e) => setKeyInput(e.target.value)}

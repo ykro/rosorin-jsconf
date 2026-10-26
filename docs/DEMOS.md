@@ -1,88 +1,92 @@
-# Guía de Demos Interactivos
+# Guía de las demos
 
-![Mapa de los 4 Demos Interactivos](./assets/demos-map.svg)
+![Mapa de las 4 demos](./assets/demos-map.svg)
 
-Los **4 demos interactivos** combinan contexto técnico o musical, conversación en vivo con **Gemini 3.8 Live** (`16 kHz` entrada / `24 kHz` salida, con compuerta acústica post-servo de `1,200 ms`) y actuación física coordinada en el **Hiwonder ROSOrin Pro** (o en su clon 3D en Three.js).
+Las 4 demos combinan un contexto (un repo, un PR, un incidente o una frase), una conversación con **Gemini Live** (audio de 16 kHz de entrada y 24 kHz de salida) y movimiento en el **Hiwonder ROSOrin Pro** o en su gemelo 3D.
+
+Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y la herramienta le responde al modelo con `target: "simulator"`. Las conversaciones de voz necesitan tu API key de Gemini.
 
 ---
 
-## Controles Comunes en Todos los Demos
+## Controles comunes
 
-- **Inicio con un clic**: Al pulsar el botón principal de cada demo, el robot ejecuta la coreografía física correspondiente, responde y deja el micrófono abierto en modo manos libres.
-- **Compuerta acústica post-servo (`1,200 ms`)**: Cada vez que un demo mueve los servos o el chasis, el micrófono se silencia durante `1,200 ms` para evitar que el ruido mecánico dispare falsas interrupciones en Gemini Live.
-- **Interrupción en vivo (*Barge-In*)**: Puedes hablar fuerte frente al micrófono mientras el robot habla o pulsar **Interrumpir** para vaciar la cola de audio en `< 20 ms`.
-- **Detener conversación**: El botón rojo detiene el stream de micrófono y cierra la sesión activa.
-- **Cambio de ruta seguro**: Al navegar a otra pestaña en la barra superior (`TopNav`), cualquier conversación o canción activa se detiene automáticamente.
+- **Un clic para empezar.** El botón principal de cada demo ejecuta el movimiento, le pide al modelo que hable y deja el micrófono abierto. La app se conecta a Gemini Live antes de abrir el micrófono; si la conexión falla, el micrófono no se abre.
+- **Compuerta después de mover (1200 ms).** Cada vez que el robot se mueve, el micrófono manda silencio durante 1200 ms para que el ruido de los servos no interrumpa al modelo.
+- **Interrumpir.** Habla fuerte mientras el robot habla, o pulsa **Interrumpir**, y la web corta su audio. La siguiente respuesta se escucha normal.
+- **Detener.** El botón **Detener** cierra el micrófono y la sesión.
+- **Cambiar de ruta o de pestaña.** Al navegar con la barra superior o cambiar de pestaña, la conversación se detiene; en el segundo caso aparece un aviso.
+- **Estado de la conexión.** La consola muestra Listo, Conectando…, Reconectando…, Conectado, Escuchando tu micrófono, Hablando…, Desconectado, Error de conexión o Sin API key.
+- **Paro de emergencia.** Desde el panel de la píldora del robot o desde `/face`. Mientras esté enclavado, los movimientos fallan y el modelo recibe `status: "error", code: "estop_latched"` y lo dice en voz alta.
 
 ---
 
 ## Demo A · Repo Roaster (`/demos/roaster`)
 
-- **Objetivo**: Analizar un repositorio de GitHub y expresar físicamente el veredicto con el brazo de 6 grados de libertad y las llantas Mecanum (`facepalm`, `trash_toss`, `chef_kiss`, `suspicious_inspect`, `victory_spin`).
-- **Herramienta de Gemini Live**: `express_verdict({ gesture, mood, verdict_headline })`.
-- **Repositorios preconfigurados**:
-  - `facebook/react`
-  - `vercel/next.js`
-  - `denoland/deno`
-  - `ykro/rosorin-jsconf`
-- **Flujo en vivo**:
-  1. Selecciona un repositorio y pulsa **Analizar y Roastear**.
-  2. Pregúntale por voz o con los botones rápidos: *«Dame más detalles técnicos de lo que encontraste»* o *«¿Cuál es el problema más crítico y cómo me recomiendas arreglarlo?»*.
+- **Objetivo:** analizar un repo de GitHub y reaccionar con un gesto del brazo y el chasis (`facepalm`, `trash_toss`, `chef_kiss`, `suspicious_inspect`, `victory_spin`).
+- **Herramienta:** `express_verdict({ gesture, mood, verdict_headline })`.
+- **Repos preconfigurados:** `facebook/react`, `vercel/next.js`, `denoland/deno`, `ykro/rosorin-jsconf`. Estos usan datos de ensayo guardados en [`repo-analyzer.ts`](../web/src/lib/repo-analyzer.ts) (`origin: "preset_rehearsal"`), no la API de GitHub en vivo. Cualquier otro repo se consulta en `api.github.com` sin token (60 peticiones por hora por IP).
+- **Si GitHub no responde:** estrellas y dependencias quedan como «no disponible» (`origin: "unavailable"`) y se le pide al modelo que lo diga en vez de inventar cifras.
+- **Flujo:**
+  1. Elige un repo y pulsa **Analizar y Roastear**.
+  2. La app ejecuta el gesto sugerido por el análisis y le indica al modelo que no llame herramientas en ese turno: el modelo solo habla.
+  3. Sigue por voz o con los botones rápidos («Dame más detalles técnicos de lo que encontraste en el repositorio.», etc.).
 
 ---
 
-## Demo B · Physical CI/CD Gatekeeper (`/demos/gatekeeper`)
+## Demo B · Gatekeeper CI/CD (`/demos/gatekeeper`)
 
-- **Objetivo**: El robot sostiene físicamente la tarjeta **Production Deploy Key** en su pinza paralela (**Servo ID 10**, pulso cerrado `680`). Al evaluar un Pull Request simulado de producción, decide si gira la base hacia la bandeja verde de **APROBADO** (`joint1 = 680`) o hacia la bandeja roja de **RECHAZADO** (`joint1 = 260`) y abre la pinza (pulso `220`) para soltar físicamente la llave.
-- **Herramienta de Gemini Live**: `release_deploy_key({ decision: "approve" | "reject", reason_es })`.
-- **Botones de preparación física**:
-  - **Centrar Robot**: Regresa el chasis y el brazo a la posición neutral (`home`).
-  - **Sujetar Llave**: Coloca el brazo en pose de custodia (`gatekeeper_hold`) y cierra la pinza (`ID 10 = 680`).
-- **Pull Requests simulados incluidos**:
-  1. `acme-cloud/edge-router#289` *(Rechazar — desactiva validación de firmas JWT en rutas de pago sin plan de rollback ni tests)*
-  2. `acme-cloud/checkout-api#645` *(Aprobar — suite E2E en verde, feature flag gradual y rollback automático verificado)*
-  3. `acme-cloud/realtime-worker#234` *(Aprobar — pruebas deterministas completas y cero regresiones de latencia)*
-
----
-
-## Demo C · Spatial Bug Hunter (`/demos/bughunter`)
-
-- **Objetivo**: Frente al robot se ubican 3 tótems físicos a `42 cm` de distancia:
-  - **Cloud Run** (Izquierda, `Y = +20 cm`, Azul `#1A73E8`)
-  - **Gemini Live** (Centro, `Y = 0 cm`, Verde `#1E8E3E`)
-  - **Firestore** (Derecha, `Y = -20 cm`, Amarillo `#F9AB00`)
-  Al analizar un incidente de producción simulado, el robot se desplaza lateralmente con sus llantas Mecanum (*strafe*) y apunta con el brazo al servicio culpable.
-- **Herramienta de Gemini Live**: `point_at_service_totem({ service: "cloud_run" | "gemini_live" | "firestore", diagnosis_es })`.
-- **Incidentes simulados incluidos**:
-  1. `acme-cloud/checkout-api#542` → **Cloud Run** *(Fuga de memoria en worker SSR / contenedor supera límite de 512 MiB con `OOMKilled`)*
-  2. `acme-cloud/realtime-voice#142` → **Gemini Live** *(Cola de audio PCM 24 kHz no vaciada tras `interrupted: true` en barge-in)*
-  3. `acme-cloud/order-store#798` → **Firestore** *(Consulta rechazada con `FAILED_PRECONDITION` por falta de índice compuesto)*
+- **Objetivo:** el robot sostiene una llave impresa de «Production Deploy» con la pinza (servo 10 cerrado en 680). Ante un PR, gira hacia la bandeja verde de **APROBADO** (`joint1 = 700`) o la roja de **RECHAZADO** (`joint1 = 280`) y abre la pinza (220) para soltar la llave. Con el rechazo, el chasis además retrocede.
+- **Herramienta:** `release_deploy_key({ decision: "approve" | "reject", reason_es })`.
+- **Quién decide:** la app, con una regla sobre los datos del PR (tests en verde y palabras como *test*, *canary*, *rollback* o *e2e* en la justificación). El modelo explica la decisión en voz alta.
+- **Botones de preparación:**
+  - **Centrar Robot:** chasis y brazo a `home`.
+  - **Sujetar Llave:** pose `gatekeeper_hold` con la pinza cerrada (680).
+- **PRs de ejemplo** (escenarios simulados de una organización ficticia, `acme-cloud`; los datos están en `PRESET_PRS` de `repo-analyzer.ts`):
+  1. `acme-cloud/edge-router#289`: rechazar. Saltarse la validación del middleware de pagos y borrar 42 líneas de tests para un *hotfix* de viernes, sin rollback.
+  2. `acme-cloud/checkout-api#645`: aprobar. Parche de idempotencia con 18 tests E2E y canary al 5 %.
+  3. `acme-cloud/rust-gateway#234`: aprobar. Límites de velocidad con la suite de tests de Rust completa en verde.
 
 ---
 
-## Demo D · Modo Bumblebee Radio (`/demos/bumblebee`)
+## Demo C · Bug Hunter (`/demos/bughunter`)
 
-- **Objetivo**: Inspirado en Bumblebee, la caja de voz del robot está dañada y **solo puede comunicarse sintonizando fragmentos de canciones** mientras baila con el brazo de 6 ejes y las ruedas Mecanum.
-- **Catálogo musical bilingüe (`web/public/songs/catalog.json`)**:
-  - **168 fragmentos catalogados** con letras sincronizadas y metadatos emocionales: **95 en español** y **73 en inglés**.
-  - *Nota sobre archivos de audio*: Los archivos `.mp3` están excluidos del repositorio público de Git por cumplimiento de derechos de autor; pueden colocarse localmente en `web/public/songs/clips/` (y el reproductor cuenta con síntesis musical de respaldo cuando un archivo `.mp3` no está presente localmente).
-- **Coreografías físicas de baile (`robot-bridge/src/gestures.rs`)**:
-  - `bumblebee_hype` — Brazos arriba y giro festivo Mecanum
-  - `bumblebee_groove` — Desplazamiento lateral rítmico (*funk strafe*)
-  - `bumblebee_rock_out` — *Headbanging* de hombro/codo y sacudida de chasis
-  - `bumblebee_romance` — Vaivén suave en frecuencia FM nocturna
-  - `bumblebee_sassy` — Giro con actitud y pose de pinza
-  - `bumblebee_sad_droop` — Hombros caídos y violines tristes
-- **Herramienta de Gemini Live**: `play_radio_sequence({ clip_ids, dance_gesture, radio_caption })`.
-- **Flujo en vivo**:
-  1. Pulsa el botón único **«📻 Iniciar Conversación Musical»**.
-  2. Háblale por el micrófono o selecciona una frase rápida (*«¡Hola Bumblebee! ¿Listo para romperla en el escenario?»*, *«El deploy en viernes salió perfecto a la primera»*, *«Se cayó producción y nadie sabe por qué»*).
-  3. El robot reproduce el barrido de estática FM, sintoniza la canción exacta, muestra la letra en `/face` y ejecuta la coreografía de baile en el robot físico y en el clon 3D (activando la compuerta acústica de `1,200 ms`).
-  4. También puedes explorar y disparar manualmente cualquiera de los **168 clips** desde el **Jukebox Musical** filtrando por idioma (`Español` / `English`), emoción o letra.
+- **Objetivo:** frente al robot hay 3 tótems impresos:
+  - **Cloud Run** a la izquierda (azul `#1A73E8`)
+  - **Gemini Live** al centro (verde `#1E8E3E`)
+  - **Firestore** a la derecha (amarillo `#F9AB00`)
+
+  Ante un incidente, el chasis se desliza de lado (0.22 m/s durante 850 ms, unos 19 cm) y el brazo apunta al tótem culpable. Para el centro avanza unos 6 cm.
+- **Herramienta:** `point_at_service_totem({ service: "cloud_run" | "gemini_live" | "firestore", diagnosis_es })`.
+- **Quién decide:** la app, buscando palabras clave en el texto del incidente (*firestore*, *index*, *precondition* → Firestore; *audio*, *pcm*, *live*, *barge-in* → Gemini Live; el resto → Cloud Run). El modelo explica la causa.
+- **Incidentes de ejemplo** (escenarios simulados de `acme-cloud`, en `repo-analyzer.ts`):
+  1. `acme-cloud/cloud-run-worker#542` → **Cloud Run**: el contenedor supera los 512 MiB (`OOMKilled`) por una fuga de descriptores de WebSocket.
+  2. `acme-cloud/voice-stream#142` → **Gemini Live**: la cola de audio PCM de 24 kHz pasa de 4800 ms porque no se vacía al recibir `serverContent.interrupted`.
+  3. `acme-cloud/firestore-orders#798` → **Firestore**: `failed-precondition` (HTTP 400) por falta de un índice compuesto.
 
 ---
 
-## Props Físicos Imprimibles 1:1
+## Demo D · Bumblebee Radio (`/demos/bumblebee`)
 
-El archivo PDF calibrado en milímetros para imprimir en Carta/A4 al `100%` se encuentra en:
-- [`docs/rosorin-stage-props-print.pdf`](./rosorin-stage-props-print.pdf) (incluye la Llave de Deploy doble cara para el Servo ID 10, los 2 tapetes de bandeja Aprobado/Rechazado y los 3 tótems plegables de mesa).
+- **Objetivo:** como Bumblebee, el robot tiene la caja de voz dañada y **solo responde con fragmentos de canciones** mientras baila con el brazo y el chasis.
+- **Catálogo** ([`web/public/songs/catalog.json`](../web/public/songs/catalog.json)): 168 fragmentos con letra y metadatos emocionales, 95 en español y 73 en inglés, de 2.1 a 9.4 s.
+- **Sin MP3:** los clips no están en git ni en el sitio desplegado. Cuando un clip no carga, la web reproduce un barrido de radio, muestra «Clip no disponible en esta versión pública: se reproduce un barrido de radio.» y mantiene la letra en el dial. En local, coloca los `<id>.mp3` en `web/public/songs/clips/` para oír las canciones.
+- **Bailes** (`robot-bridge/src/gestures.rs`):
+  - `bumblebee_hype`: fiesta
+  - `bumblebee_groove`: ritmo funk con desplazamiento lateral
+  - `bumblebee_rock_out`: cabeceo rockero
+  - `bumblebee_romance`: vaivén romántico
+  - `bumblebee_sad_droop`: violines tristes
+  - `bumblebee_sassy`: giro con actitud
+
+  Cada clip dispara el baile y un pequeño movimiento del chasis.
+- **Herramienta:** `play_radio_sequence({ clip_ids, dance_gesture, radio_caption })`. El modelo puede pedir hasta 3 IDs; la web reproduce como máximo 2. Si ningún ID existe en el catálogo, elige el clip un buscador local.
+- **Flujo:**
+  1. Pulsa **📻 Iniciar Conversación Musical** (necesita API key) y háblale.
+  2. Sin API key también funciona por texto: las frases rápidas («¡Hola Bumblebee! ¿Cómo estás hoy?», «El deploy en viernes salió perfecto a la primera.», «Se cayó producción y nadie sabe por qué.») y el cuadro de texto usan el buscador local de canciones.
+  3. El robot sintoniza, muestra la letra en el dial y en `/face`, y baila. El historial «Secuencias Musicales Sintonizadas» guarda cada turno.
+
+---
+
+## Props imprimibles a escala 1:1
+
+El PDF para imprimir en Carta o A4 al 100 % está en [`docs/rosorin-stage-props-print.pdf`](./rosorin-stage-props-print.pdf): la llave de deploy para la pinza, las 2 bandejas (aprobado y rechazado) y los 3 tótems de mesa. Se genera con [`docs/generate_props_pdf.py`](./generate_props_pdf.py), que usa Chrome o Chromium headless y copia el resultado a `web/public/props/` para la ruta `/props`.

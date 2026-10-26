@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg viewBox="0 0 1280 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="api-flow-title api-flow-desc" id="api-flow-root">
-  <title id="api-flow-title">Flujo del Contrato de API REST, WebSocket y Gemini Tool Calling</title>
-  <desc id="api-flow-desc">Relación entre las declaraciones de herramientas de Gemini 3.8 Live, los endpoints HTTP REST y el stream WebSocket a 20 Hz del puente en Rust.</desc>
+  <title id="api-flow-title">Flujo de la API: herramientas de Gemini, HTTP y WebSocket</title>
+  <desc id="api-flow-desc">Gemini Live pide una herramienta, el cliente web la ejecuta con un POST con token al bridge en Rust, que aplica límites, freno por eje y E-stop, y el modelo recibe el resultado real (ok o error). La telemetría vuelve por WebSocket a 20 Hz.</desc>
   <defs>
     <style>
       #api-flow-root {
@@ -33,7 +33,7 @@
   <text x="488" y="76" fill="#2d3142" font-size="18" font-weight="700">2. Cliente Web (TS)</text>
 
   <rect x="884" y="36" width="360" height="428" rx="12" fill="#2d3142" fill-opacity="0.03" stroke="#2d3142" stroke-opacity="0.16" stroke-width="1.2"/>
-  <text x="912" y="76" fill="#2d3142" font-size="18" font-weight="700">3. Rust Bridge (:9000)</text>
+  <text x="912" y="76" fill="#2d3142" font-size="18" font-weight="700">3. Bridge en Rust (:9000)</text>
 
   <!-- Connectors -->
   <line x1="368" y1="176" x2="488" y2="176" stroke="#2e5aa8" stroke-width="2" marker-end="url(#api-arrow-blue)"/>
@@ -42,11 +42,11 @@
 
   <line x1="488" y1="356" x2="368" y2="356" stroke="#4f5d75" stroke-width="2" stroke-dasharray="6,5" marker-end="url(#api-arrow)"/>
   <rect x="378" y="320" width="100" height="26" rx="6" fill="#f5f5f5"/>
-  <text x="428" y="338" fill="#4f5d75" font-size="15" font-weight="700" class="mono" text-anchor="middle">Status OK</text>
+  <text x="428" y="338" fill="#4f5d75" font-size="15" font-weight="700" class="mono" text-anchor="middle">ok / error</text>
 
   <line x1="792" y1="176" x2="912" y2="176" stroke="#eb6c36" stroke-width="2" marker-end="url(#api-arrow-accent)"/>
   <rect x="802" y="140" width="100" height="26" rx="6" fill="#f5f5f5"/>
-  <text x="852" y="158" fill="#eb6c36" font-size="15" font-weight="700" class="mono" text-anchor="middle">POST / WS</text>
+  <text x="852" y="158" fill="#eb6c36" font-size="15" font-weight="700" class="mono" text-anchor="middle">HTTP POST</text>
 
   <line x1="912" y1="356" x2="792" y2="356" stroke="#4f5d75" stroke-width="2" stroke-dasharray="6,5" marker-end="url(#api-arrow)"/>
   <rect x="802" y="320" width="100" height="26" rx="6" fill="#f5f5f5"/>
@@ -59,12 +59,12 @@
 
   <rect x="64" y="288" width="304" height="136" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
   <text x="88" y="346" fill="#2d3142" font-size="22" font-weight="700">ToolResponse</text>
-  <text x="88" y="384" fill="#4f5d75" font-size="16">Confirmación no bloqueante</text>
+  <text x="88" y="384" fill="#4f5d75" font-size="16">Resultado real del bridge</text>
 
   <!-- Column 2 -->
   <rect x="488" y="108" width="304" height="136" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
-  <text x="512" y="166" fill="#2d3142" font-size="22" font-weight="700">Dispatcher REST / WS</text>
-  <text x="512" y="204" fill="#4f5d75" font-size="16" class="mono">/gesture · /cmd_vel · /arm</text>
+  <text x="512" y="166" fill="#2d3142" font-size="22" font-weight="700">Cliente HTTP + token</text>
+  <text x="512" y="204" fill="#4f5d75" font-size="16" class="mono">/gesture · /cmd_vel · /hud</text>
 
   <rect x="488" y="288" width="304" height="136" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
   <text x="512" y="346" fill="#2d3142" font-size="22" font-weight="700">Stream de Estado</text>
@@ -73,7 +73,7 @@
   <!-- Column 3 -->
   <rect x="912" y="108" width="304" height="136" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
   <text x="936" y="166" fill="#2d3142" font-size="22" font-weight="700">Guardrails en Rust</text>
-  <text x="936" y="204" fill="#4f5d75" font-size="16">Clamping + Freno LiDAR 0.28 m</text>
+  <text x="936" y="204" fill="#4f5d75" font-size="16">Límites, freno por eje, E-stop</text>
 
   <rect x="912" y="288" width="304" height="136" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
   <text x="936" y="346" fill="#2d3142" font-size="22" font-weight="700">TelemetryState</text>

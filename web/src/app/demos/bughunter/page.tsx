@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { TopNav } from '@/components/TopNav';
 import { GeminiLiveConsole } from '@/components/GeminiLiveConsole';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
+import { useEmbodiedLiveSession } from '@/lib/use-embodied-live-session';
+import { useLiteMode } from '@/lib/use-lite-mode';
 import { analyzeGitHubIncident } from '@/lib/repo-analyzer';
-import { EmbodiedGeminiLiveSession } from '@/lib/gemini-live';
 
 const Rosorin3DViewer = dynamic(
   () => import('@/components/Rosorin3DViewer').then((m) => m.Rosorin3DViewer),
@@ -56,74 +57,19 @@ const FOLLOW_UP_QUESTIONS = [
 ];
 
 export default function BugHunterDemoPage() {
-  const {
-    telemetry,
-    bridgeConnected,
-    jogServo,
-    moveChassis,
-    simulateLidar,
-    triggerGesture,
-    resetScene,
-  } = useRobotTelemetry();
-
-  const [isLite, setIsLite] = useState(
-    process.env.NEXT_PUBLIC_LITE_MODE === '1'
-  );
+  const robot = useRobotTelemetry();
+  const { telemetry, jogServo, moveChassis, simulateLidar, triggerGesture, resetScene } = robot;
+  const isLite = useLiteMode();
   const [incidentInput, setIncidentInput] = useState(PRESET_INCIDENT_LINKS[0].url);
   const [hunting, setHunting] = useState(false);
   const [identifiedTotem, setIdentifiedTotem] = useState<'cloud_run' | 'gemini_live' | 'firestore' | null>(null);
-  const [conversationActive, setConversationActive] = useState(false);
-  const [liveStatus, setLiveStatus] = useState<'idle' | 'connecting' | 'live' | 'rehearsal_voice'>('idle');
-  const [speaking, setSpeaking] = useState(false);
-  const [micLevel, setMicLevel] = useState(0);
-  const [micWarning, setMicWarning] = useState<string | null>(null);
-  const [userTranscript, setUserTranscript] = useState('');
-  const [verdictHeadline, setVerdictHeadline] = useState<string>('');
 
-  const liveSessionRef = useRef<EmbodiedGeminiLiveSession | null>(null);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('lite') === '1' || process.env.NEXT_PUBLIC_LITE_MODE === '1') {
-        setIsLite(true);
-      } else {
-        window.localStorage.removeItem('ROSORIN_LITE_MODE');
-        setIsLite(false);
-      }
-    }
+  const onVerdictGesture = useCallback((gesture: string) => {
+    if (gesture === 'point_cloud_run') setIdentifiedTotem('cloud_run');
+    else if (gesture === 'point_gemini_live') setIdentifiedTotem('gemini_live');
+    else if (gesture === 'point_firestore') setIdentifiedTotem('firestore');
   }, []);
-
-  useEffect(() => {
-    const session = new EmbodiedGeminiLiveSession(
-      { triggerGesture, moveChassis },
-      {
-        onStatus: (st) => setLiveStatus(st),
-        onTranscript: (role, text) => {
-          if (role === 'robot' && text.trim()) {
-            setVerdictHeadline(text);
-          } else if (role === 'user' && text.trim()) {
-            setUserTranscript(text);
-          }
-        },
-        onVerdictHeadline: (headline, gesture) => {
-          if (headline) setVerdictHeadline(headline);
-          if (gesture === 'point_cloud_run') setIdentifiedTotem('cloud_run');
-          else if (gesture === 'point_gemini_live') setIdentifiedTotem('gemini_live');
-          else if (gesture === 'point_firestore') setIdentifiedTotem('firestore');
-        },
-        onSpeakingChange: (sp) => setSpeaking(sp),
-        onConversationActiveChange: (act) => setConversationActive(act),
-        onMicLevelChange: (lvl) => setMicLevel(lvl),
-        onMicWarning: (warn) => setMicWarning(warn),
-      }
-    );
-    liveSessionRef.current = session;
-
-    return () => {
-      session.stopContinuousConversation();
-    };
-  }, [triggerGesture, moveChassis]);
+  const { sessionRef: liveSessionRef, consoleProps } = useEmbodiedLiveSession(robot, onVerdictGesture);
 
   const handleHunt = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -162,7 +108,11 @@ export default function BugHunterDemoPage() {
         </div>
 
         <form onSubmit={handleHunt} className="mt-4 flex flex-col gap-3">
+          <label htmlFor="bughunter-issue-input" className="text-xs font-bold text-[#5F6368]">
+            Issue de GitHub con el incidente
+          </label>
           <input
+            id="bughunter-issue-input"
             type="text"
             value={incidentInput}
             onChange={(e) => setIncidentInput(e.target.value)}
@@ -213,18 +163,9 @@ export default function BugHunterDemoPage() {
 
       {/* 2. Gemini Live Voice & Follow-up Conversation */}
       <GeminiLiveConsole
-        status={liveStatus}
-        speaking={speaking}
-        externalActive={conversationActive}
-        micLevel={micLevel}
-        micWarning={micWarning}
-        userTranscript={userTranscript}
-        verdictHeadline={verdictHeadline}
+        {...consoleProps}
         placeholderHeadline="Selecciona un Issue de GitHub y pulsa Diagnosticar y Señalar para conversar."
         quickQuestions={FOLLOW_UP_QUESTIONS}
-        onSendBargeIn={(text) => liveSessionRef.current?.sendUserDefense(text)}
-        onStopContinuous={() => liveSessionRef.current?.stopContinuousConversation()}
-        onInterruptSpeech={() => liveSessionRef.current?.interruptRobotSpeech()}
       />
     </div>
   );
@@ -232,7 +173,7 @@ export default function BugHunterDemoPage() {
   if (isLite) {
     return (
       <div className="flex min-h-screen w-screen flex-col bg-[#F8F9FA] text-[#202124]">
-        <TopNav bridgeConnected={bridgeConnected} liteMode={true} />
+        <TopNav robot={robot} liteMode={true} />
         <main className="mx-auto w-full max-w-2xl flex-1 p-6">{controlsColumn}</main>
       </div>
     );
@@ -240,7 +181,7 @@ export default function BugHunterDemoPage() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#F8F9FA] text-[#202124]">
-      <TopNav bridgeConnected={bridgeConnected} />
+      <TopNav robot={robot} />
       <main className="flex h-[calc(100vh-56px)] w-full overflow-hidden">
         <aside className="flex w-[460px] shrink-0 flex-col overflow-y-auto border-r border-[#DADCE0] bg-[#F8F9FA] p-4">
           {controlsColumn}

@@ -2,6 +2,7 @@
 name = "rosorin-bridge"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.87"
 description = "Low-latency Rust HTTP + WebSocket bridge for Hiwonder ROSOrin Pro (ROS 2 Humble & STM32 1Mbps Serial)"
 authors = ["Adrián Catalán <adriancatalan@gmail.com>"]
 
