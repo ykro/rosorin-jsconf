@@ -950,7 +950,7 @@ export function Rosorin3DViewer({
               onClick={onResetScene}
               className="rounded-lg border border-[#DADCE0] bg-[#F8F9FA] px-3 py-1.5 text-xs font-bold text-[#5F6368] hover:border-[#1A73E8] hover:text-[#1A73E8]"
             >
-              Reiniciar
+              Reset
             </button>
           )}
         </div>
