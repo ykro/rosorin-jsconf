@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="rust-safety-pipeline-title rust-safety-pipeline-desc" id="rust-safety-pipeline-root">
+  <title id="rust-safety-pipeline-title">Pipeline de 4 Barreras de Seguridad de Hardware en Rust</title>
+  <desc id="rust-safety-pipeline-desc">Secuencia de cuatro validaciones deterministas en Rust que filtran los comandos de Gemini Live antes de escribir en el bus serial STM32 del robot.</desc>
+  <defs>
+    <style>
+      #rust-safety-pipeline-root {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        color: #2d3142;
+      }
+      .mono {
+        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+      }
+    </style>
+    <marker id="rsp-arrow" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+      <polygon points="0 0, 10 4, 0 8" fill="#4f5d75"/>
+    </marker>
+    <marker id="rsp-arrow-accent" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+      <polygon points="0 0, 10 4, 0 8" fill="#eb6c36"/>
+    </marker>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+  <!-- Outer Zone -->
+  <rect x="36" y="32" width="1208" height="276" rx="12" fill="#2d3142" fill-opacity="0.03" stroke="#2d3142" stroke-opacity="0.16" stroke-width="1.2"/>
+  <text x="64" y="72" fill="#2d3142" font-size="18" font-weight="700">Firewall Determinista de Hardware en Rust</text>
+
+  <!-- Connectors -->
+  <line x1="312" y1="192" x2="352" y2="192" stroke="#4f5d75" stroke-width="2" marker-end="url(#rsp-arrow)"/>
+  <line x1="612" y1="192" x2="652" y2="192" stroke="#eb6c36" stroke-width="2.2" marker-end="url(#rsp-arrow-accent)"/>
+  <line x1="912" y1="192" x2="952" y2="192" stroke="#eb6c36" stroke-width="2.2" marker-end="url(#rsp-arrow-accent)"/>
+
+  <!-- Stage 1 -->
+  <rect x="60" y="104" width="252" height="172" rx="10" fill="#ffffff" stroke="#2e5aa8" stroke-width="1.6"/>
+  <text x="84" y="146" fill="#2e5aa8" font-size="16" font-weight="700" class="mono">1. SERDE + IDs</text>
+  <text x="84" y="190" fill="#2d3142" font-size="21" font-weight="700">Tipado Estricto</text>
+  <text x="84" y="230" fill="#4f5d75" font-size="16">Solo servos {1..5, 10}</text>
+
+  <!-- Stage 2 -->
+  <rect x="360" y="104" width="252" height="172" rx="10" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
+  <text x="384" y="146" fill="#4f5d75" font-size="16" font-weight="700" class="mono">2. CLAMPING</text>
+  <text x="384" y="190" fill="#2d3142" font-size="21" font-weight="700">Rango Mecánico</text>
+  <text x="384" y="230" fill="#4f5d75" font-size="16">J2 220..780 · Pinza 200..750</text>
+
+  <!-- Stage 3 -->
+  <rect x="660" y="104" width="252" height="172" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
+  <text x="684" y="146" fill="#eb6c36" font-size="16" font-weight="700" class="mono">3. ESCUDO LIDAR</text>
+  <text x="684" y="190" fill="#2d3142" font-size="21" font-weight="700">Freno a &lt; 0.28 m</text>
+  <text x="684" y="230" fill="#4f5d75" font-size="16">Anula avance vx &gt; 0</text>
+
+  <!-- Stage 4 -->
+  <rect x="960" y="104" width="256" height="172" rx="10" fill="#eb6c36" fill-opacity="0.08" stroke="#eb6c36" stroke-width="1.8"/>
+  <text x="984" y="146" fill="#eb6c36" font-size="16" font-weight="700" class="mono">4. WATCHDOG</text>
+  <text x="984" y="190" fill="#2d3142" font-size="21" font-weight="700">Deadman (600 ms)</text>
+  <text x="984" y="230" fill="#4f5d75" font-size="16">Detiene las 4 llantas</text>
+</svg>

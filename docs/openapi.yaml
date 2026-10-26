@@ -1,0 +1,468 @@
+openapi: 3.1.0
+info:
+  title: ROSOrin Pro Rust Bridge API (rosorin-bridge)
+  version: 1.0.0
+  description: >
+    Especificación formal HTTP REST y WebSocket del puente determinista en Rust (`rosorin-bridge`)
+    para el robot manipulador móvil Hiwonder ROSOrin Pro y su simulador cinemático 3D.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  contact:
+    name: Adrián Catalán (@adriancs.tech)
+    url: https://github.com/ykro/rosorin-jsconf
+servers:
+  - url: http://localhost:9000
+    description: Simulador cinemático local en laptop (--backend mock)
+  - url: http://{robot_ip}:9000
+    description: Robot físico Hiwonder ROSOrin Pro en red Wi-Fi (--backend ros2 | serial)
+    variables:
+      robot_ip:
+        default: localhost
+        description: Dirección IP del Jetson Orin Nano en la red local
+paths:
+  /status:
+    get:
+      summary: Obtener estado instantáneo de telemetría
+      operationId: getStatus
+      responses:
+        '200':
+          description: Instantánea actual del estado del robot o simulador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryState'
+  /cmd_vel:
+    post:
+      summary: Comandar velocidad en el chasis omnidireccional Mecanum
+      operationId: postCmdVel
+      description: >
+        Aplica velocidades lineales (`±0.25 m/s`) y angulares (`±0.80 rad/s`) durante `100..2500 ms`
+        sujetas al freno autónomo por LiDAR (`front_m < 0.28 m` a 40 Hz) y al deadman watchdog (`600 ms`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CmdVelRequest'
+      responses:
+        '200':
+          description: Velocidad aplicada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+  /arm:
+    post:
+      summary: Posicionar múltiples servos del brazo 6-DOF
+      operationId: postArm
+      description: >
+        Valida que cada ID pertenezca a `{1, 2, 3, 4, 5, 10}` e interpola hacia los pulsos objetivo
+        a 900 pulsos/s en el loop de 40 Hz aplicando `clamp_servo_pulse`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArmRequest'
+      responses:
+        '200':
+          description: Trayectoria de brazo aceptada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+        '400':
+          description: ID de servo inválido (fuera de {1, 2, 3, 4, 5, 10})
+  /servo/jog:
+    post:
+      summary: Ajustar incrementalmente el pulso de un servo individual
+      operationId: postServoJog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServoJogRequest'
+      responses:
+        '200':
+          description: Pulso incrementado/decrementado dentro de límites seguros
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+        '400':
+          description: ID de servo inválido (fuera de {1, 2, 3, 4, 5, 10})
+  /gesture:
+    post:
+      summary: Ejecutar una coreografía física compuesta
+      operationId: postGesture
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GestureRequest'
+      responses:
+        '200':
+          description: Coreografía iniciada en segundo plano
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+  /hud:
+    post:
+      summary: Actualizar el rostro expresivo y teleprompter (/face)
+      operationId: postHud
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HudUpdateRequest'
+      responses:
+        '200':
+          description: HUD actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+  /rgb:
+    post:
+      summary: Cambiar el color de los LEDs WS2812 del robot
+      operationId: postRgb
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RgbRequest'
+      responses:
+        '200':
+          description: Color RGB aplicado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+  /buzzer:
+    post:
+      summary: Emitir tono en el buzzer de la placa STM32
+      operationId: postBuzzer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuzzerRequest'
+      responses:
+        '200':
+          description: Buzzer activado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+  /simulate/lidar:
+    post:
+      summary: Simular distancia frontal de obstáculo en el LiDAR (solo modo mock)
+      operationId: postSimulateLidar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LidarSimRequest'
+      responses:
+        '200':
+          description: Distancia frontal simulada actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+        '403':
+          description: Prohibido en hardware real (solo disponible en --backend mock)
+  /scene/reset:
+    post:
+      summary: Reiniciar odometría, motores y pose neutral del brazo
+      operationId: postSceneReset
+      responses:
+        '200':
+          description: Escena reiniciada a valores iniciales
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+  /stop:
+    post:
+      summary: Parada de emergencia inmediata de chasis y brazo
+      operationId: postStop
+      responses:
+        '200':
+          description: Motores detenidos y brazo en posición segura
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionResponse'
+  /camera/frame:
+    get:
+      summary: Obtener último frame de la cámara 3D Aurora 930 o vista sintética
+      operationId: getCameraFrame
+      responses:
+        '200':
+          description: Imagen JPEG de la cámara o SVG sintético
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
+              schema:
+                type: string
+components:
+  schemas:
+    CmdVelRequest:
+      type: object
+      properties:
+        linear_x:
+          type: number
+          default: 0.0
+          minimum: -0.25
+          maximum: 0.25
+        linear_y:
+          type: number
+          default: 0.0
+          minimum: -0.25
+          maximum: 0.25
+        angular_z:
+          type: number
+          default: 0.0
+          minimum: -0.8
+          maximum: 0.8
+        duration_ms:
+          type: integer
+          default: 600
+          minimum: 100
+          maximum: 2500
+    ServoTarget:
+      type: object
+      required: [id, position]
+      properties:
+        id:
+          type: integer
+          enum: [1, 2, 3, 4, 5, 10]
+        position:
+          type: integer
+          minimum: 100
+          maximum: 900
+    ArmRequest:
+      type: object
+      required: [servos]
+      properties:
+        duration_ms:
+          type: integer
+          default: 500
+          minimum: 120
+          maximum: 5000
+        servos:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServoTarget'
+    ServoJogRequest:
+      type: object
+      required: [id, delta]
+      properties:
+        id:
+          type: integer
+          enum: [1, 2, 3, 4, 5, 10]
+        delta:
+          type: integer
+          minimum: -300
+          maximum: 300
+    GestureRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          enum:
+            - home
+            - facepalm
+            - trash_toss
+            - chef_kiss
+            - suspicious_inspect
+            - victory_spin
+            - nod_yes
+            - shake_no
+            - wave_hello
+            - gatekeeper_hold
+            - gatekeeper_approve
+            - gatekeeper_reject
+            - point_cloud_run
+            - point_gemini_live
+            - point_firestore
+            - bumblebee_hype
+            - bumblebee_groove
+            - bumblebee_rock_out
+            - bumblebee_romance
+            - bumblebee_sad_droop
+            - bumblebee_sassy
+        mood:
+          type: string
+    HudUpdateRequest:
+      type: object
+      properties:
+        speaking:
+          type: boolean
+        listening:
+          type: boolean
+        headline:
+          type: string
+        subtext:
+          type: string
+        mood:
+          type: string
+    RgbRequest:
+      type: object
+      required: [r, g, b]
+      properties:
+        r:
+          type: integer
+          minimum: 0
+          maximum: 255
+        g:
+          type: integer
+          minimum: 0
+          maximum: 255
+        b:
+          type: integer
+          minimum: 0
+          maximum: 255
+    BuzzerRequest:
+      type: object
+      properties:
+        freq_hz:
+          type: integer
+          default: 1900
+        on_ms:
+          type: integer
+          default: 150
+        off_ms:
+          type: integer
+          default: 50
+        repeat:
+          type: integer
+          default: 1
+    LidarSimRequest:
+      type: object
+      required: [front_m]
+      properties:
+        front_m:
+          type: number
+          minimum: 0.05
+          maximum: 5.0
+    OdometryState:
+      type: object
+      required: [x_m, y_m, yaw_rad, vx, vy, wz]
+      properties:
+        x_m:
+          type: number
+        y_m:
+          type: number
+        yaw_rad:
+          type: number
+        vx:
+          type: number
+        vy:
+          type: number
+        wz:
+          type: number
+    LidarSummary:
+      type: object
+      required: [front_m, left_m, right_m, back_m, obstacle_alert]
+      properties:
+        front_m:
+          type: number
+        left_m:
+          type: number
+        right_m:
+          type: number
+        back_m:
+          type: number
+        obstacle_alert:
+          type: boolean
+    TelemetryState:
+      type: object
+      required:
+        - backend
+        - connected
+        - battery_mv
+        - servos
+        - target_servos
+        - rgb
+        - active_gesture
+        - mood
+        - held_object
+        - pointed_totem
+        - speaking
+        - listening
+        - hud_headline
+        - hud_subtext
+        - odometry
+        - lidar
+        - last_command_ms_ago
+        - timestamp_ms
+      properties:
+        backend:
+          type: string
+        connected:
+          type: boolean
+        battery_mv:
+          type: integer
+        servos:
+          type: object
+          additionalProperties:
+            type: integer
+        target_servos:
+          type: object
+          additionalProperties:
+            type: integer
+        rgb:
+          type: array
+          items:
+            type: integer
+          minItems: 3
+          maxItems: 3
+        active_gesture:
+          type: string
+        mood:
+          type: string
+        held_object:
+          type: [string, 'null']
+        pointed_totem:
+          type: [string, 'null']
+        speaking:
+          type: boolean
+        listening:
+          type: boolean
+        hud_headline:
+          type: string
+        hud_subtext:
+          type: string
+        odometry:
+          $ref: '#/components/schemas/OdometryState'
+        lidar:
+          $ref: '#/components/schemas/LidarSummary'
+        last_command_ms_ago:
+          type: integer
+        timestamp_ms:
+          type: integer
+    ActionResponse:
+      type: object
+      required: [status, action, telemetry]
+      properties:
+        status:
+          type: string
+          const: ok
+        action:
+          type: string
+        telemetry:
+          $ref: '#/components/schemas/TelemetryState'
