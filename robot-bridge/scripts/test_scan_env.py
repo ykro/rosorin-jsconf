@@ -104,8 +104,8 @@ class GeometryTests(unittest.TestCase):
     def test_survey_pose_keeps_the_arm_away_from_the_lidar_plane(self):
         import calibrar_sombra as cal
 
-        for j1 in (280, 500, 720):
-            self.assertGreater(cal.scan_clearance((j1, 520, 200, 180, 500, 500)), 0.05)
+        for j1 in range(280, 721, 44):  # every pause of the sweep (SCAN_J1_MIN..SCAN_J1_MAX)
+            self.assertGreater(cal.scan_clearance((j1, 520, 200, 180, 500, 500)), 0.08)
             points = cal.arm_points((j1, 520, 200, 180, 500, 500))[1:]
             self.assertGreater(min(p[2] for p in points), 0.18)
 

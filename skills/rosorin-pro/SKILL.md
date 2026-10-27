@@ -23,7 +23,7 @@ En este repo nada le habla directo al hardware salvo `robot-bridge` (Rust, binar
 | Coprocesador | STM32 (`ros_robot_controller`) | `/dev/rrc` (enlace a `/dev/ttyACM0`), 1 000 000 baudios, 8N1 |
 | Chasis | 4 motores DC con encoder, ruedas Mecanum | `wheelbase=0.17706 m`, `track_width=0.17165 m`, `wheel_diameter=0.08 m` |
 | Brazo | Servos de bus | IDs `1..5` (articulaciones) e ID `10` (pinza). Pulsos `0..1000`, `500` al centro (`0..240°`) |
-| Cámara 3D | Deptrum Aurora 930 Pro / Orbbec Astra | `/depth_cam/rgb0/image_raw` |
+| Cámara 3D | Deptrum Aurora 930 Pro / Orbbec Astra, montada en la pinza (eslabón de `joint4`) | `/depth_cam/rgb0/image_raw` (bgr8 640×400, `fx=415.853 fy=416.574 cx=322.145 cy=192.159`) y `/depth_cam/depth0/image_raw` (mono16 en mm, 640×400, válida de ~0.43 a 2.2 m) |
 | LiDAR | LD19 / MS200 | `/scan` (`sensor_msgs/LaserScan`), que el worker resume en 4 sectores. Ve el frente y los lados; atrás lo tapan el chasis y los cables (`lidar.uncovered: ["back"]`) |
 | Periféricos | Buzzer, LEDs RGB, pantalla táctil de 7" | Buzzer y LEDs por el STM32; la pantalla muestra la ruta web `/face` |
 | Batería | 3S Li-ion | El worker la lee del STM32 en mV y descarta lecturas fuera de `8000..14000` |
@@ -34,7 +34,7 @@ En este repo nada le habla directo al hardware salvo `robot-bridge` (Rust, binar
 |---|---|---|---|
 | `ros2` | Lanza `python3 ros2_worker.py`. Si puede abrir `/dev/rrc`, usa el SDK oficial (`Board("/dev/rrc", 1000000)`); si otro nodo lo tiene, publica en tópicos de ROS 2. En ambos casos se suscribe a `/scan` y a la cámara. | Sí, falla cerrado | En el robot (es lo que autodetecta `run.sh`). |
 | `serial` | Escribe tramas binarias directo en `/dev/rrc` desde un hilo propio. | No: `lidar_source: "none"` y velocidad lineal máxima 0.15 m/s | Pruebas sin ROS 2. La trama de LEDs no está implementada y la batería no se lee. |
-| `mock` | Nada; simula en memoria. | Simulado con `POST /simulate/lidar` | Laptop y ensayos (`./run.sh --mock`). |
+| `mock` | Nada; simula en memoria. | Simulado con `POST /simulate/lidar` (y la cámara de «Reconocer» con `POST /simulate/scene`) | Laptop y ensayos (`./run.sh --mock`). |
 
 Un backend pedido de forma explícita (`--backend`, `ROBOT_BACKEND`, `--serial`, `--ros2`) **no cae a mock** si falla: el bridge sale con código 1. Solo con `--allow-mock-fallback` (lo pasa `run.sh` al autodetectar) prueba serial → ros2 → mock.
 
@@ -67,8 +67,15 @@ Solo se aceptan los IDs `{1, 2, 3, 4, 5, 10}`. Cualquier otro ID en `/arm` o `/s
 - **LiDAR que falla cerrado (solo `ros2`):** sin scan en más de 300 ms, o con el worker muerto, la velocidad aplicada es 0 y `lidar_stale = true`. Al arrancar el chasis queda bloqueado hasta el primer scan y los 4 sectores valen `0.0`. Un sector ciego también llega en `0.0` y bloquea.
 - **Heartbeat del worker (solo `ros2`):** cada 100 ms el bridge manda `{"op":"ping","seq":N}` y el worker contesta `{"event":"pong","seq":N}` desde el hilo que ejecuta los comandos. Sin *pong* en 400 ms, o con una escritura atascada más de 300 ms, `connected = false` y el chasis queda bloqueado hasta que vuelva. Bridge y worker se actualizan juntos (`git pull` + `make build-robot`).
 - **Campo `blocked`:** toda respuesta de acción (HTTP 200) trae `blocked`: `null`, `worker_dead`, `lidar_stale` o `braked`. Por WebSocket llega como `{"event":"blocked","op":…,"blocked":…,"message":…}`. Un `200` con `blocked` no nulo **no** es éxito: el robot no se movió (o se movió menos).
-- **E-stop enclavada:** `POST /stop` detiene motores, congela el brazo donde está y bloquea `/cmd_vel`, `/arm`, `/servo/jog`, `/arm/jog`, `/gesture`, `/scene/reset` y `/buzzer` con `423 estop_latched` hasta `POST /estop/release`. El bridge también la enclava al apagarse (SIGINT o SIGTERM).
-- **`POST /simulate/lidar`** solo existe en mock (`403` en hardware).
+- **E-stop enclavada:** `POST /stop` detiene motores, congela el brazo donde está y bloquea `/cmd_vel`, `/arm`, `/servo/jog`, `/arm/jog`, `/gesture`, `/scene/reset`, `/buzzer` y `POST /scan_env` con `423 estop_latched` hasta `POST /estop/release`. El bridge también la enclava al apagarse (SIGINT o SIGTERM).
+- **`POST /simulate/lidar`** y **`/simulate/scene`** solo existen en mock (`403` en hardware).
+
+## «Reconocer» (`POST /scan_env`, `GET /scan_env`)
+
+- Mide dónde están las bandejas (`{"scene":"gatekeeper"}`) o los tótems (`{"scene":"bughunter"}`) **moviendo solo el brazo**: pose de observación (servos 2-4 en `520, 200, 180`, `SURVEY_POSE` en `scan_env.rs`), `joint1` de `280` a `720` en 11 pausas (600 ms de movimiento y 500 ms quieto) y vuelta a `home`. Nunca manda velocidad al chasis y no toca el servo 5 ni la pinza. STOP, cualquier otro movimiento o un worker caído lo abortan; `409` si ya corre, `503` sin driver o con `serial` (sin cámara).
+- En cada pausa el bridge manda al worker `{"op":"scan_env_capture","id":N,"scene":…,"servos":{"1":…,"4":…}}`. El hilo de stdin solo lo encola; el hilo `scan-env` ([`scan_env.py`](../../robot-bridge/scripts/scan_env.py), Python puro) espera un frame posterior al pedido, segmenta los colores impresos (HSV), calcula la pose de `camera_link` con la cadena del URDF y esos pulsos (no hay TF en vivo), y proyecta a `base_link`: con profundidad válida, el rayo por la profundidad; si no, el rayo cortado con el plano de la mesa (o 8 cm arriba para los tótems). Contesta `{"event":"scan_env_result","id":N,"ok":true,"detections":[…]}`.
+- El bridge junta las vistas y guarda el resultado en `telemetry.scan_env` (en memoria). `gatekeeper_approve`, `gatekeeper_reject` y `point_*` apuntan `joint1` a lo medido (`500 + ángulo / 0.24°` desde el eje de `joint1`, recortado a `250..750`), sin deslizar el chasis, y lo dicen en `aim`; sin un resultado vigente (15 min, el robot no se movió más de 15 cm o 15°, confianza ≥ 0.45) usan su lado fijo.
+- Bridge y worker van juntos: `make build-robot` en el robot. Los umbrales de color están en `COLOR_SPECS` y hay que validarlos con luz de escenario (`SCAN_ENV_DEBUG_DIR` guarda cada captura).
 
 ## Token y red
 
@@ -91,7 +98,7 @@ hdr | curl -X POST -H @- http://<IP>:9000/estop/release
 
 ## Lo que hace `ros2_worker.py`
 
-Protocolo: un JSON por línea en stdin (`{"op":"cmd_vel"|"arm"|"buzzer"|"rgb"|"ping",…}`) y un JSON por línea en stdout (`{"event":"backend"|"lidar"|"battery"|"camera_jpeg"|"pong",…}`). La primera línea siempre es `{"event":"backend","name":…}`; el bridge la espera hasta 20 s. El worker arma antes el nodo de cámara y `/scan` (importar rclpy, cv2 y numpy acapara el GIL cerca de un segundo y, hecho después, atrasaría los `pong`). Cada `{"op":"ping","seq":N}` se contesta con `{"event":"pong","seq":N}` desde el hilo que lee stdin. El evento `lidar` trae además `blind` (lista de sectores ciegos; solo diagnóstico).
+Protocolo: un JSON por línea en stdin (`{"op":"cmd_vel"|"arm"|"buzzer"|"rgb"|"ping"|"scan_env_capture",…}`) y un JSON por línea en stdout (`{"event":"backend"|"lidar"|"battery"|"camera_jpeg"|"pong"|"scan_env_result",…}`). La primera línea siempre es `{"event":"backend","name":…}`; el bridge la espera hasta 20 s. El worker arma antes el nodo de cámara y `/scan` (importar rclpy, cv2 y numpy acapara el GIL cerca de un segundo y, hecho después, atrasaría los `pong`). Cada `{"op":"ping","seq":N}` se contesta con `{"event":"pong","seq":N}` desde el hilo que lee stdin. El evento `lidar` trae además `blind` (lista de sectores ciegos; solo diagnóstico).
 
 - **Con el SDK (`Board`):** `name = "stm32-board (/dev/rrc @ 1Mbps)"`. Mueve motores con `set_motor_speed`, servos con `bus_servo_set_position`, buzzer y LEDs con el SDK, y lee la batería cada 2 s.
 - **Con tópicos (si `/dev/rrc` está ocupado):** `name = "ros2-topics"`. Publica:
@@ -100,7 +107,8 @@ Protocolo: un JSON por línea en stdin (`{"op":"cmd_vel"|"arm"|"buzzer"|"rgb"|"p
   - `/ros_robot_controller/set_buzzer` (`ros_robot_controller_msgs/msg/BuzzerState`)
 - **Suscripciones** (con `qos_profile_sensor_data`, que acepta publicadores *best-effort* y *reliable*):
   - `/scan`: como máximo 20 eventos `lidar` por segundo.
-  - `/depth_cam/rgb0/image_raw`: JPEG en base64, como máximo 2 por segundo (requiere `cv2`).
+  - `/depth_cam/rgb0/image_raw`: JPEG en base64, como máximo 2 por segundo (requiere `cv2`). El último frame crudo se guarda para «Reconocer».
+  - `/depth_cam/depth0/image_raw`: solo se guarda el último frame, para «Reconocer».
 - **Sectores** (REP-103: ángulo 0 al frente, positivo a la izquierda): frente `|θ| ≤ 45°`, izquierda `45°..135°`, derecha `-135°..-45°`, atrás el resto. Cada sector reporta el eco más cercano; si solo hay espacio libre, `4.0` m.
 - **Rayos** (`classify_ray`, REP 117): eco si es finito y está en `[range_min, range_max]`; libre si es `+inf` o mayor que `range_max`; inválido si es `NaN`, `-inf`, `0` o menor que `range_min` (algo pegado, ventana tapada o sucia). Un escenario con más de 12 m vacíos se ve abierto. Ojo: una superficie negra mate que no devuelve eco también se ve libre.
 - **Sector ciego:** si tiene rayos pero menos de `LIDAR_MIN_VALID_FRACTION` (0.25) son utilizables (eco o libre), el sector vale `0.0` y bloquea. Un sector sin ningún rayo (recortado por el driver) no es ciego sino `uncovered`: vale `0.0` pero no frena. Así un LiDAR tapado o sucio bloquea el chasis. `LIDAR_MIN_VALID_FRACTION=0` desactiva la revisión.

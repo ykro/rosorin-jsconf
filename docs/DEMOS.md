@@ -18,6 +18,7 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
 - **Estado de la conexión.** La consola muestra Listo, Conectando…, Reconectando…, Conectado, Escuchando tu micrófono, Hablando…, Desconectado, Error de conexión o Sin API key.
 - **STOP / E-stop.** Botón **STOP** de la barra superior o tecla **Escape** (también desde el panel de la píldora del robot o desde `/face`). Mientras esté enclavado, los movimientos fallan y el modelo recibe `status: "error", code: "estop_latched"` y lo dice en voz alta.
 - **Movimientos bloqueados.** Si el bridge acepta un movimiento pero lo frena o lo bloquea (`blocked`: `braked`, `lidar_stale` o `worker_dead`), el modelo recibe un error con ese código y un `hint` que le pide no decir que se movió.
+- **Reconocer (demos B y C).** El botón **Reconocer** hace que el robot busque dónde están de verdad las bandejas o los tótems con la cámara 3D, que va en la pinza: **solo mueve el brazo** (ninguna rueda), lo lleva a una pose que mira la mesa, gira `joint1` despacio de derecha a izquierda en 11 pausas y regresa a `home` (unos 15 s). Al lado del botón se ve «Paso i/N» y, al final, cada objeto con su ángulo, distancia y confianza. **STOP** o **Escape** lo abortan en cualquier momento. Después, los gestos apuntan a lo medido (y ya no deslizan el chasis); si no hubo reconocimiento, si el robot se movió más de 15 cm o si pasaron 15 min, usan el lado fijo de abajo. La respuesta de la herramienta le dice al modelo cuál usó. Hazlo **antes** de poner la llave en la pinza (Demo B): la tarjeta tapa parte de la cámara. Necesita el bridge (el robot o `./run.sh --mock`). En mock, la cámara simulada ve un escenario que a propósito **no** está en el lado fijo: APROBADO a la derecha, RECHAZADO a la izquierda, Gemini Live a la izquierda, Firestore casi al frente y Cloud Run a la derecha (`POST /simulate/scene` lo cambia; ver [`API.md`](./API.md#get-simulatescene-y-post-simulatescene)).
 
 ---
 
@@ -36,11 +37,12 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
 
 ## Demo B · Gatekeeper CI/CD (`/demos/gatekeeper`)
 
-- **Objetivo:** el robot sostiene una llave impresa de «Production Deploy» con la pinza (servo 10 cerrado en 680). Ante un PR, gira hacia la bandeja verde de **APROBADO**, a 18 cm a la izquierda del robot (`joint1 = 700`), o la roja de **RECHAZADO**, a 18 cm a la derecha (`joint1 = 280`), y abre la pinza (220) para soltar la llave. Con el rechazo, el chasis además retrocede. En el gemelo 3D las bandejas tienen el tamaño de las impresas (18.6 × 10.8 cm) y la llave sigue en la pinza hasta que esta se abre; entonces cae desde ahí sobre la bandeja.
+- **Objetivo:** el robot sostiene una llave impresa de «Production Deploy» con la pinza (servo 10 cerrado en 680). Ante un PR, gira hacia la bandeja verde de **APROBADO**, a 18 cm a la izquierda del robot (`joint1 = 700`), o la roja de **RECHAZADO**, a 18 cm a la derecha (`joint1 = 280`), y abre la pinza (220) para soltar la llave. Con el rechazo, el chasis además retrocede. Con **Reconocer**, el brazo gira hacia donde se midió cada bandeja en vez de esos lados fijos (y no se desliza). En el gemelo 3D las bandejas tienen el tamaño de las impresas (18.6 × 10.8 cm) y la llave sigue en la pinza hasta que esta se abre; entonces cae desde ahí sobre la bandeja.
 - **Herramienta:** `release_deploy_key({ decision: "approve" | "reject", reason_es })`.
 - **Quién decide:** la app, con una regla sobre los datos del PR (tests en verde y palabras como *test*, *canary*, *rollback* o *e2e* en la justificación). El modelo explica la decisión en voz alta.
 - **Botones de preparación:**
   - **Centrar Robot:** chasis y brazo a `home`.
+  - **Reconocer:** mide dónde están las bandejas verde y roja (ver Controles comunes).
   - **Sujetar Llave:** pose `gatekeeper_hold` con la pinza cerrada (680).
 - **PRs de ejemplo** (escenarios simulados de una organización ficticia, `acme-cloud`; los datos están en `PRESET_PRS` de `repo-analyzer.ts`):
   1. `acme-cloud/edge-router#289`: rechazar. Saltarse la validación del middleware de pagos y borrar 42 líneas de tests para un *hotfix* de viernes, sin rollback.
@@ -56,7 +58,7 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
   - **Gemini Live** al centro (verde `#1E8E3E`)
   - **Firestore** a la derecha (amarillo `#F9AB00`)
 
-  Ante un incidente, el chasis se desliza de lado (0.22 m/s durante 850 ms, unos 19 cm) y el brazo apunta al tótem culpable. Para el centro avanza unos 6 cm.
+  Ante un incidente, el chasis se desliza de lado (0.22 m/s durante 850 ms, unos 19 cm) y el brazo apunta al tótem culpable. Para el centro avanza unos 6 cm. Después de **Reconocer**, el chasis no se mueve: el brazo gira hacia donde se midió el tótem (azul, verde o amarillo, de pie sobre la mesa).
 - **Herramienta:** `point_at_service_totem({ service: "cloud_run" | "gemini_live" | "firestore", diagnosis_es })`.
 - **Quién decide:** la app, buscando palabras clave en el texto del incidente (*firestore*, *index*, *precondition* → Firestore; *audio*, *pcm*, *live*, *barge-in* → Gemini Live; el resto → Cloud Run). El modelo explica la causa.
 - **Incidentes de ejemplo** (escenarios simulados de `acme-cloud`, en `repo-analyzer.ts`):

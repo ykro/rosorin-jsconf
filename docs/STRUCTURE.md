@@ -25,9 +25,12 @@ rosorin-jsconf/
 │   ├── src/backend.rs        # Backends mock/serial/ros2, freno por eje, watchdog, E-stop, heartbeat y campo blocked
 │   ├── src/gestures.rs       # Coreografías (incluye los bailes de Bumblebee)
 │   ├── src/protocol.rs       # Tramas STM32 (0xAA 0x55, CRC8), límites de servos y velocidad
+│   ├── src/scan_env.rs       # «Reconocer»: barrido del brazo, unión de vistas, vigencia, puntería y escenario mock
 │   └── scripts/
 │       ├── ros2_worker.py        # Worker de ROS 2: SDK del STM32 o tópicos, /scan por sectores, sombra del brazo, pong
 │       ├── test_ros2_worker.py   # Tests del worker sin rclpy
+│       ├── scan_env.py           # «Reconocer» en el worker: colores, pose de la cámara (URDF), proyección a base_link
+│       ├── test_scan_env.py      # Tests de scan_env.py con imágenes sintéticas
 │       ├── calibrar_sombra.py    # make calibrar-sombra: mide dónde ve el LiDAR al brazo y escribe arm-shadow.json
 │       ├── test_calibrar_sombra.py # Tests de la calibración sin rclpy
 │       └── robot-common.sh       # Funciones de run.sh, iniciar-robot.sh, ensayo.sh y traer-token.sh: token,
@@ -42,7 +45,7 @@ rosorin-jsconf/
         ├── app/              # /, /demo, /simulator, /robot, /face, /presenter, /props, /demos/*,
         │                     # error.tsx (error de ruta con botón STOP)
         ├── components/       # Rosorin3DViewer, ViewerErrorBoundary, HardwareControlPanel, GeminiLiveConsole,
-        │                     # TopNav (STOP y tecla Escape), BridgeControls
+        │                     # TopNav (STOP y tecla Escape), BridgeControls, SceneScanPanel («Reconocer»)
         └── lib/              # gemini-live, live-connection, live-turn-gate, tool-policy, tool-args,
-                              # bumblebee-radio, robot-client, bridge-config, gesture-choreographies.generated…
+                              # bumblebee-radio, robot-client, bridge-config, scene-scan, gesture-choreographies.generated…
 ```

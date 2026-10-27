@@ -46,6 +46,17 @@ Se libera con «Liberar» en el banner, `make release` o `POST /estop/release`.
 
 El bridge también enclava la E-stop al apagarse (SIGINT o SIGTERM): pone el chasis en 0 y ninguna conexión que siga abierta puede mover el robot mientras el proceso termina.
 
+## «Reconocer»: movimiento del brazo sin ruedas
+
+`POST /scan_env` (botón **Reconocer** de las demos B y C) es el único movimiento que el robot hace por su cuenta durante varios segundos (unos 15 s). Las reglas:
+
+- **Solo el brazo.** Nunca manda velocidad al chasis; al empezar cancela el gesto activo y la velocidad que este manejaba. Solo mueve los servos 1 a 4: el giro de muñeca (5) y la pinza (10) no se tocan, así que la llave no se suelta.
+- **Poses verificadas y límites.** Pose de observación `2 = 520, 3 = 200, 4 = 180` (cerca del primer paso de `facepalm`): según la cinemática del URDF todo el brazo queda a más de 8 cm sobre el plano del LiDAR y delante de la torre, en todo el barrido (lo comprueba `test_scan_env.py`). `joint1` barre de `280` a `720`, dentro de lo que ya usan los gestos. Todo pasa por `clamp_servo_pulse`, igual que `/arm`.
+- **Despacio.** 1500 ms hasta la pose y de regreso a `home`, 600 ms entre pausas (unos 70 pulsos/s) y 500 ms quieto antes de cada captura.
+- **Se aborta en cualquier momento.** Con **STOP** / **Escape** (`/stop`: la E-stop se enclava y el brazo se congela donde está; el barrido no lo regresa a `home`), con cualquier otro comando de movimiento (gesto, `/arm`, *jog*, `cmd_vel`, `/scene/reset`) o si el worker deja de responder (*heartbeat*). Cada paso se revisa con el mismo candado y época que los gestos, y se revisa cada 25 ms durante las esperas. Con la E-stop enclavada no arranca (`423`), con el driver caído tampoco (`503`) y no hay dos a la vez (`409`).
+- **El resultado no mueve nada por sí solo.** Solo cambia hacia dónde gira `joint1` en `gatekeeper_approve`, `gatekeeper_reject` y `point_*` (recortado a `250..750`), y con un objetivo medido esos gestos **dejan de deslizar o avanzar el chasis**: apunta solo el brazo. Se descarta si el robot se movió más de 15 cm o 15° (odometría), si tiene más de 15 min o si la confianza es menor que 0.45; entonces los gestos usan su lado fijo. Vive en memoria: reiniciar el bridge lo borra (a propósito: tras un reinicio el robot suele estar en otro lugar).
+- La visión corre en un hilo aparte del worker: el hilo de stdin solo encola la captura, así que el *pong* del *heartbeat* nunca se atrasa.
+
 ## Worker que no responde
 
 Con `ros2`, el bridge le manda al worker `{"op":"ping","seq":N}` cada 100 ms y el worker contesta `{"event":"pong","seq":N}` desde el mismo hilo que ejecuta los comandos. Si el último *pong* tiene más de 400 ms, o una escritura al worker o al puerto serie lleva más de 300 ms atascada, `connected` pasa a `false` y el chasis queda bloqueado; se recupera solo cuando el worker vuelve a contestar. Las respuestas de acción traen `blocked: "worker_dead"` y la web las trata como error.
