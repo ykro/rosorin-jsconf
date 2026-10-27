@@ -394,9 +394,8 @@ pub fn is_allowed_host(host_header: &str, extra_hosts: &[String]) -> bool {
 /// Constant-time comparison (no early exit on the first differing byte or on length).
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     let mut diff: usize = a.len() ^ b.len();
-    for i in 0..a.len().max(b.len()) {
+    for (i, &y) in b.iter().enumerate() {
         let x = a.get(i).copied().unwrap_or(0);
-        let y = b.get(i).copied().unwrap_or(0);
         diff |= (x ^ y) as usize;
     }
     diff == 0

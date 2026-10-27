@@ -15,6 +15,6 @@ Mallas 3D del robot (web/public/meshes/)
   no aplica a esas mallas: sus derechos pertenecen a Hiwonder.
 
 Clips de audio de Bumblebee Radio (web/public/songs/clips/)
-  Los archivos .mp3 no forman parte del repositorio ni del sitio desplegado.
+  Los archivos .mp3 no forman parte del repositorio de código (.gitignore).
   web/public/songs/catalog.json solo contiene metadatos (título, artista,
   fragmento de letra y duración) para que la demo funcione sin el audio.

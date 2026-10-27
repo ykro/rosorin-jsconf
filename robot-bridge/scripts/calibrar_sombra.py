@@ -319,64 +319,64 @@ def main() -> int:
     os.environ.setdefault("ROS_LOCALHOST_ONLY", "1")
     rclpy.init()
     node = Node("rosorin_arm_shadow_calibration")
-    lock = threading.Lock()
-    state = {"collect": False, "samples": [], "last": None}
-
-    def on_scan(msg):
-        with lock:
-            state["last"] = msg
-            if not state["collect"]:
-                return
-            angle = float(msg.angle_min)
-            limit = math.radians(ARM_SEARCH_HALF_ANGLE_DEG)
-            for r in msg.ranges:
-                a = worker.robot_angle(angle, mount["offset_deg"], mount["flip"])  # same correction as the worker
-                angle += float(msg.angle_increment)
-                if abs(a) <= limit and math.isfinite(r) and r <= ARM_SEARCH_RADIUS_M:
-                    state["samples"].append((a, float(r)))
-
-    node.create_subscription(LaserScan, "/scan", on_scan, qos_profile_sensor_data)
-    spinner = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
-    spinner.start()
-
-    deadline = time.monotonic() + SCAN_WAIT_S
-    while state["last"] is None and time.monotonic() < deadline:
-        time.sleep(0.05)
-    if state["last"] is None:
-        print(f"[calibrar] No llega /scan en {SCAN_WAIT_S:.0f} s.", file=sys.stderr)
-        print(f"[calibrar] {scan_diagnosis(node.get_publishers_info_by_topic('/scan'), os.environ)}", file=sys.stderr)
-        return 1
-
-    # With the wrong mount the front cone falls where the driver cuts the scan (e.g. a LiDAR turned
-    # 180° whose /scan drops the robot's back): the arm would never show up and the brake would
-    # guard the wrong side.
-    coverage = cone_coverage(state["last"], mount["offset_deg"], mount["flip"])
-    if coverage < MIN_CONE_COVERAGE:
-        turned = (mount["offset_deg"] + 180.0) % 360.0
-        turned_coverage = cone_coverage(state["last"], turned, mount["flip"])
-        print(f"[calibrar] /scan solo cubre el {coverage:.0%} del frente (±{ARM_SEARCH_HALF_ANGLE_DEG:.0f}°) con "
-              f"offset {mount['offset_deg']:g}° ({worker.LIDAR_MOUNT_SOURCE}); con {turned:g}° cubriría el {turned_coverage:.0%}.",
-              file=sys.stderr)
-        if turned_coverage < MIN_CONE_COVERAGE or args.yes:
-            print("[calibrar] Corrige la orientación (sección 3 de ensayo.sh) y vuelve a calibrar.", file=sys.stderr)
-            return 1
-        print("[calibrar] Parece que el LiDAR está montado girado 180° (su ángulo 0 mira hacia atrás).")
-        if "LIDAR_ANGLE_OFFSET_DEG" in os.environ:
-            print("[calibrar] Ojo: LIDAR_ANGLE_OFFSET_DEG está en tu entorno y gana sobre el archivo.")
-        if input(f"[calibrar] ¿Guardo offset {turned:g}° en {worker.LIDAR_MOUNT_FILE} y calibro así? [s/n] ").strip().lower()[:1] not in ("s", "y"):
-            print("[calibrar] Cancelado: con esta orientación no tiene sentido calibrar.")
-            return 1
-        write_lidar_mount(worker.LIDAR_MOUNT_FILE, turned, mount["flip"])
-        mount["offset_deg"] = turned
-        print("[calibrar] Guardado. Confirma el frente con la caja de la sección 3 de ensayo.sh.")
-
-    census = ray_census(state["last"])
-    print(f"[calibrar] Rayos del último scan: {census} (REP 117: free = +inf, sin objeto en rango)")
-    if census["invalid"] > census["echo"] + census["free"]:
-        print("[calibrar] AVISO: la mayoría de rayos son inválidos (NaN/0/-inf). Si el LiDAR no está tapado,")
-        print("[calibrar]        tu driver reporta el espacio vacío así y los sectores abiertos se verán ciegos.")
-
     try:
+        lock = threading.Lock()
+        state = {"collect": False, "samples": [], "last": None}
+
+        def on_scan(msg):
+            with lock:
+                state["last"] = msg
+                if not state["collect"]:
+                    return
+                angle = float(msg.angle_min)
+                limit = math.radians(ARM_SEARCH_HALF_ANGLE_DEG)
+                for r in msg.ranges:
+                    a = worker.robot_angle(angle, mount["offset_deg"], mount["flip"])  # same correction as the worker
+                    angle += float(msg.angle_increment)
+                    if abs(a) <= limit and math.isfinite(r) and r <= ARM_SEARCH_RADIUS_M:
+                        state["samples"].append((a, float(r)))
+
+        node.create_subscription(LaserScan, "/scan", on_scan, qos_profile_sensor_data)
+        spinner = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+        spinner.start()
+
+        deadline = time.monotonic() + SCAN_WAIT_S
+        while state["last"] is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if state["last"] is None:
+            print(f"[calibrar] No llega /scan en {SCAN_WAIT_S:.0f} s.", file=sys.stderr)
+            print(f"[calibrar] {scan_diagnosis(node.get_publishers_info_by_topic('/scan'), os.environ)}", file=sys.stderr)
+            return 1
+
+        # With the wrong mount the front cone falls where the driver cuts the scan (e.g. a LiDAR turned
+        # 180° whose /scan drops the robot's back): the arm would never show up and the brake would
+        # guard the wrong side.
+        coverage = cone_coverage(state["last"], mount["offset_deg"], mount["flip"])
+        if coverage < MIN_CONE_COVERAGE:
+            turned = (mount["offset_deg"] + 180.0) % 360.0
+            turned_coverage = cone_coverage(state["last"], turned, mount["flip"])
+            print(f"[calibrar] /scan solo cubre el {coverage:.0%} del frente (±{ARM_SEARCH_HALF_ANGLE_DEG:.0f}°) con "
+                  f"offset {mount['offset_deg']:g}° ({worker.LIDAR_MOUNT_SOURCE}); con {turned:g}° cubriría el {turned_coverage:.0%}.",
+                  file=sys.stderr)
+            if turned_coverage < MIN_CONE_COVERAGE or args.yes:
+                print("[calibrar] Corrige la orientación (sección 3 de ensayo.sh) y vuelve a calibrar.", file=sys.stderr)
+                return 1
+            print("[calibrar] Parece que el LiDAR está montado girado 180° (su ángulo 0 mira hacia atrás).")
+            if "LIDAR_ANGLE_OFFSET_DEG" in os.environ:
+                print("[calibrar] Ojo: LIDAR_ANGLE_OFFSET_DEG está en tu entorno y gana sobre el archivo.")
+            if input(f"[calibrar] ¿Guardo offset {turned:g}° en {worker.LIDAR_MOUNT_FILE} y calibro así? [s/n] ").strip().lower()[:1] not in ("s", "y"):
+                print("[calibrar] Cancelado: con esta orientación no tiene sentido calibrar.")
+                return 1
+            write_lidar_mount(worker.LIDAR_MOUNT_FILE, turned, mount["flip"])
+            mount["offset_deg"] = turned
+            print("[calibrar] Guardado. Confirma el frente con la caja de la sección 3 de ensayo.sh.")
+
+        census = ray_census(state["last"])
+        print(f"[calibrar] Rayos del último scan: {census} (REP 117: free = +inf, sin objeto en rango)")
+        if census["invalid"] > census["echo"] + census["free"]:
+            print("[calibrar] AVISO: la mayoría de rayos son inválidos (NaN/0/-inf). Si el LiDAR no está tapado,")
+            print("[calibrar]        tu driver reporta el espacio vacío así y los sectores abiertos se verán ciegos.")
+
         for i, pose in enumerate(poses, 1):
             servos = [{"id": sid, "position": pos} for sid, pos in zip(SERVO_IDS, pose)]
             try:

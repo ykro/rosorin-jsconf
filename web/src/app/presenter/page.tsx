@@ -1,29 +1,24 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
-import type { TelemetryState } from '@/lib/types';
 import { PRESET_REPOS } from '@/lib/repo-analyzer';
-import { FALLBACK_TELEMETRY, RobotBridgeClient, describeBridgeError } from '@/lib/robot-client';
+import { describeBridgeError } from '@/lib/robot-client';
+import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
+import { TopNav } from '@/components/TopNav';
 
 export default function PresenterPage() {
-  const [telemetry, setTelemetry] = useState<TelemetryState>(FALLBACK_TELEMETRY);
+  const robot = useRobotTelemetry();
+  const { telemetry, triggerGesture } = robot;
   const [selectedSlug, setSelectedSlug] = useState('legacy-js/todo-400-deps');
   const analysis = PRESET_REPOS[selectedSlug] || PRESET_REPOS['legacy-js/todo-400-deps'];
-
-  useEffect(() => {
-    const client = new RobotBridgeClient(undefined, (st) => setTelemetry(st));
-    client.connectWebSocket();
-    return () => client.disconnect();
-  }, []);
 
   async function fireRoast(slug: string) {
     setSelectedSlug(slug);
     const item = PRESET_REPOS[slug];
     if (!item) return;
-    const client = new RobotBridgeClient();
     try {
-      await client.triggerGesture(item.suggestedGesture, 'stage_roast');
+      await triggerGesture(item.suggestedGesture, 'stage_roast');
     } catch (err) {
       const { code, message } = describeBridgeError(err);
       if (code !== 'disabled') console.warn(`[presenter] Gesto no enviado (${code}): ${message}`);
@@ -37,12 +32,20 @@ export default function PresenterPage() {
         minHeight: '100vh',
         background: '#F8F7F4',
         color: '#18181B',
-        padding: '56px 80px',
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'space-between',
       }}
     >
+      <TopNav robot={robot} liteMode={false} />
+      <div
+        style={{
+          flex: 1,
+          padding: '40px 80px 56px',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+        }}
+      >
       <header
         style={{
           display: 'flex',
@@ -190,6 +193,7 @@ export default function PresenterPage() {
           {telemetry.lidar.front_m.toFixed(2)}m · Pinza ID10={telemetry.servos['10'] ?? 500}
         </span>
       </footer>
+      </div>
     </div>
   );
 }

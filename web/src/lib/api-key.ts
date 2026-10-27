@@ -55,7 +55,7 @@ function initBrowser() {
   purgeLegacyApiKeyStorage();
   // A token or bridge URL that arrives later (fragment, panel) gets another chance.
   window.addEventListener(BRIDGE_CONFIG_EVENT, () => {
-    if (!bridgeKey) void loadApiKeyFromBridge({ force: true });
+    void loadApiKeyFromBridge({ force: true });
   });
   void loadApiKeyFromBridge();
 }
@@ -70,6 +70,7 @@ export function loadApiKeyFromBridge(
   if (inflight) return inflight;
   if (!opts.force && bridgeStatus !== 'idle') return Promise.resolve();
   if (typeof window === 'undefined' || !isBridgeEnabled()) {
+    bridgeKey = '';
     bridgeStatus = 'disabled';
     notify();
     return Promise.resolve();
@@ -85,6 +86,7 @@ export function loadApiKeyFromBridge(
         cache: 'no-store',
       });
       if (!res.ok) {
+        bridgeKey = '';
         bridgeStatus = 'unreachable';
         return;
       }
@@ -93,6 +95,7 @@ export function loadApiKeyFromBridge(
       bridgeKey = key;
       bridgeStatus = key ? 'configured' : 'missing';
     } catch {
+      bridgeKey = '';
       bridgeStatus = 'unreachable';
     } finally {
       inflight = null;

@@ -131,10 +131,10 @@ Nunca pongas el token en una variable `NEXT_PUBLIC_*`: se incrusta en el bundle.
 
 ### Paso 5: ensayar con el robot
 
-Antes de subir al escenario, corre `./ensayo.sh --robot` en el robot (actualiza, compila, imprime la IP y levanta el bridge) y `./ensayo.sh --laptop --ip <IP_DEL_ROBOT>` en la laptop (trae el token, levanta la web y corre la guía). Los pasos 1 a 4 quedan hechos por el script. La guía revisa versión, token, worker, LiDAR, sombra del brazo, ruedas, STOP y demos, y deja una bitácora con los valores medidos. Todo el flujo está en [`ENSAYO.md`](./ENSAYO.md).
+Antes de subir al escenario, corre `./ensayo.sh --robot` en el robot (actualiza, compila el bridge y la web estática, imprime la IP y los deja en `:9000` y `:3000`) y `./ensayo.sh --laptop --ip <IP_DEL_ROBOT>` en la laptop (sincroniza git, trae el token, copia los MP3 al robot, abre Chrome contra `http://<IP_DEL_ROBOT>:3000` y corre la guía). Los pasos 1 a 4 quedan hechos por el script. La guía revisa versión, token, worker, LiDAR, sombra del brazo, ruedas, STOP y demos, y deja una bitácora con los valores medidos. Todo el flujo está en [`ENSAYO.md`](./ENSAYO.md).
 
 > [!IMPORTANT]
-> **¿Por qué `http://localhost:3000` y no la IP del robot en el navegador?** El micrófono (`getUserMedia`) solo funciona en contextos seguros: `https://` o `http://localhost`. Además, el sitio público (`https://jsconfmx26.web.app`) no sirve para el robot físico: su CSP solo permite `localhost:9000` y `127.0.0.1:9000`, y una página `https://` no puede llamar a una IP `http://` de la red local.
+> **¿Cómo se habilita el micrófono con el robot físico?** El micrófono (`getUserMedia`) solo funciona en contextos seguros (`https://` o `http://localhost`) o pasando a Chrome `--unsafely-treat-insecure-origin-as-secure=http://<IP_DEL_ROBOT>:3000`. `ensayo.sh` y `demo.sh` abren Chrome con esa bandera y el perfil `~/.cache/rosorin-chrome` para servir la web directo desde el robot (`--laptop-server` o `./run.sh --robot-ip <IP>` la sirven en `http://localhost:3000` de tu laptop). El sitio público (`https://jsconfmx26.web.app`) no sirve para el robot físico: su CSP solo permite `localhost:9000` y `127.0.0.1:9000`, y una página `https://` no puede llamar a una IP `http://` de la red local.
 
 ---
 

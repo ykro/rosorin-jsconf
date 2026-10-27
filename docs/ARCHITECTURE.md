@@ -36,9 +36,9 @@ El sistema tiene **4 capas**: Gemini Live en la nube, la web en el navegador (Ty
 - **Dos watchdogs.** El del bridge corta cada comando al vencer su `duration_ms` (600 ms por defecto). El de `ros2_worker.py` detiene los motores si pasan 500 ms sin comandos, por ejemplo si el bridge se cuelga.
 - **Si el loop muere.** El proceso detiene los motores y sale con código 70. Con SIGINT o SIGTERM enclava la E-stop y detiene los motores antes de salir.
 
-### Por qué la web corre en la laptop
+### Por qué el navegador corre en la laptop
 
-1. **Micrófono.** `getUserMedia` solo funciona en `https://` o `http://localhost`. Desde `http://localhost:3000` no hacen falta certificados.
+1. **Micrófono.** `getUserMedia` solo funciona en `https://`, `http://localhost` o pasando a Chrome `--unsafely-treat-insecure-origin-as-secure=http://<IP>:3000`. `ensayo.sh` y `demo.sh` sirven la web estática desde el robot (`:3000`) y abren Chrome en la laptop con esa bandera; `run.sh --robot-ip <IP>` y `--laptop-server` la sirven en `http://localhost:3000`.
 2. **GPU.** La laptop dibuja las 16 mallas en Three.js y el Jetson se queda con ROS 2 y el control.
 3. **El sitio público no controla robots.** `https://jsconfmx26.web.app` no contacta el bridge sin una acción explícita, su CSP solo permite `localhost:9000` y `127.0.0.1:9000`, y una página `https://` no puede llamar a una IP `http://` de la LAN.
 

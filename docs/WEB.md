@@ -8,7 +8,7 @@
 | Slides | [jsconfmx26.web.app/slides](https://jsconfmx26.web.app/slides) | Se sirven desde `web/public/slides/`. En local, abre `/slides/index.html`. |
 | Simulador 3D | [jsconfmx26.web.app/demo](https://jsconfmx26.web.app/demo) | Corre en el navegador; las demos de voz piden tu API key de Gemini. |
 
-El sitio público **no contacta ningún robot** hasta que alguien pulsa «Conectar» en el panel del robot (o abre la página con `?bridge=` o con un token en `#token=` o `?token=`). Además, su CSP solo permite `localhost:9000` y `127.0.0.1:9000`, y una página `https://` no puede hablar con una IP `http://` de la red local. Por eso **la demo con el robot físico se usa desde `http://localhost:3000`**, con el repositorio clonado.
+El sitio público **no contacta ningún robot** hasta que alguien pulsa «Conectar» en el panel del robot (o abre la página con `?bridge=` o con un token en `#token=` o `?token=`). Además, su CSP solo permite `localhost:9000` y `127.0.0.1:9000`, y una página `https://` no puede hablar con una IP `http://` de la red local. Por eso **la demo con el robot físico se corre desde el repositorio clonado**: servida desde el robot en `http://<IP>:3000` con `ensayo.sh` / `demo.sh` (que abren Chrome con `--unsafely-treat-insecure-origin-as-secure`) o desde `http://localhost:3000` en la laptop (`./run.sh --robot-ip <IP>` o `--laptop-server`).
 
 ## Rutas
 

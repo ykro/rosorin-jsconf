@@ -242,13 +242,16 @@ ROOTS = [os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])]
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def translate_path(self, path):
-        rel = posixpath.normpath(urllib.parse.unquote(urllib.parse.urlsplit(path).path)).lstrip("/")
+        raw = "/" + urllib.parse.unquote(urllib.parse.urlsplit(path).path).lstrip("/")
+        rel = posixpath.normpath(raw).lstrip("/")
         for root in ROOTS:
-            base = os.path.join(root, rel)
+            base = os.path.abspath(os.path.join(root, rel))
+            if os.path.commonpath([root, base]) != root:
+                continue
             for cand in (base, base + ".html", os.path.join(base, "index.html")):
                 if os.path.isfile(cand):
                     return cand
-        return os.path.join(ROOTS[0], rel or "index.html")
+        return os.path.join(ROOTS[0], "index.html")
 
     def log_message(self, *args):
         pass
@@ -809,7 +812,7 @@ console.log(Object.entries(all).filter(([n]) => n !== 'home')
   .map(([n, g]) => n + ':' + (g.steps.some(s => s.velocity && s.velocity.some(v => v !== 0)) ? 1 : 0)).join(' '));
 " 2>/dev/null)"
 if [ -z "$GESTURES" ]; then
-  GESTURES="facepalm trash_toss chef_kiss suspicious_inspect victory_spin nod_yes shake_no wave_hello gatekeeper_hold gatekeeper_approve gatekeeper_reject point_cloud_run point_gemini_live point_firestore bumblebee_hype bumblebee_groove bumblebee_rock_out bumblebee_romance bumblebee_sad_droop bumblebee_sassy"
+  GESTURES="facepalm:1 trash_toss:1 chef_kiss:1 suspicious_inspect:1 victory_spin:1 nod_yes:1 shake_no:1 wave_hello:0 gatekeeper_hold:0 gatekeeper_approve:1 gatekeeper_reject:1 point_cloud_run:1 point_gemini_live:1 point_firestore:1 bumblebee_hype:1 bumblebee_groove:1 bumblebee_rock_out:1 bumblebee_romance:1 bumblebee_sad_droop:1 bumblebee_sassy:1"
 fi
 note "Necesito 50 cm libres alrededor: varios gestos también mueven el chasis. Un sector bajo 0.28 m durante un gesto es el brazo visto como obstáculo; en los que mueven el chasis solo cuenta el frente (lo demás es el robot acercándose a algo)."
 if clear_area; then

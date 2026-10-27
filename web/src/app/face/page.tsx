@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { stopAllActiveConversations } from '@/lib/gemini-live';
+import { stopActiveBumblebeeSession } from '@/lib/bumblebee-radio';
 import { BridgeAlerts } from '@/components/BridgeControls';
 
 export default function RobotFacePage() {
@@ -105,6 +106,7 @@ export default function RobotFacePage() {
   const handleTap = () => {
     if (isSpeaking) {
       stopAllActiveConversations('user');
+      stopActiveBumblebeeSession('user');
       void client?.updateHud({ speaking: false });
     } else {
       void triggerGesture('wave_hello', 'impressed');
