@@ -36,7 +36,7 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
 
 ## Demo B · Gatekeeper CI/CD (`/demos/gatekeeper`)
 
-- **Objetivo:** el robot sostiene una llave impresa de «Production Deploy» con la pinza (servo 10 cerrado en 680). Ante un PR, gira hacia la bandeja verde de **APROBADO** (`joint1 = 700`) o la roja de **RECHAZADO** (`joint1 = 280`) y abre la pinza (220) para soltar la llave. Con el rechazo, el chasis además retrocede.
+- **Objetivo:** el robot sostiene una llave impresa de «Production Deploy» con la pinza (servo 10 cerrado en 680). Ante un PR, gira hacia la bandeja verde de **APROBADO**, a 18 cm a la izquierda del robot (`joint1 = 700`), o la roja de **RECHAZADO**, a 18 cm a la derecha (`joint1 = 280`), y abre la pinza (220) para soltar la llave. Con el rechazo, el chasis además retrocede. En el gemelo 3D las bandejas tienen el tamaño de las impresas (18.6 × 10.8 cm) y la llave sigue en la pinza hasta que esta se abre; entonces cae desde ahí sobre la bandeja.
 - **Herramienta:** `release_deploy_key({ decision: "approve" | "reject", reason_es })`.
 - **Quién decide:** la app, con una regla sobre los datos del PR (tests en verde y palabras como *test*, *canary*, *rollback* o *e2e* en la justificación). El modelo explica la decisión en voz alta.
 - **Botones de preparación:**

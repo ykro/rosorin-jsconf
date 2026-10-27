@@ -63,11 +63,22 @@ function pulseToRadians(id: number, pulse: number): number {
     // Parallel gripper: 220 = wide open (+0.18 rad), 680 = pinched shut (-0.50 rad)
     return 0.18 - ((pulse - 220) / 460) * 0.68;
   }
-  if (id === 2 || id === 3 || id === 4) {
+  // joint1's URDF axis points down (≈ -z), so a pulse above 500 must give a negative angle to turn
+  // the arm to the robot's LEFT (+y): that's how the gestures and the printed props are laid out
+  // (joint1 = 700 → green APROBADO tray 18 cm to the left, 610 → Cloud Run totem on the left).
+  if (id === 1 || id === 2 || id === 3 || id === 4) {
     return (500 - pulse) * scale;
   }
   return (pulse - 500) * scale;
 }
+
+// Demo B: the key leaves the gripper only once it is open this far (pulseToRadians(10, ~450)).
+const GRIPPER_RELEASE_RAD = -0.16;
+const KEY_FLAT_HALF_M = 0.009; // the key lying flat: half of its 0.018 m thickness
+const TRAY_TOP_M = 0.012;
+// Same size as the printed tray mats (docs/generate_props_pdf.py: 186 × 108 mm), long side forward
+const TRAY_HALF_X_M = 0.093;
+const TRAY_HALF_Y_M = 0.054;
 
 /**
  * 3D twin of the robot. Wrapped in an error boundary: if the scene crashes (or
@@ -583,22 +594,53 @@ function Rosorin3DViewerScene({
     rosWorld.add(gatekeeperGroup);
 
     const approveTray = new THREE.Mesh(
-      new THREE.BoxGeometry(0.11, 0.11, 0.012),
+      new THREE.BoxGeometry(2 * TRAY_HALF_X_M, 2 * TRAY_HALF_Y_M, TRAY_TOP_M),
       new THREE.MeshStandardMaterial({ color: 0x059669, roughness: 0.4 })
     );
-    approveTray.position.set(0.18, 0.19, 0.006);
+    // 18 cm to the left / right of the robot, as the printed props say
+    approveTray.position.set(0.18, 0.19, TRAY_TOP_M / 2);
     gatekeeperGroup.add(approveTray);
 
     const rejectTray = new THREE.Mesh(
-      new THREE.BoxGeometry(0.11, 0.11, 0.012),
+      new THREE.BoxGeometry(2 * TRAY_HALF_X_M, 2 * TRAY_HALF_Y_M, TRAY_TOP_M),
       new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.4 })
     );
-    rejectTray.position.set(0.18, -0.19, 0.006);
+    rejectTray.position.set(0.18, -0.19, TRAY_TOP_M / 2);
     gatekeeperGroup.add(rejectTray);
 
     const droppedKeyMesh = keyMesh.clone();
     droppedKeyMesh.visible = false;
     gatekeeperGroup.add(droppedKeyMesh);
+    // The key stays in the gripper until it actually opens, then falls from there onto the tray
+    // under it (or the floor). gatekeeperGroup sits at the rosWorld origin: its frame is rosWorld's.
+    const keyDrop = { phase: 'held' as 'held' | 'falling' | 'resting', vz: 0, restZ: KEY_FLAT_HALF_M };
+    const keyFlatQuat = new THREE.Quaternion();
+    const keyWorldPos = new THREE.Vector3();
+    const keyWorldQuat = new THREE.Quaternion();
+    const keyParentQuat = new THREE.Quaternion();
+    const keyAxisX = new THREE.Vector3();
+    const startKeyDrop = () => {
+      keyMesh.updateWorldMatrix(true, false);
+      keyMesh.getWorldPosition(keyWorldPos);
+      keyMesh.getWorldQuaternion(keyWorldQuat);
+      gatekeeperGroup.worldToLocal(keyWorldPos);
+      gatekeeperGroup.getWorldQuaternion(keyParentQuat);
+      droppedKeyMesh.position.copy(keyWorldPos);
+      droppedKeyMesh.quaternion.copy(keyParentQuat.invert().multiply(keyWorldQuat));
+      const onTray = [approveTray, rejectTray].some(
+        (tray) =>
+          Math.abs(keyWorldPos.x - tray.position.x) <= TRAY_HALF_X_M &&
+          Math.abs(keyWorldPos.y - tray.position.y) <= TRAY_HALF_Y_M
+      );
+      keyDrop.restZ = (onTray ? TRAY_TOP_M : 0) + KEY_FLAT_HALF_M;
+      // Lands flat (thin side down), keeping the heading it had in the gripper
+      keyAxisX.set(1, 0, 0).applyQuaternion(droppedKeyMesh.quaternion);
+      keyFlatQuat
+        .setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.atan2(keyAxisX.y, keyAxisX.x))
+        .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2));
+      keyDrop.vz = 0;
+      keyDrop.phase = 'falling';
+    };
 
     // Demo C 3 Physical Service Totems on the Stage Table + 3D Backboard Labels
     const bughunterGroup = new THREE.Group();
@@ -858,18 +900,24 @@ function Rosorin3DViewerScene({
       if (sceneMode === 'gatekeeper') {
         gatekeeperGroup.visible = true;
         bughunterGroup.visible = false;
-        if (heldState === 'released_approved') {
-          heldKeyGroup.visible = false;
-          droppedKeyMesh.visible = true;
-          droppedKeyMesh.position.set(0.18, 0.19, 0.032);
-        } else if (heldState === 'released_rejected') {
-          heldKeyGroup.visible = false;
-          droppedKeyMesh.visible = true;
-          droppedKeyMesh.position.set(0.18, -0.19, 0.032);
-        } else {
-          heldKeyGroup.visible = true;
-          droppedKeyMesh.visible = false;
+        const released = heldState === 'released_approved' || heldState === 'released_rejected';
+        if (!released) {
+          keyDrop.phase = 'held';
+        } else if (keyDrop.phase === 'held' && rJoint.currentAngle > GRIPPER_RELEASE_RAD) {
+          startKeyDrop();
         }
+        if (keyDrop.phase === 'falling') {
+          keyDrop.vz -= 9.81 * dt;
+          droppedKeyMesh.position.z += keyDrop.vz * dt;
+          droppedKeyMesh.quaternion.slerp(keyFlatQuat, Math.min(1, dt * 10));
+          if (droppedKeyMesh.position.z <= keyDrop.restZ) {
+            droppedKeyMesh.position.z = keyDrop.restZ;
+            droppedKeyMesh.quaternion.copy(keyFlatQuat);
+            keyDrop.phase = 'resting';
+          }
+        }
+        heldKeyGroup.visible = keyDrop.phase === 'held';
+        droppedKeyMesh.visible = keyDrop.phase !== 'held';
       } else if (sceneMode === 'bughunter') {
         gatekeeperGroup.visible = false;
         bughunterGroup.visible = true;
