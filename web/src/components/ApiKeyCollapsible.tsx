@@ -10,10 +10,29 @@ import {
   type ApiKeySource,
   type BridgeKeyStatus,
 } from '@/lib/api-key';
+import { bridgeHost, resolveBridgeUrl } from '@/lib/bridge-config';
 
 export const MISSING_KEY_NOTICE =
   'Falta la API key de Gemini: agrégala a web/.env del robot (GEMINI_API_KEY) o ingrésala aquí.';
 export const MEMORY_ONLY_NOTICE = 'Solo se usa mientras esta página está abierta; no se guarda.';
+
+/** Why there is no key, from what the bridge answered (or that it could not be asked). */
+export function missingKeyNotice(status: BridgeKeyStatus, host = bridgeHost(resolveBridgeUrl())): string {
+  const where = host ? ` (${host})` : '';
+  switch (status) {
+    case 'idle':
+    case 'loading':
+      return `Buscando la API key de Gemini en el bridge${where}…`;
+    case 'unreachable':
+      return `No pude pedirle la API key al bridge${where}: no responde. Ingrésala aquí mientras tanto.`;
+    case 'missing':
+      return `El bridge${where} no tiene GEMINI_API_KEY en web/.env: agrégala ahí o ingrésala aquí.`;
+    case 'disabled':
+      return 'Esta página no carga la API key desde un bridge: ingrésala aquí.';
+    default:
+      return MISSING_KEY_NOTICE;
+  }
+}
 
 function sourceText(source: ApiKeySource, bridge: BridgeKeyStatus): string {
   if (source === 'manual') return 'Ingresada a mano (solo esta página)';
@@ -104,7 +123,7 @@ export function ApiKeyCollapsible() {
         >
           {missing && (
             <p role="alert" className="mb-2 text-xs font-semibold text-[#B06000]">
-              {MISSING_KEY_NOTICE}
+              {missingKeyNotice(bridgeStatus)}
             </p>
           )}
           <p className="text-xs text-[#5F6368]">
