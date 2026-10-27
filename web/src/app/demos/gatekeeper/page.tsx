@@ -10,6 +10,7 @@ import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { useEmbodiedLiveSession } from '@/lib/use-embodied-live-session';
 import { useLiteMode } from '@/lib/use-lite-mode';
 import { analyzeGitHubPR } from '@/lib/repo-analyzer';
+import { PUT_KEY_BACK_HINT, caseSwitchAction } from '@/lib/gatekeeper-case';
 
 const Rosorin3DViewer = dynamic(
   () => import('@/components/Rosorin3DViewer').then((m) => m.Rosorin3DViewer),
@@ -43,6 +44,7 @@ export default function GatekeeperDemoPage() {
   const isLite = useLiteMode();
   const [prUrlInput, setPrUrlInput] = useState(PRESET_PR_LINKS[0].url);
   const [evaluating, setEvaluating] = useState(false);
+  const [keyHint, setKeyHint] = useState('');
   const { sessionRef: liveSessionRef, consoleProps, setVerdictHeadline } = useEmbodiedLiveSession(robot);
 
   useEffect(() => {
@@ -66,8 +68,20 @@ export default function GatekeeperDemoPage() {
   };
 
   const handleHoldAgain = async () => {
+    setKeyHint('');
     await triggerGesture('gatekeeper_hold', 'guarding');
     setVerdictHeadline('Llave sujeta nuevamente en la pinza.');
+  };
+
+  // A new case starts clean: in mock or in the twin the key goes back to the gripper (what
+  // «Sujetar Llave» does); the real robot's key has to be put back by hand.
+  const handleSelectCase = (url: string) => {
+    if (url === prUrlInput) return;
+    setPrUrlInput(url);
+    setVerdictHeadline('');
+    const action = caseSwitchAction(robot.bridge.connected, telemetry.backend, telemetry.held_object);
+    setKeyHint(action === 'hint' ? PUT_KEY_BACK_HINT : '');
+    if (action === 'hold') void triggerGesture('gatekeeper_hold', 'guarding');
   };
 
   const controlsColumn = (
@@ -127,7 +141,7 @@ export default function GatekeeperDemoPage() {
             <button
               key={item.url}
               type="button"
-              onClick={() => setPrUrlInput(item.url)}
+              onClick={() => handleSelectCase(item.url)}
               className={`rounded-xl border px-3.5 py-2 text-xs font-bold transition-colors ${
                 prUrlInput === item.url
                   ? 'border-[#1E8E3E] bg-[#E6F4EA] text-[#1E8E3E]'
@@ -138,6 +152,7 @@ export default function GatekeeperDemoPage() {
             </button>
           ))}
         </div>
+        {keyHint && <p className="mt-2 text-xs font-semibold text-[#B06000]">{keyHint}</p>}
         </ApiKeyGate>
         </div>
       </div>
