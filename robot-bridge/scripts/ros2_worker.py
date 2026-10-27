@@ -15,6 +15,9 @@ On stdin EOF (bridge died or exited) the motors are set to 0.
 Heartbeat: `{"op":"ping","seq":N}` is answered with `{"event":"pong","seq":N}` from the same
 thread that executes the commands, so a worker that stops reading stdin is detected by the bridge
 (connected=false, chassis blocked) even if the LiDAR thread keeps publishing.
+«Reconocer entorno»: `{"op":"scan_env_capture",...}` only enqueues the request; the vision runs on
+the `scan-env` thread (scan_env.py) and answers `{"event":"scan_env_result",...}` when done, so it
+never delays the pongs.
 
 This module is importable without ROS 2 / the Board (see `test_ros2_worker.py`):
 hardware is only touched from `main()`.
@@ -27,6 +30,8 @@ import signal
 import sys
 import threading
 import time
+
+import scan_env  # noqa: E402  (pure Python, next to this file)
 
 VALID_SERVO_IDS = {1, 2, 3, 4, 5, 10}
 # The bridge re-sends the active velocity every ~100 ms, so 500 ms without
@@ -162,6 +167,21 @@ def emit(event: dict) -> None:
         sys.stdout.flush()
 
 
+def scan_rays(msg) -> list:
+    """LaserScan → [(robot_angle_rad, range_m)] with the mount correction (for scan_env's LiDAR check)."""
+    angle = float(msg.angle_min)
+    inc = float(msg.angle_increment)
+    rays = []
+    for r in msg.ranges:
+        rays.append((robot_angle(angle), float(r)))
+        angle += inc
+    return rays
+
+
+# Frames for «Reconocer entorno» (fed by the telemetry node's callbacks).
+SCANNER = scan_env.SceneScanner(emit, lidar_rays=scan_rays)
+
+
 def ensure_rclpy():
     """Initializes rclpy exactly once, even if called from several threads."""
     with _rclpy_lock:
@@ -239,7 +259,9 @@ def handle_board_command(board, cmd: dict, vel_state: dict):
     op = cmd.get("op")
     if reply_ping(cmd):
         return
-    if op == "arm":
+    if op == "scan_env_capture":
+        SCANNER.request(cmd)  # only enqueues: the vision runs on its own thread
+    elif op == "arm":
         dur_s = max(0.12, min(5.0, float(cmd.get("duration_s", 0.4))))
         positions = []
         for s in cmd.get("servos", [])[:6]:
@@ -436,7 +458,9 @@ def compute_lidar_sectors(
 def create_telemetry_node():
     """
     Builds the node that subscribes to:
-    - /depth_cam/rgb0/image_raw (Aurora 930 3D camera, 2 FPS JPEG base64)
+    - /depth_cam/rgb0/image_raw (Aurora 930 3D camera, 2 FPS JPEG base64; the newest raw frame is
+      also kept for «Reconocer entorno»)
+    - /depth_cam/depth0/image_raw (mono16 mm, only kept for «Reconocer entorno»)
     - /scan (LD19/MS200 LiDAR, up to 10 Hz sector distances with arm shadow filtering)
     Without /scan the bridge marks the LiDAR as stale and blocks the chassis.
 
@@ -465,6 +489,7 @@ def create_telemetry_node():
 
         if has_cv2:
             def on_image(msg: Image):
+                SCANNER.on_rgb(msg)  # reference only; the scan thread decodes it on demand
                 now = time.monotonic()
                 if now - last_img_sent[0] < 0.5:
                     return
@@ -491,8 +516,17 @@ def create_telemetry_node():
                 Image, "/depth_cam/rgb0/image_raw", on_image, qos_profile_sensor_data
             )
             sys.stderr.write("[ros2_worker] Subscribed to /depth_cam/rgb0/image_raw (Aurora 930)\n")
+        else:
+            # Without cv2 there is no JPEG preview, but «Reconocer entorno» still needs the frames.
+            node.create_subscription(
+                Image, "/depth_cam/rgb0/image_raw", SCANNER.on_rgb, qos_profile_sensor_data
+            )
+        node.create_subscription(
+            Image, "/depth_cam/depth0/image_raw", SCANNER.on_depth, qos_profile_sensor_data
+        )
 
         def on_scan(msg: LaserScan):
+            SCANNER.on_scan(msg)
             now = time.monotonic()
             # ~20 Hz max: well inside the bridge's 300 ms staleness window
             if now - last_scan_sent[0] < 0.05:
@@ -608,7 +642,9 @@ def main():
                 op = cmd.get("op")
                 if reply_ping(cmd):
                     continue
-                if op == "cmd_vel":
+                if op == "scan_env_capture":
+                    SCANNER.request(cmd)  # only enqueues: the vision runs on its own thread
+                elif op == "cmd_vel":
                     lx = max(-0.25, min(0.25, float(cmd.get("linear_x", 0.0))))
                     ly = max(-0.25, min(0.25, float(cmd.get("linear_y", 0.0))))
                     az = max(-0.80, min(0.80, float(cmd.get("angular_z", 0.0))))
