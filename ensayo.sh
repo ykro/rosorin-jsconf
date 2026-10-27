@@ -829,12 +829,18 @@ fi
 # ==============================================================================
 section "5. Sentido de las ruedas Mecanum"
 if [[ ",$(uncovered_sectors)," == *",back_m,"* ]]; then
-  note "Atrás no frena: el LiDAR no ve detrás del robot. Deja libre detrás del robot y nunca lo pruebes en una mesa."
+  note "Atrás no frena: el LiDAR no ve detrás del robot. El ensayo retrocede despacio (0.05 m/s, ~2.5 cm) y te lo pregunta antes."
 fi
 if clear_area; then
-  for spec in "0.10 0 0:hacia ADELANTE" "-0.10 0 0:hacia ATRÁS" "0 0.10 0:de lado a la IZQUIERDA" "0 -0.10 0:de lado a la DERECHA" "0 0 0.4:girando a la IZQUIERDA (antihorario)" "0 0 -0.4:girando a la DERECHA (horario)"; do
-    read -r vx vy wz <<< "${spec%%:*}"; label="${spec#*:}"
-    R="$(cmd_vel "$vx" "$vy" "$wz" 600)"
+  # Hacia atrás el LiDAR no frena: el ensayo retrocede lento y corto (0.05 m/s × 0.5 s ≈ 2.5 cm,
+  # el mismo límite que el bridge aplica a los gestos) y pide confirmarlo aparte.
+  for spec in "0.10 0 0 600:hacia ADELANTE" "-0.05 0 0 500:hacia ATRÁS (despacio, ~2.5 cm)" "0 0.10 0 600:de lado a la IZQUIERDA" "0 -0.10 0 600:de lado a la DERECHA" "0 0 0.4 600:girando a la IZQUIERDA (antihorario)" "0 0 -0.4 600:girando a la DERECHA (horario)"; do
+    read -r vx vy wz ms <<< "${spec%%:*}"; label="${spec#*:}"
+    if [[ "$vx" == -* ]] && ! ask "Detrás del robot está libre. ¿Retrocedo despacio unos 2.5 cm"; then
+      warn "Omití el movimiento $label."
+      continue
+    fi
+    R="$(cmd_vel "$vx" "$vy" "$wz" "$ms")"
     if [ "$(code_of "$R")" = "423" ]; then bad "El movimiento $label respondió 423: la E-stop estaba enclavada."; release; continue; fi
     BLOCKED="$(jf "$(body_of "$R")" 'd.get("blocked")')"
     sleep 0.9
