@@ -70,7 +70,7 @@ Gemini Live nunca habla directo con el bus serie. Cada comando pasa por estas ba
 1. **Tipos e IDs.** `serde` rechaza tipos incorrectos con `422`. `is_valid_servo_id` solo acepta `{1, 2, 3, 4, 5, 10}` (la pinza es el 10, no el 6) y `/arm` pide entre 1 y 6 servos; si no, `400 invalid_request`. En `/servo/jog`, un `delta` fuera de `-300..300` también es `400`.
 2. **Recorte por articulación** (`clamp_servo_pulse`): las posiciones fuera de rango no son error, se recortan.
    - Servo 1 (base): `120..880`
-   - Servo 2 (hombro): `220..780`, para no golpear la torre del LiDAR
+   - Servo 2 (hombro): `220..780`, para no golpear el LiDAR
    - Servos 3 y 4 (codo y muñeca): `150..850`
    - Servo 5 (giro de muñeca): `100..900`
    - Servo 10 (pinza): `200..750` (220 abierta, 680 cerrada sobre la llave)

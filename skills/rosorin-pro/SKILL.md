@@ -47,7 +47,7 @@ Solo se aceptan los IDs `{1, 2, 3, 4, 5, 10}`. Cualquier otro ID en `/arm` o `/s
 | Articulación | ID | Rol | Rango permitido | Nota |
 |---|---|---|---|---|
 | `joint1` | `1` | Base (giro) | `120..880` | `500` mira al frente |
-| `joint2` | `2` | Hombro | `220..780` | Más abajo golpea la torre del LiDAR |
+| `joint2` | `2` | Hombro | `220..780` | Más abajo golpea el LiDAR |
 | `joint3` | `3` | Codo | `150..850` | |
 | `joint4` | `4` | Muñeca | `150..850` | Inclina cámara y pinza |
 | `joint5` | `5` | Giro de muñeca | `100..900` | |
@@ -170,7 +170,7 @@ Los motores 3 y 4 (lado derecho) están montados invertidos.
 | Mandar la pinza al servo 6 | La pinza es el **servo 10**. Otro ID da `400`. |
 | Usar `wheel_diameter=0.0065` de `mecanum.py` | Es un error en el valor por defecto de Hiwonder; el real es `0.08` (80 mm). |
 | Mover el chasis sin plazo | Siempre manda `duration_ms` o deja que el watchdog (600 ms) corte. |
-| Bajar `joint2` de 220 | Choca con la torre del LiDAR; el bridge lo recorta. |
+| Bajar `joint2` de 220 | Choca con el LiDAR; el bridge lo recorta. |
 | Abrir `/dev/rrc` con `ros_robot_controller_node` activo | Usa `ros2` (el worker publica en tópicos) o detén ese nodo para `serial`. |
 | Reintentar un movimiento que dio `423` | La E-stop está enclavada a propósito. Avisa y espera `POST /estop/release`. |
 | Llamar al bridge sin token desde la LAN | Manda `x-bridge-token`; `401` significa token faltante o distinto. |

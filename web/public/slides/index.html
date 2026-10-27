@@ -370,9 +370,9 @@
             <h3 class="headline-md" style="font-size: 64px; margin-top: 24px;">MOVER UN BRAZO DE 6 SERVOS</h3>
           </div>
           <ul style="list-style: none; display: flex; flex-direction: column; gap: 30px; font-size: 36px; line-height: 1.36; color: var(--ink-muted);">
-            <li><strong style="color: var(--ink);">Inercia y gravedad.</strong> Frenar tarde o perder la red en movimiento golpea la mesa.</li>
+            <li><strong style="color: var(--ink);">Inercia y gravedad.</strong> Si cae la red en movimiento, el chasis sigue rodando y choca.</li>
             <li><strong style="color: var(--ink);">Sin Ctrl+Z físico.</strong> Abrir la pinza (<code>ID 10</code>) suelta el objeto de verdad.</li>
-            <li><strong style="color: var(--ink);">Geometría rígida.</strong> Bajar el hombro (<code>J2</code>) de <code>220</code> golpea la torre del LiDAR.</li>
+            <li><strong style="color: var(--ink);">Geometría rígida.</strong> Bajar el hombro (<code>J2</code>) de <code>220</code> golpea el LiDAR.</li>
           </ul>
         </div>
       </div>
@@ -387,7 +387,7 @@
       <div class="diagram-frame" style="flex: 1; margin-top: 28px;">
         <svg role="img" aria-labelledby="d1-title d1-desc" viewBox="0 0 1640 740" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
           <title id="d1-title">Arquitectura end-to-end de ROSOrin Pro con Gemini 3.8 Live y Rust</title>
-          <desc id="d1-desc">Diagrama de arquitectura con Cliente Web en puerto 3000, Voz con gemini-3.8-live y Bridge en puerto 9000, y ROSOrin Pro con ROS 2 Humble y STM32 a 1 Mbps.</desc>
+          <desc id="d1-desc">Diagrama de arquitectura con Cliente Web, Voz con gemini-3.8-live y Bridge en Rust, y ROSOrin Pro con ROS 2 Humble y STM32 a 1 Mbps.</desc>
           <defs>
             <marker id="d1-arr-dark" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
               <path d="M0,1 L9,5 L0,9 Z" fill="#3F4752"/>
@@ -404,14 +404,9 @@
           <rect width="1640" height="740" fill="#FFFFFF" rx="8"/>
 
           <!-- 2. Zone Containers -->
-          <rect x="24" y="24" width="452" height="614" rx="8" fill="#F8F7F3" stroke="#CFCBC0" stroke-width="2" stroke-dasharray="6 4"/>
-          <text x="52" y="64" font-family="'JetBrains Mono', monospace" font-size="20" font-weight="700" fill="#68707C" letter-spacing="2">CLIENTE WEB (:3000)</text>
-
-          <rect x="572" y="24" width="496" height="614" rx="8" fill="#F8F7F3" stroke="#CFCBC0" stroke-width="2" stroke-dasharray="6 4"/>
-          <text x="600" y="64" font-family="'JetBrains Mono', monospace" font-size="20" font-weight="700" fill="#68707C" letter-spacing="2">GEMINI (NUBE) · BRIDGE (:9000)</text>
-
-          <rect x="1132" y="24" width="484" height="614" rx="8" fill="#F8F7F3" stroke="#CFCBC0" stroke-width="2" stroke-dasharray="6 4"/>
-          <text x="1160" y="64" font-family="'JetBrains Mono', monospace" font-size="20" font-weight="700" fill="#68707C" letter-spacing="2">ROSORIN PRO</text>
+          <rect x="24" y="64" width="452" height="568" rx="8" fill="#F8F7F3" stroke="#CFCBC0" stroke-width="2" stroke-dasharray="6 4"/>
+          <rect x="572" y="64" width="496" height="568" rx="8" fill="#F8F7F3" stroke="#CFCBC0" stroke-width="2" stroke-dasharray="6 4"/>
+          <rect x="1132" y="64" width="484" height="568" rx="8" fill="#F8F7F3" stroke="#CFCBC0" stroke-width="2" stroke-dasharray="6 4"/>
 
           <!-- 3. Orthogonal Connectors -->
           <!-- Browser -> Gemini Live (y=165) -->
@@ -419,10 +414,10 @@
           <!-- Gemini Live -> Browser (y=222) -->
           <line x1="604" y1="222" x2="444" y2="222" stroke="#EB6C36" stroke-width="3" marker-end="url(#d1-arr-coral)"/>
 
-          <!-- Browser -> Rust Bridge :9000 -->
+          <!-- Browser -> Rust Bridge -->
           <path d="M 444,268 L 486,268 Q 494,268 494,276 L 494,435 Q 494,443 502,443 L 604,443" fill="none" stroke="#EB6C36" stroke-width="3.5" marker-end="url(#d1-arr-coral)"/>
 
-          <!-- Rust Bridge -> Simulador 3D (:3000) -->
+          <!-- Rust Bridge -> Simulador 3D -->
           <line x1="604" y1="518" x2="444" y2="518" stroke="#16A34A" stroke-width="3" stroke-dasharray="7 4" marker-end="url(#d1-arr-green)"/>
 
           <!-- Rust Bridge -> ROS 2 Humble -->
@@ -468,16 +463,16 @@
           <rect x="604" y="105" width="432" height="186" rx="6" fill="#FFFFFF" stroke="#948F84" stroke-width="2.5"/>
           <rect x="626" y="125" width="196" height="30" rx="2" fill="#ECEAE3"/>
           <text x="724" y="146" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="16" font-weight="700" fill="#0E1117">GEMINI-3.8-LIVE</text>
-          <text x="626" y="194" font-family="'IBM Plex Sans', sans-serif" font-size="26" font-weight="700" fill="#0E1117">Gemini Live API (WSS)</text>
+          <text x="626" y="194" font-family="'IBM Plex Sans', sans-serif" font-size="26" font-weight="700" fill="#0E1117">Gemini Live API</text>
           <text x="626" y="232" font-family="'IBM Plex Sans', sans-serif" font-size="21" fill="#3F4752">• Voz nativa + Visión JPEG 1 FPS</text>
           <text x="626" y="266" font-family="'IBM Plex Sans', sans-serif" font-size="21" fill="#3F4752">• Tools con resultado ok o error</text>
 
-          <!-- Node 4 (FOCAL CORAL NODE): Rust robot-bridge :9000 -->
+          <!-- Node 4 (FOCAL CORAL NODE): Rust robot-bridge -->
           <rect x="604" y="405" width="432" height="186" rx="6" fill="rgba(235, 108, 54, 0.10)" stroke="#EB6C36" stroke-width="3.5"/>
-          <rect x="626" y="425" width="194" height="30" rx="2" fill="#EB6C36"/>
-          <text x="723" y="446" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="16" font-weight="700" fill="#FFFFFF">RUST · AXUM :9000</text>
-          <text x="626" y="494" font-family="'IBM Plex Sans', sans-serif" font-size="26" font-weight="700" fill="#0E1117">API robot-bridge (40 Hz)</text>
-          <text x="626" y="532" font-family="'IBM Plex Sans', sans-serif" font-size="21" fill="#0E1117">• Loop de servos a 40 Hz + WS 20 Hz</text>
+          <rect x="626" y="425" width="154" height="30" rx="2" fill="#EB6C36"/>
+          <text x="703" y="446" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="16" font-weight="700" fill="#FFFFFF">API EN RUST</text>
+          <text x="626" y="494" font-family="'IBM Plex Sans', sans-serif" font-size="26" font-weight="700" fill="#0E1117">API robot-bridge</text>
+          <text x="626" y="532" font-family="'IBM Plex Sans', sans-serif" font-size="21" fill="#0E1117">• Interpolación de servos + Telemetría WS</text>
           <text x="626" y="566" font-family="'IBM Plex Sans', sans-serif" font-size="21" fill="#0E1117">• Rango por servo + Freno LiDAR</text>
 
           <!-- Node 5: ROS 2 Humble -->
@@ -505,7 +500,7 @@
           <text x="584" y="693" font-family="'IBM Plex Sans', sans-serif" font-size="20" font-weight="600" fill="#0E1117">Entrada de Micrófono 16 kHz / Tópicos ROS 2</text>
 
           <line x1="1060" y1="686" x2="1110" y2="686" stroke="#16A34A" stroke-width="3.5" stroke-dasharray="7 4"/>
-          <text x="1124" y="693" font-family="'IBM Plex Sans', sans-serif" font-size="20" font-weight="600" fill="#0E1117">Telemetría 20 Hz, LiDAR y Cámara 3D</text>
+          <text x="1124" y="693" font-family="'IBM Plex Sans', sans-serif" font-size="20" font-weight="600" fill="#0E1117">Telemetría en vivo, LiDAR y Cámara 3D</text>
         </svg>
       </div>
     </section>
@@ -519,7 +514,7 @@
       <div class="diagram-frame" style="flex: 1; margin-top: 28px;">
         <svg role="img" aria-labelledby="d2-title d2-desc" viewBox="0 0 1640 720" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
           <title id="d2-title">Stack de cuatro capas del sistema: TypeScript, API en Rust, ROS 2 Humble y STM32</title>
-          <desc id="d2-desc">Diagrama de capas horizontales mostrando TypeScript en el navegador, Rust para el API robot-bridge en el puerto 9000, ROS 2 Humble para los sensores y STM32 a 1 Mbps para el control electrónico.</desc>
+          <desc id="d2-desc">Diagrama de capas horizontales mostrando TypeScript en el navegador, Rust para el API robot-bridge, ROS 2 Humble para los sensores y STM32 a 1 Mbps para el control electrónico.</desc>
           <defs>
             <marker id="d2-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
               <path d="M0,1 L9,5 L0,9 Z" fill="#EB6C36"/>
@@ -534,7 +529,7 @@
           <line x1="264" y1="28" x2="264" y2="168" stroke="#CFCBC0" stroke-width="2"/>
           <text x="64" y="86" font-family="'JetBrains Mono', monospace" font-size="24" font-weight="700" fill="#0E1117">CAPA 4</text>
           <text x="64" y="122" font-family="'JetBrains Mono', monospace" font-size="19" font-weight="600" fill="#68707C">TYPESCRIPT</text>
-          <text x="296" y="80" font-family="'IBM Plex Sans', sans-serif" font-size="28" font-weight="700" fill="#0E1117">Navegador + Web Audio PCM + Visor Three.js (:3000)</text>
+          <text x="296" y="80" font-family="'IBM Plex Sans', sans-serif" font-size="28" font-weight="700" fill="#0E1117">Navegador + Web Audio PCM + Visor Three.js</text>
           <text x="296" y="124" font-family="'IBM Plex Sans', sans-serif" font-size="23" fill="#3F4752">Captura micrófono a 16 kHz, vacía la cola de voz al interrumpir y dibuja el modelo 3D.</text>
           <rect x="1340" y="54" width="234" height="40" rx="2" fill="#ECEAE3"/>
           <text x="1457" y="80" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="17" font-weight="700" fill="#0E1117">gemini-3.8-live</text>
@@ -544,10 +539,10 @@
           <line x1="264" y1="196" x2="264" y2="344" stroke="#EB6C36" stroke-width="2"/>
           <text x="64" y="256" font-family="'JetBrains Mono', monospace" font-size="24" font-weight="700" fill="#EB6C36">CAPA 3</text>
           <text x="64" y="292" font-family="'JetBrains Mono', monospace" font-size="19" font-weight="700" fill="#0E1117">API EN RUST</text>
-          <text x="296" y="248" font-family="'IBM Plex Sans', sans-serif" font-size="28" font-weight="700" fill="#0E1117">robot-bridge (:9000) · Control y Límites Físicos</text>
-          <text x="296" y="292" font-family="'IBM Plex Sans', sans-serif" font-size="23" fill="#0E1117">Interpola los 6 servos a 40 Hz y aplica el rango por articulación, el watchdog, el freno LiDAR y la E-stop.</text>
+          <text x="296" y="248" font-family="'IBM Plex Sans', sans-serif" font-size="28" font-weight="700" fill="#0E1117">robot-bridge · Control y Límites Físicos</text>
+          <text x="296" y="292" font-family="'IBM Plex Sans', sans-serif" font-size="23" fill="#0E1117">Interpola los 6 servos y aplica el rango por articulación, el watchdog, el freno LiDAR y la E-stop.</text>
           <rect x="1340" y="220" width="234" height="40" rx="2" fill="#EB6C36"/>
-          <text x="1457" y="246" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="17" font-weight="700" fill="#FFFFFF">AXUM · TOKIO 40HZ</text>
+          <text x="1457" y="246" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="17" font-weight="700" fill="#FFFFFF">GUARDRAILS FÍSICOS</text>
 
           <!-- Band L2: ROS 2 Humble -->
           <rect x="36" y="372" width="1568" height="140" rx="6" fill="#F8F7F3" stroke="#948F84" stroke-width="2"/>
@@ -598,10 +593,10 @@
 
       <div class="grid-3" style="flex: 1; margin-top: 36px;">
         <div class="card-dark" style="display: flex; flex-direction: column; gap: 22px;">
-          <span class="badge-mono" style="background: rgba(255,107,53,0.18); color: var(--orange); align-self: flex-start;">¿POR QUÉ UN API (:9000)?</span>
+          <span class="badge-mono" style="background: rgba(255,107,53,0.18); color: var(--orange); align-self: flex-start;">¿POR QUÉ UN API PROPIO?</span>
           <h3 class="headline-md" style="font-size: 50px;">PROTEGER EL BUS DE ROS 2</h3>
           <p style="font-size: 31px; line-height: 1.42; color: var(--light-muted);">
-            ROS 2 usa internamente <strong>DDS</strong> (su bus de mensajes local entre nodos). Exponer ese bus directo al navegador deja los motores sin filtro; el API en <code>:9000</code> valida cada acción y transmite la telemetría por WebSocket a <code>20 Hz</code>.
+            ROS 2 usa internamente <strong>DDS</strong> (su bus de mensajes local entre nodos). Exponer ese bus directo al navegador deja los motores sin filtro; el API valida cada acción y transmite la telemetría por WebSocket.
           </p>
         </div>
 
@@ -609,7 +604,7 @@
           <span class="badge-mono" style="background: var(--orange); color: var(--ink); align-self: flex-start;">¿POR QUÉ RUST Y NO PYTHON?</span>
           <h3 class="headline-md" style="font-size: 50px;">CONCURRENCIA Y UN SOLO BINARIO</h3>
           <p style="font-size: 31px; line-height: 1.42; color: var(--light-muted);">
-            El bridge atiende WebSockets a <code>20 Hz</code>, ejecuta el loop cinemático de <code>40 Hz</code> y vigila el watchdog al mismo tiempo sin bloqueos del GIL ni pausas de <em>garbage collector</em>, en un único binario nativo para laptop y Jetson.
+            El bridge atiende WebSockets, interpola el movimiento de los servos y vigila el watchdog al mismo tiempo sin bloqueos del GIL ni pausas de <em>garbage collector</em>, en un único binario nativo para laptop y Jetson.
           </p>
         </div>
 
@@ -684,13 +679,13 @@
           <text x="532" y="273" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="16" font-weight="700" fill="#EB6C36">ACCIONES</text>
 
           <rect x="478" y="387" width="108" height="34" rx="4" fill="#FFFFFF" stroke="#16A34A" stroke-width="1.5"/>
-          <text x="532" y="410" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="16" font-weight="700" fill="#16A34A">WS 20 HZ</text>
+          <text x="532" y="410" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="14" font-weight="700" fill="#16A34A">TELEMETRÍA</text>
 
           <!-- 4. Enlarged Node Boxes -->
           <rect x="28" y="88" width="448" height="484" rx="8" fill="#FFFFFF" stroke="#948F84" stroke-width="3"/>
           <rect x="56" y="122" width="242" height="36" rx="4" fill="#ECEAE3"/>
           <text x="177" y="147" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="18" font-weight="700" fill="#0E1117">THREE.JS + URDF/STL</text>
-          <text x="56" y="210" font-family="'IBM Plex Sans', sans-serif" font-size="33" font-weight="700" fill="#0E1117">Clon 3D (:3000)</text>
+          <text x="56" y="210" font-family="'IBM Plex Sans', sans-serif" font-size="33" font-weight="700" fill="#0E1117">Clon 3D</text>
           <text x="56" y="268" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#3F4752">• 16 piezas CAD oficiales (.stl)</text>
           <text x="56" y="316" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#3F4752">• Cinemática J1..J5 + Pinza</text>
           <text x="56" y="364" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#3F4752">• Simulador de obstáculo LiDAR</text>
@@ -699,8 +694,8 @@
           <rect x="588" y="88" width="448" height="484" rx="8" fill="rgba(235, 108, 54, 0.11)" stroke="#EB6C36" stroke-width="3.5"/>
           <rect x="616" y="122" width="236" height="36" rx="4" fill="#EB6C36"/>
           <text x="734" y="147" text-anchor="middle" font-family="'JetBrains Mono', monospace" font-size="18" font-weight="700" fill="#FFFFFF">MISMO BINARIO RUST</text>
-          <text x="616" y="210" font-family="'IBM Plex Sans', sans-serif" font-size="33" font-weight="700" fill="#0E1117">robot-bridge (:9000)</text>
-          <text x="616" y="268" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#0E1117">• Loop a 40 Hz (25 ms)</text>
+          <text x="616" y="210" font-family="'IBM Plex Sans', sans-serif" font-size="33" font-weight="700" fill="#0E1117">robot-bridge</text>
+          <text x="616" y="268" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#0E1117">• Interpolación de los 6 servos</text>
           <text x="616" y="316" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#0E1117">• Coreografías seguras (gestures.rs)</text>
           <text x="616" y="364" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#0E1117">• Rango por articulación</text>
           <text x="616" y="412" font-family="'IBM Plex Sans', sans-serif" font-size="25" fill="#0E1117">• Freno LiDAR (&lt; 0.28 m)</text>
@@ -746,7 +741,7 @@
             <span class="badge-mono" style="background: rgba(255,107,53,0.18); color: #C2410C;">PANEL DERECHO</span>
             <h3 style="font-family: var(--font-display); font-size: 44px; text-transform: uppercase; margin-top: 14px;">VISOR 3D SINCRONIZADO</h3>
             <p style="font-size: 28px; line-height: 1.38; color: var(--ink-muted); margin-top: 12px;">
-              Renderiza las 16 mallas CAD del fabricante en tiempo real siguiendo los pulsos que emite <code>robot-bridge</code> a <code>20 Hz</code>.
+              Renderiza las 16 mallas CAD del fabricante en tiempo real siguiendo los pulsos que emite <code>robot-bridge</code>.
             </p>
           </div>
         </div>
@@ -817,7 +812,7 @@
           <ul style="list-style: none; display: flex; flex-direction: column; gap: 16px; font-size: 27px; color: var(--ink);">
             <li>• <strong>Normales STL.</strong> <code>computeVertexNormals()</code> + <code>DoubleSide</code>.</li>
             <li>• <strong>Árbol cinemático.</strong> Pivotes anidados <code>J1..J5</code> + pinza.</li>
-            <li>• <strong>Espejo a <code>20 Hz</code>.</strong> Refleja <code>--backend mock</code> y <code>ros2</code>.</li>
+            <li>• <strong>Espejo en vivo.</strong> Refleja <code>--backend mock</code> y <code>ros2</code>.</li>
           </ul>
         </div>
       </div>
@@ -924,23 +919,23 @@ responses.<span style="color:#D2A8FF;">push</span>({
           <div style="font-family: var(--font-display); font-size: 96px; font-weight: 700; line-height: 1.05;">28 CM</div>
           <h3 style="font-family: var(--font-display); font-size: 46px; text-transform: uppercase;">ESCUDO LIDAR MS200</h3>
           <p style="font-size: 32px; line-height: 1.42; color: var(--ink-muted);">
-            El reflejo vive en el loop de <code>40 Hz</code> en Rust. Si un sector marca menos de <code>28 cm</code>, bloquea el avance hacia ese lado y limita el giro, sin consultar al LLM.
+            El reflejo vive directamente en Rust. Si un sector marca menos de <code>28 cm</code>, bloquea el avance hacia ese lado y limita el giro, sin consultar al LLM.
           </p>
         </div>
       </div>
     </section>
 
     <!-- ================================================================ -->
-    <!-- SLIDE 16: SNIPPET 2 — EL LOOP DE 40 HZ Y GUARDRAILS EN RUST      -->
+    <!-- SLIDE 16: SNIPPET 2 — GUARDRAILS FÍSICOS EN RUST                 -->
     <!-- ================================================================ -->
     <section class="slide s-dark" data-slide="17">
-      <h2 class="headline-md">EL LOOP DE 40 HZ Y GUARDRAILS EN RUST</h2>
+      <h2 class="headline-md">GUARDRAILS FÍSICOS EN RUST</h2>
 
       <div style="display: grid; grid-template-columns: 0.78fr 1.22fr; gap: 44px; flex: 1; margin-top: 32px; align-items: center;">
         <div style="display: flex; flex-direction: column; gap: 26px;">
-          <h3 class="headline-md" style="font-size: 56px; color: var(--cyan);">SEGURIDAD FÍSICA EN CADA TICK DE 25 MS</h3>
+          <h3 class="headline-md" style="font-size: 56px; color: var(--cyan);">SEGURIDAD FÍSICA EN TIEMPO REAL</h3>
           <p style="font-size: 33px; line-height: 1.42; color: var(--light-muted);">
-            Cada <code>25 ms</code>, <code>robot-bridge</code> revisa el plazo de cada comando, la antigüedad del scan y el freno por eje, y frena el chasis sin consultar al modelo. El rango de cada servo se recorta antes, al recibir el comando.
+            En cada ciclo, <code>robot-bridge</code> revisa el plazo de cada comando, la antigüedad del scan y el freno por eje, y frena el chasis sin consultar al modelo. El rango de cada servo se recorta antes, al recibir el comando.
           </p>
         </div>
 
@@ -967,12 +962,12 @@ responses.<span style="color:#D2A8FF;">push</span>({
       <h2 class="headline-md">HABLAR Y MOVERSE AL MISMO TIEMPO</h2>
 
       <div class="grid-2" style="flex: 1; margin-top: 36px; align-items: stretch;">
-        <div class="card-dark" style="display: flex; flex-direction: column; gap: 24px; justify-content: center; opacity: 0.84;">
-          <span class="badge-mono" style="background: #374151; color: #D1D5DB; align-self: flex-start;">POR TURNOS (STT → LLM → TTS)</span>
-          <div style="font-family: var(--font-display); font-size: 128px; font-weight: 700; color: #9CA3AF; line-height: 1.05;">
+        <div class="card-dark" style="display: flex; flex-direction: column; gap: 24px; justify-content: center;">
+          <span class="badge-mono" style="background: #334155; color: #F8FAFC; align-self: flex-start;">POR TURNOS (STT → LLM → TTS)</span>
+          <div style="font-family: var(--font-display); font-size: 128px; font-weight: 700; color: var(--light-text); line-height: 1.05;">
             EN SERIE
           </div>
-          <p style="font-size: 36px; line-height: 1.4; color: var(--light-muted);">
+          <p style="font-size: 36px; line-height: 1.4; color: #CBD5E1;">
             STT, LLM y TTS en serie. El silencio mirándote fijo antes de mover un milímetro el brazo rompe por completo la interacción.
           </p>
         </div>
@@ -999,7 +994,7 @@ responses.<span style="color:#D2A8FF;">push</span>({
         <div class="card-paper" style="border-left: 10px solid var(--red); display: flex; flex-direction: column; gap: 22px;">
           <h3 class="headline-md" style="font-size: 54px;">SET_SERVO(ID, PULSE)</h3>
           <p style="font-size: 31px; line-height: 1.4; color: var(--ink-muted);">
-            Si le pides a un modelo de lenguaje que calcule los 6 pulsos para depositar una llave en una bandeja, fallará la coordinación entre hombro, codo y apertura de pinza.
+            Mandar cada pulso de servo desde la nube acopla el prompt a la geometría del brazo y deja la sincronización entre hombro y pinza a merced de la latencia de red.
           </p>
           <div class="code-block" style="background: #1E2430; font-size: 24px; padding: 26px 30px; margin-top: 8px;"><span style="color:#FF7B72;">// Mal: acopla el modelo a la geometría</span>
 set_servo({ id: <span style="color:#79C0FF;">1</span>, pulse: <span style="color:#79C0FF;">680</span> });
@@ -1084,7 +1079,7 @@ release_deploy_key({
         <div style="display: grid; grid-template-columns: 112px 1fr; gap: 36px; align-items: start; border-bottom: 1px solid var(--dark-border); padding-bottom: 36px;">
           <div style="font-family: var(--font-display); font-size: 72px; font-weight: 700; color: var(--orange); line-height: 0.86; margin-top: 4px;">01</div>
           <div style="font-size: 36px; line-height: 1.38; color: var(--light-text);">
-            <strong>Al LLM se le dan intenciones de negocio, nunca control de motores.</strong> El modelo es excelente decidiendo si aprueba un PR, pero pésimo calculando ángulos e inercia; expón acciones semánticas y resuelve las trayectorias en un loop determinista.
+            <strong>Al LLM se le dan intenciones de negocio; el control de motores es local.</strong> Un modelo en la nube tiene latencia de red y salidas probabilísticas; expón acciones semánticas y resuelve las trayectorias y frenos en un loop determinista.
           </div>
         </div>
 
@@ -1108,25 +1103,38 @@ release_deploy_key({
     <!-- SLIDE 22: CIERRE + CÓDIGO Y SKILLS EN GITHUB                     -->
     <!-- ================================================================ -->
     <section class="slide s-dark" data-slide="22">
-      <div style="display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 56px; align-items: center; margin: auto 0;">
+      <div style="display: grid; grid-template-columns: 0.92fr 1.08fr; gap: 48px; align-items: center; margin: auto 0;">
         <div>
-          <h2 class="headline-lg" style="font-size: 100px; line-height: 1.22;">
+          <h2 class="headline-lg" style="font-size: 92px; line-height: 1.18;">
             PRUEBA EL SIMULADOR 3D Y LOS <span class="accent-orange">SKILLS</span> EN TU LAPTOP
           </h2>
-          <p style="font-size: 36px; line-height: 1.4; color: var(--light-muted); margin-top: 32px;">
+          <p style="font-size: 33px; line-height: 1.4; color: var(--light-muted); margin-top: 28px;">
             Incluye el bridge <code>robot-bridge</code> en Rust, el simulador 3D con las 16 piezas STL y los skills (<code>rosorin-pro</code>, <code>gemini-live-js</code> y <code>threejs-urdf-twin</code>).
           </p>
-          <div style="margin-top: 40px; font-family: var(--font-mono); font-size: 36px; font-weight: 700; color: var(--cyan);">
-            github.com/ykro/rosorin-jsconf
-          </div>
         </div>
 
-        <div class="card-dark" style="background: #FFFFFF; color: var(--ink); padding: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 24px;">
-          <!-- Scannable QR SVG for https://github.com/ykro/rosorin-jsconf -->
-          <svg viewBox="0 0 37 37" width="460" height="460" shape-rendering="crispEdges" aria-label="Código QR hacia https://github.com/ykro/rosorin-jsconf">
-            <rect width="37" height="37" fill="#FFFFFF"/>
-            <path fill="#0E1117" d="M4,4h7v1h-7zM18,4h1v1h-1zM22,4h1v1h-1zM26,4h7v1h-7zM4,5h1v1h-1zM10,5h1v1h-1zM12,5h7v1h-7zM20,5h2v1h-2zM26,5h1v1h-1zM32,5h1v1h-1zM4,6h1v1h-1zM6,6h3v1h-3zM10,6h1v1h-1zM12,6h2v1h-2zM15,6h1v1h-1zM20,6h1v1h-1zM23,6h1v1h-1zM26,6h1v1h-1zM28,6h3v1h-3zM32,6h1v1h-1zM4,7h1v1h-1zM6,7h3v1h-3zM10,7h1v1h-1zM12,7h1v1h-1zM16,7h2v1h-2zM19,7h4v1h-4zM26,7h1v1h-1zM28,7h3v1h-3zM32,7h1v1h-1zM4,8h1v1h-1zM6,8h3v1h-3zM10,8h1v1h-1zM14,8h3v1h-3zM20,8h5v1h-5zM26,8h1v1h-1zM28,8h3v1h-3zM32,8h1v1h-1zM4,9h1v1h-1zM10,9h1v1h-1zM13,9h2v1h-2zM16,9h3v1h-3zM20,9h2v1h-2zM24,9h1v1h-1zM26,9h1v1h-1zM32,9h1v1h-1zM4,10h7v1h-7zM12,10h1v1h-1zM14,10h1v1h-1zM16,10h1v1h-1zM18,10h1v1h-1zM20,10h1v1h-1zM22,10h1v1h-1zM24,10h1v1h-1zM26,10h7v1h-7zM12,11h1v1h-1zM15,11h1v1h-1zM19,11h1v1h-1zM23,11h1v1h-1zM4,12h1v1h-1zM10,12h1v1h-1zM12,12h1v1h-1zM14,12h1v1h-1zM16,12h1v1h-1zM19,12h1v1h-1zM21,12h1v1h-1zM23,12h1v1h-1zM25,12h2v1h-2zM29,12h3v1h-3zM7,13h1v1h-1zM9,13h1v1h-1zM14,13h1v1h-1zM16,13h1v1h-1zM18,13h2v1h-2zM23,13h1v1h-1zM25,13h1v1h-1zM27,13h2v1h-2zM30,13h2v1h-2zM4,14h1v1h-1zM6,14h5v1h-5zM16,14h1v1h-1zM19,14h4v1h-4zM24,14h1v1h-1zM28,14h1v1h-1zM5,15h1v1h-1zM8,15h2v1h-2zM11,15h5v1h-5zM19,15h1v1h-1zM22,15h1v1h-1zM25,15h1v1h-1zM29,15h1v1h-1zM4,16h1v1h-1zM7,16h1v1h-1zM10,16h3v1h-3zM15,16h1v1h-1zM17,16h3v1h-3zM26,16h2v1h-2zM32,16h1v1h-1zM9,17h1v1h-1zM11,17h1v1h-1zM13,17h3v1h-3zM17,17h1v1h-1zM19,17h6v1h-6zM26,17h3v1h-3zM31,17h2v1h-2zM5,18h1v1h-1zM8,18h1v1h-1zM10,18h3v1h-3zM17,18h3v1h-3zM21,18h1v1h-1zM24,18h2v1h-2zM28,18h3v1h-3zM4,19h6v1h-6zM11,19h1v1h-1zM14,19h1v1h-1zM17,19h4v1h-4zM23,19h1v1h-1zM27,19h2v1h-2zM30,19h1v1h-1zM32,19h1v1h-1zM5,20h3v1h-3zM9,20h2v1h-2zM12,20h1v1h-1zM18,20h1v1h-1zM21,20h1v1h-1zM23,20h1v1h-1zM25,20h1v1h-1zM27,20h1v1h-1zM29,20h2v1h-2zM4,21h1v1h-1zM6,21h4v1h-4zM16,21h1v1h-1zM19,21h2v1h-2zM23,21h1v1h-1zM26,21h3v1h-3zM30,21h3v1h-3zM4,22h4v1h-4zM9,22h2v1h-2zM12,22h4v1h-4zM17,22h3v1h-3zM22,22h2v1h-2zM28,22h2v1h-2zM32,22h1v1h-1zM4,23h1v1h-1zM6,23h1v1h-1zM8,23h1v1h-1zM13,23h4v1h-4zM18,23h1v1h-1zM20,23h1v1h-1zM24,23h1v1h-1zM26,23h1v1h-1zM4,24h1v1h-1zM6,24h5v1h-5zM13,24h2v1h-2zM16,24h1v1h-1zM21,24h1v1h-1zM23,24h6v1h-6zM30,24h3v1h-3zM12,25h2v1h-2zM16,25h2v1h-2zM19,25h4v1h-4zM24,25h1v1h-1zM28,25h2v1h-2zM4,26h7v1h-7zM13,26h7v1h-7zM21,26h1v1h-1zM23,26h2v1h-2zM26,26h1v1h-1zM28,26h3v1h-3zM4,27h1v1h-1zM10,27h1v1h-1zM14,27h1v1h-1zM17,27h1v1h-1zM19,27h2v1h-2zM23,27h2v1h-2zM28,27h1v1h-1zM32,27h1v1h-1zM4,28h1v1h-1zM6,28h3v1h-3zM10,28h1v1h-1zM16,28h2v1h-2zM20,28h1v1h-1zM23,28h7v1h-7zM32,28h1v1h-1zM4,29h1v1h-1zM6,29h3v1h-3zM10,29h1v1h-1zM13,29h1v1h-1zM15,29h1v1h-1zM19,29h2v1h-2zM23,29h3v1h-3zM29,29h2v1h-2zM32,29h1v1h-1zM4,30h1v1h-1zM6,30h3v1h-3zM10,30h1v1h-1zM14,30h4v1h-4zM19,30h13v1h-13zM4,31h1v1h-1zM10,31h1v1h-1zM13,31h2v1h-2zM16,31h1v1h-1zM18,31h1v1h-1zM20,31h1v1h-1zM22,31h1v1h-1zM26,31h2v1h-2zM29,31h2v1h-2zM32,31h1v1h-1zM4,32h7v1h-7zM12,32h1v1h-1zM14,32h3v1h-3zM21,32h1v1h-1zM23,32h1v1h-1zM26,32h3v1h-3zM30,32h1v1h-1z"/>
-          </svg>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: stretch;">
+          <div class="card-dark" style="background: #FFFFFF; color: var(--ink); padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; border-radius: 20px; border: 3px solid var(--orange);">
+            <span class="badge-mono" style="background: var(--orange); color: var(--ink); font-size: 20px; width: 100%; text-align: center;">SIMULADOR EN VIVO</span>
+            <svg viewBox="0 0 27 27" width="360" height="360" shape-rendering="crispEdges" style="margin: 14px 0;" aria-label="Código QR hacia https://jsconfmx26.web.app">
+              <path fill="#FFFFFF" d="M0 0h27v27H0z"/>
+              <path stroke="#0E1117" d="M1 1.5h7m4 0h2m1 0h1m3 0h7M1 2.5h1m5 0h1m2 0h1m1 0h5m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m1 0h1m6 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h2m1 0h2m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h6m4 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m1 0h1m2 0h3m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2m2 0h1m2 0h1M1 9.5h1m1 0h5m4 0h4m1 0h1m1 0h5M1 10.5h1m2 0h3m2 0h1m1 0h1m3 0h1m1 0h2m1 0h1m3 0h1M1 11.5h1m1 0h1m2 0h3m2 0h7m1 0h1m1 0h2m1 0h2M5 12.5h1m4 0h2m3 0h4m2 0h1m3 0h1M3 13.5h1m3 0h2m1 0h2m1 0h3m2 0h2m1 0h1m1 0h3M1 14.5h3m1 0h2m1 0h2m1 0h1m1 0h1m3 0h1m2 0h1m1 0h1m1 0h1M1 15.5h1m2 0h2m1 0h3m3 0h1m1 0h2m2 0h4m1 0h2M1 16.5h1m2 0h2m2 0h2m1 0h1m1 0h1m1 0h1m1 0h2m1 0h2m3 0h1M1 17.5h1m1 0h2m1 0h4m4 0h8m1 0h1M9 18.5h2m1 0h1m3 0h2m3 0h2M1 19.5h7m2 0h1m2 0h2m2 0h1m1 0h1m1 0h1m1 0h3M1 20.5h1m5 0h1m1 0h2m2 0h1m3 0h1m3 0h2M1 21.5h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h1m1 0h6m1 0h1M1 22.5h1m1 0h3m1 0h1m1 0h4m1 0h1m1 0h4m1 0h5M1 23.5h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h2m1 0h1m4 0h2m1 0h1M1 24.5h1m5 0h1m3 0h1m1 0h1m2 0h3m1 0h3m2 0h1M1 25.5h7m1 0h1m1 0h1m1 0h3m2 0h1m1 0h6"/>
+            </svg>
+            <div style="font-family: var(--font-mono); font-size: 22px; font-weight: 700; color: var(--ink);">
+              jsconfmx26.web.app
+            </div>
+          </div>
+
+          <div class="card-dark" style="background: #FFFFFF; color: var(--ink); padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; border-radius: 20px; border: 3px solid var(--cyan);">
+            <span class="badge-mono" style="background: var(--cyan); color: var(--ink); font-size: 20px; width: 100%; text-align: center;">CÓDIGO Y SKILLS</span>
+            <svg viewBox="0 0 31 31" width="360" height="360" shape-rendering="crispEdges" style="margin: 14px 0;" aria-label="Código QR hacia https://github.com/ykro/rosorin-jsconf">
+              <path fill="#FFFFFF" d="M0 0h31v31H0z"/>
+              <path stroke="#0E1117" d="M1 1.5h7m2 0h2m2 0h1m2 0h5m1 0h7M1 2.5h1m5 0h1m3 0h1m1 0h6m4 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m1 0h1m4 0h1m2 0h1m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h2m2 0h2m1 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m6 0h5m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h3m1 0h6m2 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h4m7 0h1M1 9.5h1m1 0h5m4 0h2m2 0h1m1 0h1m1 0h1m2 0h5M1 10.5h2m2 0h2m1 0h1m5 0h1m2 0h1m2 0h2m1 0h3m3 0h1M1 11.5h1m1 0h2m2 0h1m2 0h3m1 0h6m1 0h1m3 0h1M3 12.5h1m2 0h1m1 0h1m1 0h2m1 0h2m4 0h1m6 0h1m1 0h1M1 13.5h1m1 0h3m1 0h5m1 0h1m1 0h4m1 0h2m4 0h2M1 14.5h1m1 0h1m5 0h1m7 0h9m3 0h1M1 15.5h1m1 0h2m2 0h1m1 0h2m1 0h2m2 0h1m1 0h1m2 0h2m2 0h3M3 16.5h4m1 0h2m2 0h2m1 0h1m4 0h6m2 0h1M1 17.5h2m3 0h3m9 0h1m1 0h1m1 0h1m1 0h1m1 0h2M1 18.5h1m1 0h2m1 0h1m2 0h4m1 0h2m1 0h1m2 0h1m1 0h4m1 0h1m1 0h1M1 19.5h1m2 0h1m1 0h2m2 0h1m1 0h1m1 0h6m1 0h1m1 0h3m1 0h1M1 20.5h1m1 0h2m1 0h1m1 0h2m3 0h2m1 0h2m3 0h3m4 0h1M1 21.5h1m2 0h2m1 0h1m1 0h4m2 0h1m2 0h1m1 0h6m1 0h3M9 22.5h1m2 0h2m4 0h2m1 0h1m3 0h5M1 23.5h7m5 0h1m2 0h1m1 0h1m1 0h2m1 0h1m1 0h3M1 24.5h1m5 0h1m1 0h2m1 0h1m2 0h1m1 0h1m2 0h2m3 0h1m2 0h2M1 25.5h1m1 0h3m1 0h1m1 0h2m1 0h2m4 0h1m2 0h5m1 0h1M1 26.5h1m1 0h3m1 0h1m1 0h2m2 0h3m1 0h1m2 0h2m4 0h4M1 27.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h14M1 28.5h1m5 0h1m2 0h3m2 0h2m2 0h1m1 0h2m1 0h1m1 0h1m1 0h1M1 29.5h7m1 0h1m3 0h1m1 0h1m2 0h1m1 0h1m2 0h3m1 0h1"/>
+            </svg>
+            <div style="font-family: var(--font-mono); font-size: 20px; font-weight: 700; color: var(--ink);">
+              github.com/ykro/rosorin-jsconf
+            </div>
+          </div>
         </div>
       </div>
 

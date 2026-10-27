@@ -131,7 +131,7 @@ pub fn is_valid_servo_id(id: u8) -> bool {
     matches!(id, 1 | 2 | 3 | 4 | 5 | 10)
 }
 
-/// Clamps bus servo pulse to mechanical safety limits so the 6-DOF arm never hits the LiDAR tower.
+/// Clamps bus servo pulse to mechanical safety limits so the 6-DOF arm never hits the LiDAR.
 /// Valid IDs on ROSOrin Pro: 1..=5 (arm joints) and 10 (parallel gripper).
 pub fn clamp_servo_pulse(id: u8, position: u16) -> u16 {
     match id {

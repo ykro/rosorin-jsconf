@@ -545,7 +545,7 @@ El evento de error del WebSocket agrega `"event": "error"` y `"op"` (la operaci�
 | Servo | Articulación | Mínimo | Máximo | Motivo |
 |---|---|---|---|---|
 | `1` | Base (`joint1`, giro) | `120` | `880` | Evita torcer el cableado del brazo. |
-| `2` | Hombro (`joint2`) | `220` | `780` | Más abajo golpea la torre del LiDAR. |
+| `2` | Hombro (`joint2`) | `220` | `780` | Más abajo golpea el LiDAR. |
 | `3` | Codo (`joint3`) | `150` | `850` | Evita que el antebrazo choque con el chasis. |
 | `4` | Muñeca (`joint4`) | `150` | `850` | Protege la cámara. |
 | `5` | Giro de muñeca (`joint5`) | `100` | `900` | Rango seguro de giro. |
