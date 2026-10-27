@@ -183,6 +183,26 @@ const NO_KEY_WARNING =
 const CONNECT_FAILED_WARNING =
   'No se pudo conectar a Gemini Live. Verifica tu conexión y que tu GEMINI_API_KEY sea válida.';
 
+/** The Live session config for the embodied demos (A, B, C); `systemPrompt` defaults to SYSTEM_PROMPT_EN. */
+export function buildEmbodiedLiveConfig(systemPrompt: string = SYSTEM_PROMPT_EN) {
+  return {
+    responseModalities: [Modality.AUDIO],
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    speechConfig: {
+      languageCode: 'es-US',
+      voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+    },
+    outputAudioTranscription: {},
+    inputAudioTranscription: {},
+    tools: [{ functionDeclarations: EMBODIED_TOOLS }],
+  };
+}
+
+export interface EmbodiedSessionOptions {
+  /** Replaces SYSTEM_PROMPT_EN for this session (e.g. the Roaster persona). */
+  systemPrompt?: string;
+}
+
 const BARGE_IN_LEVEL = 0.36;
 const NOISE_FLOOR_LEVEL = 0.09;
 const POST_MOTION_GATE_MS = 1200;
@@ -205,7 +225,14 @@ export class EmbodiedGeminiLiveSession {
   private conversationActive = false;
   private activeDemoContext = '';
 
-  constructor(bridge: RobotActionHandler | undefined | null, callbacks: LiveControllerCallbacks) {
+  private readonly systemPrompt: string;
+
+  constructor(
+    bridge: RobotActionHandler | undefined | null,
+    callbacks: LiveControllerCallbacks,
+    options: EmbodiedSessionOptions = {}
+  ) {
+    this.systemPrompt = options.systemPrompt || SYSTEM_PROMPT_EN;
     this.bridge = bridge || createBridgeActionHandler(new RobotBridgeClient());
     this.callbacks = callbacks;
     this.player = new PcmPlayer((playing) => {
@@ -214,17 +241,7 @@ export class EmbodiedGeminiLiveSession {
     });
     this.live = new LiveConnection({
       label: 'gemini-live',
-      buildConfig: () => ({
-        responseModalities: [Modality.AUDIO],
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT_EN }] },
-        speechConfig: {
-          languageCode: 'es-US',
-          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
-        },
-        outputAudioTranscription: {},
-        inputAudioTranscription: {},
-        tools: [{ functionDeclarations: EMBODIED_TOOLS }],
-      }),
+      buildConfig: () => buildEmbodiedLiveConfig(this.systemPrompt),
       onMessage: (msg) => this.handleMessage(msg),
       onStatus: (status) => this.callbacks.onStatus(status),
       onSessionOpened: () => {
@@ -525,7 +542,7 @@ export class EmbodiedGeminiLiveSession {
     });
 
     this.sendTurn(
-      `${this.activeDemoContext}\n\nThe app already executed the gesture "${gesture}" for this turn: do NOT call any tool now. Deliver a sarcastic technical roast of this repository in Spanish, in ONE short sentence (max 18 words), based only on the data above.`
+      `${this.activeDemoContext}\n\nThe app already executed the gesture "${gesture}" for this turn: do NOT call any tool now. Deliver an acid, brutal technical roast of this repository in Spanish, one or two punchy sentences (max 25 words), based only on the data above.`
     );
   }
 

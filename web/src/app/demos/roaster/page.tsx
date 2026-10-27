@@ -7,6 +7,8 @@ import { GeminiLiveConsole } from '@/components/GeminiLiveConsole';
 import { ApiKeyGate } from '@/components/ApiKeyGate';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { useEmbodiedLiveSession } from '@/lib/use-embodied-live-session';
+import { SYSTEM_PROMPT_EN } from '@/lib/gemini-live';
+import { buildRoasterSystemPrompt } from '@/lib/prompts/roaster';
 import { useLiteMode } from '@/lib/use-lite-mode';
 import { analyzeGitHubRepo } from '@/lib/repo-analyzer';
 
@@ -22,6 +24,9 @@ const PRESET_REPOS = [
   'ykro/rosorin-jsconf',
 ];
 
+// Every turn of the Roaster's conversation uses the acid persona (web/src/lib/prompts/roaster.ts)
+const ROASTER_SYSTEM_PROMPT = buildRoasterSystemPrompt(SYSTEM_PROMPT_EN);
+
 const FOLLOW_UP_QUESTIONS = [
   'Dame más detalles técnicos de lo que encontraste en el repositorio.',
   '¿Cuál es el problema más crítico y cómo me recomiendas arreglarlo?',
@@ -34,7 +39,9 @@ export default function RepoRoasterDemoPage() {
   const isLite = useLiteMode();
   const [repoInput, setRepoInput] = useState('facebook/react');
   const [analyzing, setAnalyzing] = useState(false);
-  const { sessionRef: liveSessionRef, consoleProps } = useEmbodiedLiveSession(robot);
+  const { sessionRef: liveSessionRef, consoleProps } = useEmbodiedLiveSession(robot, undefined, {
+    systemPrompt: ROASTER_SYSTEM_PROMPT,
+  });
 
   const handleAnalyzeAndRoast = async () => {
     if (!repoInput.trim()) return;

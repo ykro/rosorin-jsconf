@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { EmbodiedGeminiLiveSession, type LiveStatus } from './gemini-live';
+import { EmbodiedGeminiLiveSession, type EmbodiedSessionOptions, type LiveStatus } from './gemini-live';
 import type { RobotActionHandler } from './types';
 
 /**
@@ -10,8 +10,10 @@ import type { RobotActionHandler } from './types';
  */
 export function useEmbodiedLiveSession(
   robot: RobotActionHandler,
-  onVerdictGesture?: (gesture: string) => void
+  onVerdictGesture?: (gesture: string) => void,
+  options: EmbodiedSessionOptions = {}
 ) {
+  const systemPrompt = options.systemPrompt;
   const [liveStatus, setLiveStatus] = useState<LiveStatus>('idle');
   const [speaking, setSpeaking] = useState(false);
   const [conversationActive, setConversationActive] = useState(false);
@@ -46,14 +48,15 @@ export function useEmbodiedLiveSession(
         onConversationActiveChange: setConversationActive,
         onMicLevelChange: setMicLevel,
         onMicWarning: setMicWarning,
-      }
+      },
+      { systemPrompt }
     );
     sessionRef.current = session;
     return () => {
       session.dispose();
       if (sessionRef.current === session) sessionRef.current = null;
     };
-  }, [triggerGesture, moveChassis]);
+  }, [triggerGesture, moveChassis, systemPrompt]);
 
   return {
     sessionRef,
