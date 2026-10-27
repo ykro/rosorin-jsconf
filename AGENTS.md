@@ -11,7 +11,7 @@ Guía corta para agentes de código (y personas) que trabajen en este repo. Es e
 | `docs/` | Documentación, `openapi.yaml`, diagramas (`assets/*.svg` con su fuente `.html`). | Markdown |
 | `skills/` | Skills `rosorin-pro`, `gemini-live-js` y `threejs-urdf-twin`. | Markdown |
 | `slides/`, `web/public/slides/` | Slides de la charla. | HTML |
-| Raíz | `run.sh`, `iniciar-robot.sh`, `traer-token.sh`, `ensayo.sh`, `Makefile`, `firebase.json`. | Bash |
+| Raíz | `run.sh`, `iniciar-robot.sh`, `traer-token.sh`, `ensayo.sh`, `demo.sh`, `Makefile`, `firebase.json`. | Bash |
 
 ## Verificación
 
@@ -22,10 +22,19 @@ make test                                   # cargo test + tests del worker (sin
 make lint                                   # cargo clippy --all-targets -- -D warnings
 cd web && npx tsc --noEmit && npm run lint && npm run check:css && npm run check:gestures && npm run build
 npx @redocly/cli@latest lint docs/openapi.yaml   # si tocaste la API (0 errores)
-bash -n run.sh iniciar-robot.sh traer-token.sh ensayo.sh robot-bridge/scripts/robot-common.sh   # si tocaste los scripts
+bash -n run.sh iniciar-robot.sh traer-token.sh ensayo.sh demo.sh robot-bridge/scripts/robot-common.sh   # si tocaste los scripts
 ```
 
 El CI (`.github/workflows/ci.yml`) corre en cada push y PR todo lo anterior menos el lint de OpenAPI y la revisión de los scripts de Bash: build, tests y clippy de Rust (también con Rust 1.87), tests del worker y, en `web/`, `tsc`, `npm test`, `lint`, `check:css`, `check:gestures` y `build`.
+
+## Robot físico
+
+- Se entra por SSH como `ubuntu@<IP>` y el repo está en `~/Desktop/rosorin-jsconf`. El robot guarda sus propias notas en `~/robot_docs/ESTADO_SISTEMA.md`. Ahí corren también servicios `mission-*` y otra sesión de Claude (`claude remote-control`): no cambies la configuración del sistema sin pedirlo.
+- ROS 2 usa `ROS_LOCALHOST_ONLY=1` (en `~/.bashrc` y `~/.zshrc`), y las variables de Hiwonder (`LIDAR_TYPE`, `DEPTH_CAMERA_TYPE`, `need_compile`) salen de `~/.zshrc`. Un `ssh` no interactivo no las carga: usa `zsh -c 'source ~/.zshrc; …'`.
+- `start_app_node.service` es el bringup completo de Hiwonder (`bringup.launch.py`): controlador en `/dev/rrc`, LiDAR (`/scan_raw` → filtro → `/scan`), cámara Aurora, rosbridge, joystick e `init_pose` (mueve el brazo). `rosorin_pause_factory_services` lo detiene para liberar `/dev/rrc`, y `rosorin_start_sensors` vuelve a levantar solo `peripherals lidar.launch.py` y `depth_camera.launch.py`. Sin eso no hay `/scan` y el chasis queda bloqueado.
+- El LiDAR de este robot está montado girado 180°: el ángulo 0 del driver mira hacia atrás y el filtro de Hiwonder recorta esa zona (`/scan` solo trae de 72° a 291°). Necesita `robot-bridge/lidar-mount.json` con `{"offset_deg": 180, "flip": false}` (fuera de git; el entorno gana). Sin eso, el sector «frente» queda ciego y el freno protege el lado equivocado. `make calibrar-sombra` lo detecta y ofrece escribirlo.
+- `ros2_worker.py` arma el nodo de cámara y `/scan` antes de su primera línea: importar rclpy, cv2 y numpy acapara el GIL cerca de un segundo y, hecho después, atrasa los `pong` más allá del *heartbeat* (`connected=false` al arrancar). El worker ignora SIGINT: el apagado lo maneja el bridge cerrando su stdin.
+- En Bash, un proceso en segundo plano de un shell no interactivo nace ignorando SIGINT. Para apagarlo, mándale TERM.
 
 ## Reglas
 

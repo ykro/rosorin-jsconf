@@ -19,21 +19,21 @@ El sitio público **no contacta ningún robot** hasta que alguien pulsa «Conect
 | `/demo` | Simulador 3D con panel de servos, chasis, LiDAR y gestos (con `NEXT_PUBLIC_LITE_MODE=1` muestra la consola ligera). Las demos se abren desde la barra superior. |
 | `/robot` | Consola ligera sin WebGL, pensada para la pantalla del robot. |
 | `/demos/roaster`, `/demos/gatekeeper`, `/demos/bughunter`, `/demos/bumblebee` | Las 4 demos (ver [`DEMOS.md`](./DEMOS.md)). |
-| `/face` | Rostro del robot para la pantalla táctil de 7": ojos, estado de voz, letras de Bumblebee, banners de seguridad y botón **PARO** (visible siempre que el bridge esté habilitado, aunque el WebSocket esté caído). `iniciar-robot.sh` la abre como `/face#token=<t>`. |
+| `/face` | Rostro del robot para la pantalla táctil de 7": ojos, estado de voz, letras de Bumblebee, banners de seguridad y botón **STOP** (visible siempre que el bridge esté habilitado, aunque el WebSocket esté caído). `iniciar-robot.sh` la abre como `/face#token=<t>`. |
 | `/presenter` | Pantalla del presentador: telemetría en vivo y disparo de los gestos de los repos de ensayo. |
 | `/props` | Descarga de los props imprimibles a escala 1:1. |
 | `/slides` | Slides de la charla (archivos estáticos de `web/public/slides/`). |
 
 ## Paro de emergencia y token
 
-- **PARO fijo.** Las páginas con barra superior (`/`, `/demo`, `/robot` y las 4 demos) muestran un botón **PARO** rojo cuando el bridge está habilitado; en `localhost` lo está por defecto. La tecla **Escape** hace lo mismo, salvo mientras escribes en un campo de texto; si el panel del robot está abierto, Escape primero lo cierra. El PARO manda `POST /stop` directo, así que funciona aunque el WebSocket de telemetría esté caído, y también detiene el gemelo 3D.
+- **STOP fijo.** Las páginas con barra superior (`/`, `/demo`, `/robot` y las 4 demos) muestran un botón **STOP** rojo cuando el bridge está habilitado; en `localhost` lo está por defecto. La tecla **Escape** hace lo mismo, salvo mientras escribes en un campo de texto; si el panel del robot está abierto, Escape primero lo cierra. El STOP manda `POST /stop` directo, así que funciona aunque el WebSocket de telemetría esté caído, y también detiene el gemelo 3D.
 - **Token.** La web lo toma de `#token=<t>` (lo que imprime `run.sh`) o de `?token=<t>`, lo guarda en `localStorage` y lo quita de la barra. El panel de la píldora del robot muestra el host del bridge; si cambias a otro host, el token guardado se borra. Los detalles están en [`SECURITY.md`](./SECURITY.md#el-token-en-la-web).
-- **Control del robot sin respuesta.** Si la telemetría trae `connected: false` (worker atascado o caído), aparece el banner «El control del robot no responde: chasis bloqueado». Un PARO en ese estado igual enclava la E-stop en el bridge y la web lo marca como enviado, con un aviso de apagar el robot si sigue moviéndose.
+- **Control del robot sin respuesta.** Si la telemetría trae `connected: false` (worker atascado o caído), aparece el banner «El control del robot no responde: chasis bloqueado». Un STOP en ese estado igual enclava la E-stop en el bridge y la web lo marca como enviado, con un aviso de apagar el robot si sigue moviéndose.
 - **Respuestas bloqueadas.** Si el bridge acepta un movimiento pero responde `blocked` (`braked`, `lidar_stale` o `worker_dead`), la web lo muestra como error y nunca como éxito.
 
 ## Sin WebGL
 
-Si el navegador no tiene WebGL, el simulador muestra «Sin WebGL: el simulador 3D no está disponible» y el resto de la página sigue funcionando: consola Live, botones del robot y PARO. Si el visor falla por otra causa, su error boundary muestra «El simulador 3D falló» con «Reintentar». Un error que tumbe la ruta completa cae en `app/error.tsx`, que conserva la barra superior y ofrece «Reintentar» y, si el bridge está habilitado, «Paro de emergencia», que llama directo al bridge.
+Si el navegador no tiene WebGL, el simulador muestra «Sin WebGL: el simulador 3D no está disponible» y el resto de la página sigue funcionando: consola Live, botones del robot y STOP. Si el visor falla por otra causa, su error boundary muestra «El simulador 3D falló» con «Reintentar». Un error que tumbe la ruta completa cae en `app/error.tsx`, que conserva la barra superior y ofrece «Reintentar» y, si el bridge está habilitado, **STOP**, que llama directo al bridge.
 
 ## Gestos del robot
 

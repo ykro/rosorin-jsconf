@@ -209,7 +209,7 @@ export function TopNav({ robot, liteMode: propLite }: TopNavProps) {
                   title="Paro de emergencia (Esc)"
                   className="flex items-center gap-1.5 rounded-xl bg-[#D93025] px-3 py-1.5 text-xs font-extrabold text-white hover:bg-[#B3261E] disabled:opacity-50"
                 >
-                  PARO
+                  STOP
                   <kbd className="rounded bg-white/20 px-1 font-mono text-[10px] font-bold">Esc</kbd>
                 </button>
               </>

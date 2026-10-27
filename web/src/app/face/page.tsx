@@ -132,7 +132,7 @@ export default function RobotFacePage() {
           }}
           className="absolute bottom-4 right-4 z-10 rounded-xl bg-[#D93025] px-4 py-3 text-sm font-extrabold text-white shadow-lg hover:bg-[#B3261E]"
         >
-          PARO
+          STOP
         </button>
       )}
       <svg

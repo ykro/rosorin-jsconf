@@ -23,6 +23,7 @@ import base64
 import json
 import math
 import os
+import signal
 import sys
 import threading
 import time
@@ -98,8 +99,46 @@ LIDAR_BLIND_M = 0.0
 # Mounting correction when the driver's angle 0 is not the robot's front (REP-103: 0 = front,
 # positive = left). LIDAR_FLIP=1 mirrors the scan (driver counts clockwise) and LIDAR_ANGLE_OFFSET_DEG
 # is then added, e.g. 180 for a LiDAR mounted backwards. `ensayo.sh` section 3 tells which one you need.
-LIDAR_ANGLE_OFFSET_DEG = _env_float("LIDAR_ANGLE_OFFSET_DEG", 0.0)
-LIDAR_FLIP = os.environ.get("LIDAR_FLIP", "0").strip().lower() in ("1", "true", "yes", "si", "sí")
+# Values come from, in order: the environment, the per-robot file LIDAR_MOUNT_FILE
+# (robot-bridge/lidar-mount.json by default, offered by `make calibrar-sombra`) and 0 / not flipped.
+LIDAR_MOUNT_FILE = os.environ.get(
+    "LIDAR_MOUNT_FILE",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lidar-mount.json"),
+)
+
+
+def _truthy(value) -> bool:
+    return str(value).strip().lower() in ("1", "true", "yes", "si", "sí")
+
+
+def load_lidar_mount(path: str = LIDAR_MOUNT_FILE, env=os.environ) -> tuple:
+    """Returns ({offset_deg, flip}, source) with env > mount file > defaults (0, not flipped)."""
+    values = {"offset_deg": 0.0, "flip": False}
+    source = "defaults"
+    try:
+        with open(path, encoding="utf-8") as f:
+            mount = json.load(f)
+        values = {"offset_deg": float(mount.get("offset_deg", 0.0)), "flip": _truthy(mount.get("flip", False))}
+        source = f"file {path}"
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        sys.stderr.write(f"[ros2_worker] ignoring invalid {path}: {exc}\n")
+    if "LIDAR_ANGLE_OFFSET_DEG" in env:
+        try:
+            values["offset_deg"] = float(env["LIDAR_ANGLE_OFFSET_DEG"])
+            source = "environment"
+        except ValueError:
+            sys.stderr.write(f"[ros2_worker] invalid LIDAR_ANGLE_OFFSET_DEG, keeping {values['offset_deg']}\n")
+    if "LIDAR_FLIP" in env:
+        values["flip"] = _truthy(env["LIDAR_FLIP"])
+        source = "environment"
+    return values, source
+
+
+_LIDAR_MOUNT, LIDAR_MOUNT_SOURCE = load_lidar_mount()
+LIDAR_ANGLE_OFFSET_DEG = _LIDAR_MOUNT["offset_deg"]
+LIDAR_FLIP = _LIDAR_MOUNT["flip"]
 
 
 def robot_angle(raw_rad: float, offset_deg: float = None, flip: bool = None) -> float:
@@ -129,7 +168,13 @@ def ensure_rclpy():
         import rclpy
 
         if not rclpy.ok():
-            rclpy.init()
+            try:
+                # Without its own SIGINT handler rclpy does not tear the nodes down on Ctrl+C
+                from rclpy.signals import SignalHandlerOptions
+
+                rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
+            except (ImportError, TypeError):
+                rclpy.init()
         return rclpy
 
 
@@ -378,12 +423,16 @@ def compute_lidar_sectors(
     }
 
 
-def ros2_telemetry_subscriber():
+def create_telemetry_node():
     """
-    Subscribes to:
+    Builds the node that subscribes to:
     - /depth_cam/rgb0/image_raw (Aurora 930 3D camera, 2 FPS JPEG base64)
     - /scan (LD19/MS200 LiDAR, up to 10 Hz sector distances with arm shadow filtering)
     Without /scan the bridge marks the LiDAR as stale and blocks the chassis.
+
+    Call it before the first stdout line: importing rclpy, cv2 and numpy holds the GIL for about a
+    second, and done in a background thread it delays the pongs past the bridge's heartbeat timeout
+    (`connected=false` right after start-up). Returns None if ROS 2 is not available.
     """
     try:
         os.environ.setdefault("ROS_LOCALHOST_ONLY", "1")
@@ -454,23 +503,35 @@ def ros2_telemetry_subscriber():
             "[ros2_worker] Subscribed to /scan (arm shadow filter "
             f"{ARM_SHADOW_MIN_M}-{ARM_SHADOW_MAX_M} m within ±{ARM_SHADOW_HALF_ANGLE_DEG} deg from "
             f"{ARM_SHADOW_SOURCE}, blind sector below {LIDAR_MIN_VALID_FRACTION:.0%} usable rays, "
-            f"angle offset {LIDAR_ANGLE_OFFSET_DEG} deg{', flipped' if LIDAR_FLIP else ''})\n"
+            f"angle offset {LIDAR_ANGLE_OFFSET_DEG} deg{', flipped' if LIDAR_FLIP else ''} from "
+            f"{LIDAR_MOUNT_SOURCE})\n"
         )
-        spin_node(node)
+        return node
     except Exception as exc:
         sys.stderr.write(f"[ros2_worker] Telemetry subscriber info: {exc}\n")
+        return None
+
+
+def start_telemetry(node) -> None:
+    """Spins the node from create_telemetry_node() in the background (no-op if it is None)."""
+    if node is not None:
+        threading.Thread(target=spin_node, args=(node,), daemon=True).start()
 
 
 def main():
+    # Ctrl+C in `make robot` also reaches this process (same process group). The bridge owns the
+    # shutdown: it latches the E-stop and closes stdin, and the EOF below zeroes the motors.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     board_instance = init_board()
 
     if board_instance is not None:
         backend_label = "stm32-board (/dev/rrc @ 1Mbps)"
         sys.stderr.write(f"[ros2_worker] Connected directly to STM32: {backend_label}\n")
+        # Aurora 930 camera + /scan LiDAR: built before the first line, spun in the background
+        telemetry = create_telemetry_node()
         # First line on stdout must be the backend event (the bridge waits for it)
         emit({"event": "backend", "name": backend_label})
-        # Start Aurora 930 camera + /scan LiDAR subscriber thread in the background
-        threading.Thread(target=ros2_telemetry_subscriber, daemon=True).start()
+        start_telemetry(telemetry)
 
         vel_state = {"lock": threading.Lock(), "last_cmd_at": time.monotonic(), "moving": False}
         threading.Thread(target=battery_poller, args=(board_instance,), daemon=True).start()
@@ -522,9 +583,10 @@ def main():
 
     node.create_timer(0.1, ros2_watchdog)
 
+    telemetry = create_telemetry_node()
     emit({"event": "backend", "name": "ros2-topics"})
     threading.Thread(target=spin_node, args=(node,), daemon=True).start()
-    threading.Thread(target=ros2_telemetry_subscriber, daemon=True).start()
+    start_telemetry(telemetry)
 
     try:
         for line in sys.stdin:

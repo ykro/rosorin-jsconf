@@ -243,9 +243,15 @@ curl_bridge() {
 
 # 4. En el robot físico: abortar si hay un paro de emergencia de otra app
 #    (~/.openclaw/workspace/ESTOP_LOCK, nunca se borra aquí) y detener button_scan.service y
-#    start_app_node.service, que acaparan /dev/rrc. Ver robot-bridge/scripts/robot-common.sh.
+#    start_app_node.service, que acaparan /dev/rrc. Con ros2, levantar de nuevo solo el LiDAR y la
+#    cámara (start_app_node los lanzaba). Ver robot-bridge/scripts/robot-common.sh.
 if [ -z "$REMOTE_ROBOT_IP" ] && [ "$ROBOT_BACKEND" != "mock" ]; then
   rosorin_pause_factory_services || exit 1
+  # Con start_app_node se fueron también el LiDAR y la cámara: el backend ros2 los necesita.
+  if [ "$ROBOT_BACKEND" = "ros2" ]; then
+    SENSOR_LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rosorin-sensores.XXXXXX")"
+    rosorin_start_sensors "$SENSOR_LOG_DIR"
+  fi
 fi
 
 # 5. Asegurar que cargo (Rust) esté en PATH (solo si vamos a compilar el puente aquí)
@@ -294,6 +300,7 @@ cleanup() {
   if [ -n "${BRIDGE_PID:-}" ]; then
     kill "$BRIDGE_PID" 2>/dev/null || true
   fi
+  rosorin_stop_sensors
 }
 # Ctrl+C / SIGTERM salen del script; la salida dispara cleanup una sola vez.
 trap cleanup EXIT

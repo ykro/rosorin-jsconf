@@ -69,5 +69,5 @@ El ROSOrin Pro tiene una pantalla táctil de 7". La ruta `/face` la convierte en
 
 1. **Ojos que siguen al brazo.** La mirada sigue el pulso del servo 1 (base) y el 4 (muñeca) que llega por la telemetría a 20 Hz, y cambia de expresión según `mood` (`approved`, `rejected`, `guarding`, `dancing`…). La boca se anima solo mientras el robot habla.
 2. **HUD.** Muestra `hud_headline` y `hud_subtext` (por ejemplo «DEPLOY APROBADO» o «CLOUD RUN · OOM») y la letra de la canción en Bumblebee. Los escribe `POST /hud`, que funciona aun con la E-stop enclavada.
-3. **Seguridad.** Muestra los banners de E-stop (con «Liberar»), de LiDAR sin datos y de control del robot sin respuesta, y, siempre que el bridge esté habilitado, un botón **PARO** que llama a `POST /stop` aunque el WebSocket esté caído.
+3. **Seguridad.** Muestra los banners de E-stop (con «Liberar»), de LiDAR sin datos y de control del robot sin respuesta, y, siempre que el bridge esté habilitado, un botón **STOP** que llama a `POST /stop` aunque el WebSocket esté caído.
 4. **Token.** `iniciar-robot.sh` abre `/face#token=<token>` en modo kiosco; la página guarda el token y lo quita de la barra. El fragmento (`#`) no llega al servidor de Next.

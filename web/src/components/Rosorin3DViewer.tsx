@@ -70,7 +70,7 @@ function pulseToRadians(id: number, pulse: number): number {
 
 /**
  * 3D twin of the robot. Wrapped in an error boundary: if the scene crashes (or
- * the browser has no WebGL), the rest of the page — TopNav with PARO, Live
+ * the browser has no WebGL), the rest of the page — TopNav with STOP, Live
  * console, robot buttons — keeps working.
  */
 export function Rosorin3DViewer(props: Rosorin3DViewerProps) {
@@ -1043,7 +1043,7 @@ function WebglUnavailableNotice() {
     <div role="status" className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
       <p className="text-sm font-bold text-[#202124]">{WEBGL_UNAVAILABLE_MESSAGE}</p>
       <p className="max-w-sm text-xs text-[#5F6368]">
-        El resto de la página sigue funcionando: consola Live, botones del robot y PARO. Activa la aceleración por
+        El resto de la página sigue funcionando: consola Live, botones del robot y STOP. Activa la aceleración por
         hardware del navegador para ver el gemelo 3D.
       </p>
     </div>

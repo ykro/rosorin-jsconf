@@ -236,7 +236,7 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
             onClick={handleStop}
             className="rounded-xl bg-[#D93025] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#B3261E]"
           >
-            Paro de emergencia
+            STOP
           </button>
         )}
       </div>

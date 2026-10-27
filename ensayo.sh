@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# ensayo.sh — Guía del ensayo con el robot físico. Se corre EN LA LAPTOP.
+# ensayo.sh — Ensayo con el robot físico, de punta a punta, con un solo script en cada lado.
 #
 # Uso:
-#   ./ensayo.sh --robot-ip <IP> [--ssh <usuario>@<IP>] [--robot-repo <ruta>] [--solo-auto]
-#   ./ensayo.sh --mock            # contra el bridge local (127.0.0.1:9000), para probar el script
+#   ./ensayo.sh --robot                     # EN EL ROBOT: espera la Wi-Fi e imprime la IP, actualiza
+#                                           # el repo, compila y levanta el bridge (make robot)
+#   ./ensayo.sh --laptop --ip <IP>          # EN LA LAPTOP: actualiza, trae el token, levanta la web
+#                                           # contra el robot y corre la guía del ensayo
+#   ./ensayo.sh --laptop --mock             # igual, contra el gemelo local (./run.sh --mock)
+#   ./ensayo.sh --robot-ip <IP> [--ssh <usuario>@<IP>]   # solo la guía (bridge y web ya levantados)
 #
-# Verifica solo lo que se puede medir (bridge, token, worker, LiDAR, paros) y te guía en lo que
-# necesita tus ojos (orientación del LiDAR, sentido de las ruedas, choques, distancia de frenado).
-# Antes de mover el robot siempre pide confirmación. Con --solo-auto no mueve nada.
-# Resultado: resumen en pantalla y bitácora en ensayo-<fecha>.log (fuera de git).
+# Opciones: --ip/--robot-ip <IP> (también --ip=<IP>), --ssh <usuario>@<IP> (en --laptop por defecto
+# ubuntu@<IP>, o ROBOT_USER), --robot-repo <ruta>, --port <P>, --solo-auto, --calibrar (--robot).
 #
-# Requisitos: curl >= 7.55, python3. El token se lee de BRIDGE_TOKEN o de .bridge-token
-# (tráelo con ./traer-token.sh). Con --ssh también revisa el commit del robot y /scan.
+# La guía verifica solo lo que se puede medir (bridge, token, worker, LiDAR, paros) y te guía en lo
+# que necesita tus ojos (orientación del LiDAR, ruedas, choques, distancia de frenado). Antes de mover
+# el robot siempre pide confirmación; con --solo-auto no mueve nada. Resultado: resumen en pantalla
+# y bitácora en ensayo-<fecha>.log (fuera de git). Requisitos: curl >= 7.55, python3 y, para --laptop
+# contra el robot, acceso SSH a él. Detalles en docs/ENSAYO.md.
 # ==============================================================================
 set -uo pipefail
 
@@ -20,28 +25,372 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=robot-bridge/scripts/robot-common.sh
 ROSORIN_LOG_TAG="[ensayo]" source "$ROOT_DIR/robot-bridge/scripts/robot-common.sh"
 
+MODE="guia"
 ROBOT_IP=""
 BRIDGE_PORT="${BRIDGE_PORT:-9000}"
+WEB_PORT="${WEB_PORT:-3000}"
 ROBOT_SSH=""
 ROBOT_REPO="${ROBOT_REPO:-~/Desktop/rosorin-jsconf}"
 SOLO_AUTO=false
 MOCK=false
+CALIBRAR=false
+DEMO=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --robot) MODE="robot"; shift ;;
+    --laptop) MODE="laptop"; shift ;;
     --robot-ip|--ip) ROBOT_IP="${2:-}"; shift 2 ;;
+    --robot-ip=*|--ip=*) ROBOT_IP="${1#*=}"; shift ;;
     --port) BRIDGE_PORT="${2:-}"; shift 2 ;;
     --ssh) ROBOT_SSH="${2:-}"; shift 2 ;;
+    --ssh=*) ROBOT_SSH="${1#*=}"; shift ;;
     --robot-repo) ROBOT_REPO="${2:-}"; shift 2 ;;
     --solo-auto) SOLO_AUTO=true; shift ;;
+    --calibrar) CALIBRAR=true; shift ;;
+    --demo) DEMO=true; shift ;;
     --mock) MOCK=true; ROBOT_IP="127.0.0.1"; shift ;;
-    -h|--help) sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "[ensayo] Opción desconocida: $1 (usa --help)" >&2; exit 1 ;;
   esac
 done
 
+# Pregunta s/n. Devuelve 0 si la respuesta es sí.
+ask() {
+  local answer
+  read -r -p "  ¿$1? [s/n] " answer
+  [[ "$answer" =~ ^[sSyY] ]]
+}
+
+# ==============================================================================
+# --robot: todo lo que se corre en el robot, hasta dejar el bridge levantado.
+# ==============================================================================
+
+# Imprime "<ip> <interfaz> <ssid>" de la primera interfaz Wi-Fi con IPv4, o nada si aún no hay.
+# Sin ninguna interfaz Wi-Fi (robot con cable) usa la primera IP de la máquina.
+robot_network() {
+  local dir dev ip ssid any_wifi=false
+  for dir in /sys/class/net/*; do
+    [ -d "$dir/wireless" ] || continue
+    any_wifi=true
+    dev="$(basename "$dir")"
+    ip="$(ip -4 -o addr show dev "$dev" scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+    if [ -n "$ip" ]; then
+      ssid="$(iwgetid -r "$dev" 2>/dev/null || true)"
+      [ -n "$ssid" ] || ssid="$(nmcli -t -f active,ssid dev wifi 2>/dev/null | sed -n 's/^yes://p' | head -n1)"
+      echo "$ip $dev ${ssid:-?}"
+      return 0
+    fi
+  done
+  if [ "$any_wifi" = false ]; then
+    ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    [ -n "$ip" ] && echo "$ip (sin-wifi) -"
+  fi
+  return 0
+}
+
+wait_for_network() {
+  local net waiting=false
+  while :; do
+    net="$(robot_network)"
+    [ -n "$net" ] && break
+    if [ "$waiting" = false ]; then
+      echo "[ensayo] Aún no hay conexión Wi-Fi. Reviso cada 2 s (Ctrl+C para salir)..."
+      waiting=true
+    fi
+    sleep 2
+  done
+  read -r ROBOT_IP NET_DEV NET_SSID <<< "$net"
+}
+
+robot_banner() {
+  local laptop_cmd="./ensayo.sh --laptop --ip $ROBOT_IP"
+  [ "$DEMO" = true ] && laptop_cmd="./demo.sh --laptop --ip $ROBOT_IP"
+  [ "$USER" = "ubuntu" ] || laptop_cmd+=" --ssh $USER@$ROBOT_IP"
+  [ "$ROOT_DIR" = "$HOME/Desktop/rosorin-jsconf" ] || laptop_cmd+=" --robot-repo $ROOT_DIR"
+  echo "================================================================"
+  if [ "$NET_DEV" = "(sin-wifi)" ]; then
+    echo " Sin interfaz Wi-Fi: uso la red de la máquina"
+  else
+    echo " Wi-Fi conectada : $NET_SSID ($NET_DEV)"
+  fi
+  echo " IP del robot    : $ROBOT_IP"
+  echo " En la laptop    : $laptop_cmd"
+  echo "================================================================"
+}
+
+# git pull del robot. Sin internet sigue con el commit actual; si el pull no avanza en limpio
+# (historial reescrito o cambios locales) pregunta antes de descartar nada.
+robot_update() {
+  local head
+  head="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
+  echo "[ensayo] Actualizando el repo (commit actual $head)..."
+  if ! git -C "$ROOT_DIR" fetch origin; then
+    echo "[ensayo] AVISO: git fetch falló (¿la red tiene internet?). Sigo con $head."
+    return 0
+  fi
+  if git -C "$ROOT_DIR" merge --ff-only origin/main >/dev/null 2>&1; then
+    echo "[ensayo] Repo en $(git -C "$ROOT_DIR" rev-parse --short HEAD) (origin/main)."
+    return 0
+  fi
+  echo "[ensayo] El repo no avanza en limpio hasta origin/main. Cambios locales:"
+  git -C "$ROOT_DIR" status --short | sed 's/^/    /'
+  if ask "Descarto los cambios locales y dejo el robot igual a origin/main (git reset --hard origin/main)"; then
+    git -C "$ROOT_DIR" reset --hard origin/main || exit 1
+  else
+    echo "[ensayo] AVISO: sigo con $head; la guía marcará que el robot no tiene el commit de la laptop."
+  fi
+}
+
+# Imprime por qué hay que (re)calibrar la sombra del brazo y devuelve 0; si está al día, nada y 1.
+# Una calibración hecha con otra orientación del LiDAR (o sin registrarla) no sirve.
+calibration_stale() {
+  python3 - "$ROOT_DIR/robot-bridge/scripts" <<'PY'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import ros2_worker as w
+try:
+    with open(w.ARM_SHADOW_FILE, encoding="utf-8") as f:
+        data = json.load(f)
+except FileNotFoundError:
+    sys.exit(print("Este robot no tiene calibrada la sombra del brazo") or 0)
+except Exception:
+    sys.exit(print(f"No puedo leer {w.ARM_SHADOW_FILE}") or 0)
+if "lidar_offset_deg" not in data:
+    sys.exit(print("La sombra del brazo se calibró sin registrar la orientación del LiDAR") or 0)
+if float(data["lidar_offset_deg"]) != float(w.LIDAR_ANGLE_OFFSET_DEG):
+    sys.exit(print(f"La sombra se calibró con el LiDAR a {data['lidar_offset_deg']:g}° y ahora está a {w.LIDAR_ANGLE_OFFSET_DEG:g}°") or 0)
+sys.exit(1)
+PY
+}
+
+# La sombra del brazo se calibra con el bridge levantado: lo levanta en segundo plano, calibra y
+# lo apaga, para que el bridge final cargue arm-shadow.json.
+robot_calibrate() {
+  local log pid
+  log="$(mktemp "${TMPDIR:-/tmp}/rosorin-calibrar.XXXXXX")"
+  echo "[ensayo] Levanto el bridge en segundo plano para calibrar (log en $log)..."
+  "$ROOT_DIR/run.sh" --bridge-only </dev/null >"$log" 2>&1 &
+  pid=$!
+  for _ in $(seq 1 60); do
+    curl -s -m 1 -o /dev/null "http://127.0.0.1:$BRIDGE_PORT/health" && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  if curl -s -m 1 -o /dev/null "http://127.0.0.1:$BRIDGE_PORT/health"; then
+    make -C "$ROOT_DIR" calibrar-sombra || echo "[ensayo] AVISO: la calibración falló; la guía lo verá en la sección 4."
+  else
+    echo "[ensayo] AVISO: el bridge no levantó para calibrar. Últimas líneas:"
+    tail -n 15 "$log" | sed 's/^/    /'
+  fi
+  kill -TERM "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+}
+
+run_robot_mode() {
+  if [ ! -f /opt/ros/humble/setup.bash ] && [ ! -e /dev/rrc ]; then
+    echo "[ensayo] --robot se corre en el robot (no encuentro ROS 2 Humble ni /dev/rrc). En la laptop usa --laptop." >&2
+    exit 1
+  fi
+  rosorin_check_estop_lock || exit 1
+  export BRIDGE_PORT  # run.sh lo toma del entorno (--port)
+  wait_for_network
+  robot_banner
+  # sudo una vez al principio: run.sh detiene servicios de fábrica y, en segundo plano, no puede pedirla
+  sudo -v || exit 1
+  robot_update
+  [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+  echo "[ensayo] Compilando el bridge (make build-robot)..."
+  make -C "$ROOT_DIR" build-robot || exit 1
+  local reason
+  if [ "$CALIBRAR" = true ]; then
+    robot_calibrate
+  elif reason="$(calibration_stale)"; then
+    if [ "$DEMO" = true ]; then
+      echo "[ensayo] AVISO: $reason. Calíbrala en el ensayo (./ensayo.sh --robot)."
+    else
+      echo "[ensayo] $reason."
+      if ask "La calibro ahora (mueve solo el brazo; 50 cm libres)"; then
+        robot_calibrate
+      fi
+    fi
+  fi
+  wait_for_network
+  robot_banner
+  echo "[ensayo] Levanto el bridge (make robot). Ctrl+C lo detiene y enclava la E-stop."
+  cd "$ROOT_DIR" && exec ./run.sh --bridge-only
+}
+
+[ "$MODE" = "robot" ] && run_robot_mode
+
+# ==============================================================================
+# --laptop: actualiza, trae el token, levanta la web y sigue con la guía.
+# ==============================================================================
+WEB_PID=""
+WEB_TMP=""
+
+# run.sh corre en su propio grupo de procesos: TERM solo a run.sh no basta (bash posterga su trap
+# hasta que termine `npm run dev`), así que se manda al grupo entero. La salida de run.sh manda
+# /stop al bridge.
+stop_web() {
+  if [ -n "$WEB_PID" ] && kill -0 "$WEB_PID" 2>/dev/null; then
+    echo "[ensayo] Cerrando la web (run.sh manda /stop al bridge)..."
+    kill -TERM -- "-$WEB_PID" 2>/dev/null
+    for _ in $(seq 1 20); do kill -0 "$WEB_PID" 2>/dev/null || break; sleep 0.5; done
+    kill -KILL -- "-$WEB_PID" 2>/dev/null
+  fi
+  [ -n "$WEB_TMP" ] && rm -rf "$WEB_TMP"
+}
+
+# Fin de la guía. En --laptop interactivo deja la web abierta para las demos hasta Ctrl+C.
+finish() {
+  local code="$1"
+  if [ "$MODE" = "laptop" ] && [ -n "$WEB_PID" ] && [ "$SOLO_AUTO" = false ] && [ -t 0 ]; then
+    echo ""
+    echo "[ensayo] La web sigue en http://localhost:$WEB_PORT para las demos. Ctrl+C la cierra (y manda /stop al robot)."
+    wait "$WEB_PID"
+  fi
+  exit "$code"
+}
+
+# Abre la web con el token sin ponerlo en argv ni en la terminal: una página local (600) redirige.
+open_web() {
+  local url="$1" page="$WEB_TMP/abrir.html"
+  (umask 077 && printf '<!doctype html><meta charset="utf-8"><script>location.replace("%s")</script>\n' "$url" > "$page")
+  if command -v open >/dev/null 2>&1; then
+    open "$page"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$page" >/dev/null 2>&1
+  else
+    echo "[ensayo] Abre a mano la URL con el token: está en $WEB_TMP/web.log (no proyectes esa terminal)."
+  fi
+}
+
+# Los MP3 de Bumblebee no van en git (derechos de autor): viven en la laptop y se copian al robot,
+# donde se quedan. Solo viajan los que faltan o cambiaron; nunca borra nada en el robot.
+sync_clips() {
+  local src="$ROOT_DIR/web/public/songs/clips" dest="$ROBOT_REPO/web/public/songs/clips"
+  local local_list remote_list missing total
+  local_list="$(cd "$src" 2>/dev/null && ls -1 -- *.mp3 2>/dev/null | LC_ALL=C sort)"
+  total="$(printf '%s' "$local_list" | grep -c . || true)"
+  if [ "$total" = "0" ]; then
+    echo "[ensayo] AVISO: no hay MP3 en $src: no copio nada al robot (Bumblebee no tendrá canciones)."
+    return 0
+  fi
+  remote_list="$(ssh -o ConnectTimeout=5 "$ROBOT_SSH" "mkdir -p $dest && cd $dest && ls -1 | grep '\.mp3\$' | LC_ALL=C sort" 2>/dev/null)" || {
+    echo "[ensayo] AVISO: no pude revisar los MP3 del robot por SSH."
+    return 0
+  }
+  missing="$(LC_ALL=C comm -23 <(printf '%s\n' "$local_list") <(printf '%s\n' "$remote_list") | grep -c . || true)"
+  if [ "$missing" = "0" ]; then
+    echo "[ensayo] El robot ya tiene los $total MP3 de Bumblebee; reviso que no haya cambiado ninguno..."
+  else
+    echo "[ensayo] Al robot le faltan $missing de $total MP3 de Bumblebee: los copio..."
+  fi
+  if (cd "$src" && rsync -a -- *.mp3 "$ROBOT_SSH:$dest/"); then
+    echo "[ensayo] MP3 al día en el robot ($dest)."
+  else
+    echo "[ensayo] AVISO: rsync de los MP3 falló; Bumblebee en el robot puede quedar sin canciones."
+  fi
+}
+
+run_laptop_setup() {
+  local token_url=""
+  if [ "$MOCK" = false ]; then
+    if [ -z "$ROBOT_IP" ] && [ -n "$ROBOT_SSH" ]; then ROBOT_IP="${ROBOT_SSH#*@}"; fi
+    if [ -z "$ROBOT_IP" ]; then
+      read -r -p "[ensayo] IP del robot (la imprime ./ensayo.sh --robot): " ROBOT_IP
+      [ -n "$ROBOT_IP" ] || exit 1
+    fi
+    [ -n "$ROBOT_SSH" ] || ROBOT_SSH="${ROBOT_USER:-ubuntu}@$ROBOT_IP"
+  fi
+
+  echo "[ensayo] Actualizando la laptop desde origin/main..."
+  if git -C "$ROOT_DIR" fetch -q origin && git -C "$ROOT_DIR" merge -q --ff-only origin/main 2>/dev/null; then
+    local ahead
+    ahead="$(git -C "$ROOT_DIR" rev-list --count origin/main..HEAD)"
+    [ "$ahead" = "0" ] || echo "[ensayo] AVISO: la laptop tiene $ahead commit(s) sin push: el robot no los verá con git pull."
+  else
+    echo "[ensayo] AVISO: no pude avanzar la laptop hasta origin/main; sigo con $(git -C "$ROOT_DIR" rev-parse --short HEAD)."
+  fi
+
+  if [ "$MOCK" = false ]; then
+    local waiting=false
+    until curl -s -m 2 -o /dev/null "http://$ROBOT_IP:$BRIDGE_PORT/health"; do
+      if [ "$waiting" = false ]; then
+        echo "[ensayo] Esperando el bridge en http://$ROBOT_IP:$BRIDGE_PORT (en el robot: ./ensayo.sh --robot). Ctrl+C para salir..."
+        waiting=true
+      fi
+      sleep 2
+    done
+    echo "[ensayo] El bridge del robot responde."
+    # traer-token.sh no copia de nuevo un .bridge-token que el bridge ya acepta
+    "$ROOT_DIR/traer-token.sh" "$ROBOT_SSH" "$ROBOT_REPO" | grep -v "Ahora corre:" || exit 1
+    sync_clips
+    BRIDGE_TOKEN="$(tr -d '[:space:]' < "$ROOT_DIR/.bridge-token")"
+  fi
+
+  WEB_TMP="$(mktemp -d "${TMPDIR:-/tmp}/rosorin-ensayo.XXXXXX")"
+  chmod 700 "$WEB_TMP"
+  trap stop_web EXIT
+  if curl -s -m 2 -o /dev/null "http://127.0.0.1:$WEB_PORT/"; then
+    echo "[ensayo] AVISO: ya hay una web en :$WEB_PORT; la uso tal cual (revisa que apunte a este bridge)."
+  else
+    local run_args=(--robot-ip "$ROBOT_IP" --bridge-port "$BRIDGE_PORT" --web-port "$WEB_PORT")
+    [ "$MOCK" = true ] && run_args=(--mock --bridge-port "$BRIDGE_PORT" --web-port "$WEB_PORT")
+    echo "[ensayo] Levantando la web (./run.sh ${run_args[*]}; log en $WEB_TMP/web.log)..."
+    # stdin de /dev/null: run.sh no debe leer las respuestas de la guía. set -m: grupo de procesos
+    # propio, así el Ctrl+C de la guía no lo tumba a medias y stop_web lo cierra completo.
+    set -m
+    (cd "$ROOT_DIR" && exec ./run.sh "${run_args[@]}") </dev/null >"$WEB_TMP/web.log" 2>&1 &
+    WEB_PID=$!
+    set +m
+    for _ in $(seq 1 180); do
+      curl -s -m 2 -o /dev/null "http://127.0.0.1:$WEB_PORT/" && break
+      kill -0 "$WEB_PID" 2>/dev/null || break
+      sleep 1
+    done
+    if ! curl -s -m 2 -o /dev/null "http://127.0.0.1:$WEB_PORT/"; then
+      echo "[ensayo] La web no levantó. Últimas líneas de run.sh:" >&2
+      tail -n 20 "$WEB_TMP/web.log" | sed -E 's/#token=[^ ]*/#token=***/; s/^/    /' >&2
+      exit 1
+    fi
+  fi
+  if [ "$MOCK" = true ]; then
+    # En --mock run.sh compila y levanta también el bridge: la web puede estar lista antes
+    for _ in $(seq 1 120); do
+      curl -s -m 1 -o /dev/null "http://127.0.0.1:$BRIDGE_PORT/health" && break
+      sleep 1
+    done
+  else
+    token_url="?bridge=http://$ROBOT_IP:$BRIDGE_PORT"
+  fi
+  open_web "http://localhost:$WEB_PORT/$token_url${BRIDGE_TOKEN:+#token=$BRIDGE_TOKEN}"
+  echo "[ensayo] Web abierta en el navegador (http://localhost:$WEB_PORT). Carga ahí tu API key de Gemini."
+}
+
+[ "$MODE" = "laptop" ] && run_laptop_setup
+
+# --demo en la laptop: la web queda lista contra el robot, sin la guía del ensayo.
+if [ "$DEMO" = true ]; then
+  if [ "$MODE" != "laptop" ]; then
+    echo "[ensayo] --demo va con --robot o --laptop. Usa ./demo.sh --robot o ./demo.sh --laptop --ip <IP>." >&2
+    exit 1
+  fi
+  echo ""
+  echo "[demo] Listo: web en http://localhost:$WEB_PORT contra el bridge http://$ROBOT_IP:$BRIDGE_PORT."
+  if [ -n "$WEB_PID" ]; then
+    echo "[demo] Ctrl+C cierra la web (y manda /stop al robot)."
+    wait "$WEB_PID"
+  fi
+  exit 0
+fi
+
+# ==============================================================================
+# Guía del ensayo (también la parte final de --laptop).
+# ==============================================================================
 if [ -z "$ROBOT_IP" ]; then
-  echo "[ensayo] Falta --robot-ip <IP> (o --mock). Usa --help." >&2
+  echo "[ensayo] Falta --laptop, --robot-ip <IP> o --mock. Usa --help." >&2
   exit 1
 fi
 
@@ -51,7 +400,7 @@ if [ -z "${BRIDGE_TOKEN:-}" ] && [ "$MOCK" = false ] && [ -s "$ROOT_DIR/.bridge-
   BRIDGE_TOKEN="$(tr -d '[:space:]' < "$ROOT_DIR/.bridge-token")"
 fi
 if [ -z "${BRIDGE_TOKEN:-}" ] && [ "$MOCK" = false ]; then
-  echo "[ensayo] No hay token. Tráelo con ./traer-token.sh <usuario>@$ROBOT_IP" >&2
+  echo "[ensayo] No hay token. Corre ./ensayo.sh --laptop --ip $ROBOT_IP (lo trae solo) o ./traer-token.sh <usuario>@$ROBOT_IP" >&2
   exit 1
 fi
 
@@ -66,12 +415,6 @@ bad() { FAIL=$((FAIL + 1)); FAILS+=("$*"); log "  [FALLA]  $*"; }
 warn() { WARN=$((WARN + 1)); log "  [AVISO]  $*"; }
 note() { log "           $*"; }
 
-# Pregunta s/n. Devuelve 0 si la respuesta es sí.
-ask() {
-  local answer
-  read -r -p "  ¿$1? [s/n] " answer
-  [[ "$answer" =~ ^[sSyY] ]]
-}
 # Pregunta s/n y la registra como OK o FALLA.
 check_manual() {
   MANUAL=$((MANUAL + 1))
@@ -190,7 +533,7 @@ if [ "$SOLO_AUTO" = true ]; then
   section "Resumen (--solo-auto)"
   log "  OK: $PASS · FALLAS: $FAIL · AVISOS: $WARN"
   for f in "${FAILS[@]+"${FAILS[@]}"}"; do log "  - $f"; done
-  [ "$FAIL" -eq 0 ]; exit $?
+  [ "$FAIL" -eq 0 ]; finish $?
 fi
 
 # ==============================================================================
@@ -295,13 +638,13 @@ if clear_area; then
   S="$(status_json)"
   if [ "$(jf "$S" 'd["estop_latched"]')" = "False" ]; then ok "POST /estop/release libera la E-stop."; else bad "La E-stop no se liberó."; fi
 
-  pause "Ahora presiona Esc (o el botón PARO) en la web de la laptop"
+  pause "Ahora presiona Esc (o el botón STOP) en la web de la laptop"
   LATCHED=""
   for _ in $(seq 1 30); do
     [ "$(jf "$(status_json)" 'd["estop_latched"]')" = "True" ] && LATCHED=1 && break
     sleep 0.5
   done
-  if [ -n "$LATCHED" ]; then ok "El PARO de la web enclava la E-stop."; else bad "El PARO de la web no enclavó la E-stop en 15 s."; fi
+  if [ -n "$LATCHED" ]; then ok "El STOP de la web enclava la E-stop."; else bad "El STOP de la web no enclavó la E-stop en 15 s."; fi
   check_manual "La web muestra el banner «Paro de emergencia activo»"
   pause "Presiona «Liberar» en la web"
   if [ "$(jf "$(status_json)" 'd["estop_latched"]')" = "False" ]; then ok "«Liberar» en la web libera la E-stop."; else bad "«Liberar» no liberó la E-stop."; release; fi
@@ -374,4 +717,4 @@ log "  OK: $PASS · FALLAS: $FAIL · AVISOS: $WARN · revisiones manuales: $MANU
 for f in "${FAILS[@]+"${FAILS[@]}"}"; do log "  - $f"; done
 log ""
 log "Bitácora con los valores medidos: $LOG"
-[ "$FAIL" -eq 0 ]
+[ "$FAIL" -eq 0 ]; finish $?

@@ -4,6 +4,7 @@ import math
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -53,6 +54,56 @@ class AnalyzeShadowTests(unittest.TestCase):
         self.assertEqual(band["echoes"], 1)
         self.assertAlmostEqual(band["max_m"], 0.1)
 
+
+
+class ScanDiagnosisTests(unittest.TestCase):
+    def test_no_publisher_points_to_driver_or_ros_environment(self):
+        msg = cal.scan_diagnosis([], {"ROS_LOCALHOST_ONLY": "1"})
+        self.assertIn("No veo ningún publicador", msg)
+        self.assertIn("ROS_DOMAIN_ID=0, ROS_LOCALHOST_ONLY=1", msg)
+
+    def test_silent_publisher_is_named(self):
+        pub = SimpleNamespace(node_namespace="/", node_name="ldlidar")
+        msg = cal.scan_diagnosis([pub], {})
+        self.assertIn("1 publicador(es) (/ldlidar)", msg)
+        self.assertIn("ROS_LOCALHOST_ONLY=0", msg)
+
+
+class SelectPosesTests(unittest.TestCase):
+    HOME = (500, 430, 310, 380, 500, 500)
+
+    def test_real_gestures_reduce_to_twelve_starting_at_home(self):
+        with open(cal.GESTURES_RS, encoding="utf-8") as f:
+            poses = cal.gesture_poses(f.read())
+        chosen = cal.select_poses(poses, self.HOME)
+        self.assertGreater(len(poses), cal.MAX_POSES)
+        self.assertEqual(len(chosen), cal.MAX_POSES)
+        self.assertEqual(chosen[0], self.HOME)
+        self.assertEqual(len(set(chosen)), len(chosen))
+
+    def test_extremes_come_before_near_duplicates(self):
+        near = (505, 430, 310, 380, 500, 500)
+        far = (100, 800, 150, 850, 900, 200)
+        chosen = cal.select_poses([near, far], self.HOME, limit=2)
+        self.assertEqual(chosen, [self.HOME, far])
+
+
+def fake_scan(angle_min_deg, angle_max_deg, inc_deg=1.0):
+    n = int(round((angle_max_deg - angle_min_deg) / inc_deg)) + 1
+    return SimpleNamespace(
+        angle_min=math.radians(angle_min_deg), angle_increment=math.radians(inc_deg), ranges=[1.0] * n
+    )
+
+
+class ConeCoverageTests(unittest.TestCase):
+    def test_full_scan_covers_the_front(self):
+        self.assertGreater(cal.cone_coverage(fake_scan(-180, 179), 0.0, False), 0.95)
+
+    def test_scan_cropped_at_the_back_needs_offset_180(self):
+        # This robot: the driver's 0 is the robot's back and the filter keeps only 72°..291°
+        scan = fake_scan(72, 290.7, 0.9)
+        self.assertLess(cal.cone_coverage(scan, 0.0, False), cal.MIN_CONE_COVERAGE)
+        self.assertGreater(cal.cone_coverage(scan, 180.0, False), 0.95)
 
 if __name__ == "__main__":
     unittest.main()

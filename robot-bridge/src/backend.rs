@@ -29,7 +29,7 @@ pub const NO_LIDAR_MAX_LINEAR_MPS: f32 = 0.15;
 /// While a timed `cmd_vel` is active, the current velocity is re-sent this often
 /// (keeps the worker's 500 ms watchdog fed and gives `serial` a heartbeat).
 pub const DRIVER_RESEND_INTERVAL: Duration = Duration::from_millis(100);
-/// Max time to wait for the first line of `ros2_worker.py` (rclpy + Board init).
+/// Max time to wait for the first line of `ros2_worker.py` (Board init + rclpy/cv2 telemetry node).
 pub const WORKER_STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 /// Max queued non-velocity driver commands. A full queue means the writer is stuck: new commands
 /// are dropped (velocity never queues: it lives in a latest-wins slot).

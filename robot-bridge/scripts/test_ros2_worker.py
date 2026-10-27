@@ -7,6 +7,7 @@ import io
 import json
 import math
 import os
+import signal
 import sys
 import unittest
 from contextlib import redirect_stdout
@@ -218,6 +219,36 @@ class ArmShadowCalibrationTests(unittest.TestCase):
         self.assertEqual(source, "defaults")
 
 
+
+class LidarMountTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+
+        self.dir = tempfile.mkdtemp()
+        self.path = os.path.join(self.dir, "lidar-mount.json")
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_defaults_without_file(self):
+        self.assertEqual(worker.load_lidar_mount(self.path, env={}), ({"offset_deg": 0.0, "flip": False}, "defaults"))
+
+    def test_file_sets_offset(self):
+        with open(self.path, "w") as f:
+            json.dump({"offset_deg": 180, "flip": False}, f)
+        values, source = worker.load_lidar_mount(self.path, env={})
+        self.assertEqual(values, {"offset_deg": 180.0, "flip": False})
+        self.assertTrue(source.startswith("file "))
+
+    def test_environment_wins_over_file(self):
+        with open(self.path, "w") as f:
+            json.dump({"offset_deg": 180}, f)
+        values, source = worker.load_lidar_mount(self.path, env={"LIDAR_ANGLE_OFFSET_DEG": "0", "LIDAR_FLIP": "1"})
+        self.assertEqual(values, {"offset_deg": 0.0, "flip": True})
+        self.assertEqual(source, "environment")
+
 class HeartbeatTests(unittest.TestCase):
     def test_ping_is_echoed_as_pong(self):
         buf = io.StringIO()
@@ -236,6 +267,34 @@ class HeartbeatTests(unittest.TestCase):
         with redirect_stdout(buf):
             worker.handle_board_command(NoBoard(), {"op": "ping", "seq": 7}, {})
         self.assertEqual(json.loads(buf.getvalue()), {"event": "pong", "seq": 7})
+
+    def test_board_main_builds_telemetry_before_first_line_and_ignores_sigint(self):
+        # The rclpy/cv2 imports hold the GIL: done after the first line they delay the pongs.
+        calls = []
+        saved = {n: getattr(worker, n) for n in (
+            "init_board", "create_telemetry_node", "start_telemetry", "emit",
+            "battery_poller", "board_watchdog_loop", "zero_board_motors")}
+        try:
+            worker.init_board = lambda: object()
+            worker.create_telemetry_node = lambda: calls.append("telemetry") or "node"
+            worker.start_telemetry = lambda node: calls.append(f"spin:{node}")
+            worker.emit = lambda event: calls.append(event.get("event"))
+            worker.battery_poller = lambda *a: None
+            worker.board_watchdog_loop = lambda *a: None
+            worker.zero_board_motors = lambda *a: None
+            stdin, sys.stdin = sys.stdin, io.StringIO("")
+            sigint = signal.getsignal(signal.SIGINT)
+            try:
+                worker.main()
+                # Ctrl+C belongs to the bridge: the worker waits for stdin EOF
+                self.assertIs(signal.getsignal(signal.SIGINT), signal.SIG_IGN)
+            finally:
+                sys.stdin = stdin
+                signal.signal(signal.SIGINT, sigint)
+        finally:
+            for n, f in saved.items():
+                setattr(worker, n, f)
+        self.assertEqual(calls, ["telemetry", "backend", "spin:node"])
 
 
 class EmitTests(unittest.TestCase):

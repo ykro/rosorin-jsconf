@@ -40,7 +40,7 @@ export class ViewerErrorBoundary extends React.Component<ViewerErrorBoundaryProp
           {noWebgl ? 'Sin WebGL: el simulador 3D no está disponible' : 'El simulador 3D falló'}
         </p>
         <p className="max-w-sm text-xs text-[#5F6368]">
-          El resto de la página sigue funcionando: consola Live, botones del robot y PARO.
+          El resto de la página sigue funcionando: consola Live, botones del robot y STOP.
         </p>
         <button
           type="button"

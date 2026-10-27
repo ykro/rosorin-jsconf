@@ -16,7 +16,7 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
 - **Detener.** El botón **Detener** cierra el micrófono y la sesión.
 - **Cambiar de ruta o de pestaña.** Al navegar con la barra superior o cambiar de pestaña, la conversación se detiene; en el segundo caso aparece un aviso.
 - **Estado de la conexión.** La consola muestra Listo, Conectando…, Reconectando…, Conectado, Escuchando tu micrófono, Hablando…, Desconectado, Error de conexión o Sin API key.
-- **Paro de emergencia.** Botón **PARO** de la barra superior o tecla **Escape** (también desde el panel de la píldora del robot o desde `/face`). Mientras esté enclavado, los movimientos fallan y el modelo recibe `status: "error", code: "estop_latched"` y lo dice en voz alta.
+- **Paro de emergencia.** Botón **STOP** de la barra superior o tecla **Escape** (también desde el panel de la píldora del robot o desde `/face`). Mientras esté enclavado, los movimientos fallan y el modelo recibe `status: "error", code: "estop_latched"` y lo dice en voz alta.
 - **Movimientos bloqueados.** Si el bridge acepta un movimiento pero lo frena o lo bloquea (`blocked`: `braked`, `lidar_stale` o `worker_dead`), el modelo recibe un error con ese código y un `hint` que le pide no decir que se movió.
 
 ---

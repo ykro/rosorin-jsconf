@@ -38,7 +38,7 @@ En este repo nada le habla directo al hardware salvo `robot-bridge` (Rust, binar
 
 Un backend pedido de forma explícita (`--backend`, `ROBOT_BACKEND`, `--serial`, `--ros2`) **no cae a mock** si falla: el bridge sale con código 1. Solo con `--allow-mock-fallback` (lo pasa `run.sh` al autodetectar) prueba serial → ros2 → mock.
 
-> **Regla:** no abras `/dev/rrc` dos veces. Si `ros_robot_controller_node` está corriendo, el worker publica en tópicos; si quieres `serial`, detén ese nodo. `run.sh` detiene `button_scan.service` y `start_app_node.service` por esa razón.
+> **Regla:** no abras `/dev/rrc` dos veces. Si `ros_robot_controller_node` está corriendo, el worker publica en tópicos; si quieres `serial`, detén ese nodo. `run.sh` detiene `button_scan.service` y `start_app_node.service` por esa razón. `start_app_node.service` es el bringup completo de Hiwonder y también lanzaba el LiDAR y la cámara: con `ros2`, `rosorin_start_sensors` (en `robot-common.sh`) vuelve a levantar solo `ros2 launch peripherals lidar.launch.py` y `depth_camera.launch.py`, y `run.sh` los apaga al salir.
 
 ## Servos y límites (`clamp_servo_pulse` en `protocol.rs`)
 
@@ -75,7 +75,7 @@ Solo se aceptan los IDs `{1, 2, 3, 4, 5, 10}`. Cualquier otro ID en `/arm` o `/s
 - El bridge escucha en `127.0.0.1` por defecto. En el robot `run.sh` lo levanta en `0.0.0.0` con `BRIDGE_TOKEN` (generado en `.bridge-token`, permisos 600). Sin token fuera de loopback, el bridge sale con código 2.
 - Manda el token como `x-bridge-token: <t>` o `Authorization: Bearer <t>`. `?token=` solo vale en `/ws`. `GET /health` es público.
 - `Host` debe ser una IP, `localhost` o un nombre de `BRIDGE_ALLOWED_HOSTS`; `Origin`, una IP de loopback, `localhost`, el sitio de la charla o uno de `BRIDGE_ALLOWED_ORIGINS`. Las IPs privadas solo valen como origen si hay token o el bridge escucha fuera de loopback.
-- En la laptop, el token se trae con `./traer-token.sh <usuario>@<IP>` y la web lo recibe en `#token=<t>`.
+- En la laptop, el token se trae con `./traer-token.sh <usuario>@<IP>` (no lo vuelve a copiar si el bridge ya acepta el que tienes; `--force` lo trae siempre) y la web lo recibe en `#token=<t>`. `./ensayo.sh --laptop --ip <IP>` hace las dos cosas y corre la guía del ensayo.
 - Límite global: 30 POST/s con ráfaga de 60 (`/stop` y `/estop/release` exentos).
 
 El token se le pasa a `curl` por stdin (`-H @-`, `curl >= 7.55`) para que no aparezca en `ps`, como hace `rosorin_curl_with_token` en `robot-bridge/scripts/robot-common.sh`:
@@ -90,7 +90,7 @@ hdr | curl -X POST -H @- http://<IP>:9000/estop/release
 
 ## Lo que hace `ros2_worker.py`
 
-Protocolo: un JSON por línea en stdin (`{"op":"cmd_vel"|"arm"|"buzzer"|"rgb"|"ping",…}`) y un JSON por línea en stdout (`{"event":"backend"|"lidar"|"battery"|"camera_jpeg"|"pong",…}`). La primera línea siempre es `{"event":"backend","name":…}`; el bridge la espera hasta 20 s. Cada `{"op":"ping","seq":N}` se contesta con `{"event":"pong","seq":N}` desde el hilo que lee stdin. El evento `lidar` trae además `blind` (lista de sectores ciegos; solo diagnóstico).
+Protocolo: un JSON por línea en stdin (`{"op":"cmd_vel"|"arm"|"buzzer"|"rgb"|"ping",…}`) y un JSON por línea en stdout (`{"event":"backend"|"lidar"|"battery"|"camera_jpeg"|"pong",…}`). La primera línea siempre es `{"event":"backend","name":…}`; el bridge la espera hasta 20 s. El worker arma antes el nodo de cámara y `/scan` (importar rclpy, cv2 y numpy acapara el GIL cerca de un segundo y, hecho después, atrasaría los `pong`). Cada `{"op":"ping","seq":N}` se contesta con `{"event":"pong","seq":N}` desde el hilo que lee stdin. El evento `lidar` trae además `blind` (lista de sectores ciegos; solo diagnóstico).
 
 - **Con el SDK (`Board`):** `name = "stm32-board (/dev/rrc @ 1Mbps)"`. Mueve motores con `set_motor_speed`, servos con `bus_servo_set_position`, buzzer y LEDs con el SDK, y lee la batería cada 2 s.
 - **Con tópicos (si `/dev/rrc` está ocupado):** `name = "ros2-topics"`. Publica:
@@ -103,9 +103,9 @@ Protocolo: un JSON por línea en stdin (`{"op":"cmd_vel"|"arm"|"buzzer"|"rgb"|"p
 - **Sectores** (REP-103: ángulo 0 al frente, positivo a la izquierda): frente `|θ| ≤ 45°`, izquierda `45°..135°`, derecha `-135°..-45°`, atrás el resto. Cada sector reporta el eco más cercano; si solo hay espacio libre, `4.0` m.
 - **Rayos** (`classify_ray`, REP 117): eco si es finito y está en `[range_min, range_max]`; libre si es `+inf` o mayor que `range_max`; inválido si es `NaN`, `-inf`, `0` o menor que `range_min` (algo pegado, ventana tapada o sucia). Un escenario con más de 12 m vacíos se ve abierto. Ojo: una superficie negra mate que no devuelve eco también se ve libre.
 - **Sector ciego:** si menos de `LIDAR_MIN_VALID_FRACTION` (0.25) de sus rayos son utilizables (eco o libre), el sector vale `0.0` y bloquea. Así un LiDAR tapado o sucio bloquea el chasis. `LIDAR_MIN_VALID_FRACTION=0` desactiva la revisión.
-- **Orientación del scan:** el worker asume REP-103; `LIDAR_ANGLE_OFFSET_DEG` y `LIDAR_FLIP=1` corrigen un `/scan` rotado o reflejado antes de calcular sectores y sombra (`robot_angle()` en `ros2_worker.py`, también la usa `calibrar_sombra.py`).
+- **Orientación del scan** (`load_lidar_mount`): el worker asume REP-103; un offset y un reflejo corrigen un `/scan` rotado o reflejado antes de calcular sectores y sombra (`robot_angle()` en `ros2_worker.py`, también la usa `calibrar_sombra.py`). Los valores salen de `LIDAR_ANGLE_OFFSET_DEG` y `LIDAR_FLIP` en el entorno, si no del archivo `LIDAR_MOUNT_FILE` (por defecto `robot-bridge/lidar-mount.json`, `{"offset_deg": 180, "flip": false}`, fuera de git) y si no 0° sin reflejo.
 - **Sombra del brazo:** los ecos entre `ARM_SHADOW_MIN_M` y `ARM_SHADOW_MAX_M` dentro de ±`ARM_SHADOW_HALF_ANGLE_DEG` al frente se ignoran si el sector tiene otros rayos utilizables (eco o libre); si el brazo es lo único que ve el sector, se reporta (bloquea). Lo que está más cerca que `ARM_SHADOW_MIN_M` siempre bloquea. `ARM_SHADOW_MAX_M=0` desactiva el filtro.
-- **Calibración de la sombra** (`load_arm_shadow`): los valores salen de las variables de entorno, si no del archivo `ARM_SHADOW_FILE` (por defecto `robot-bridge/arm-shadow.json`, fuera de git) y si no de los valores por defecto (0.06–0.09 m, ±20°), estrechos y sin calibrar. El archivo lo escribe `make calibrar-sombra` en el robot, con `make robot` corriendo: mueve solo el brazo por las poses de `gestures.rs`, toma como brazo todo eco a menos de 30 cm dentro de ±90°, agrega 1 cm y 2° de margen y aborta si la banda pasa de 0.25 m. Después hay que reiniciar el bridge; el worker dice en stderr de dónde salió la banda.
+- **Calibración de la sombra** (`load_arm_shadow`): los valores salen de las variables de entorno, si no del archivo `ARM_SHADOW_FILE` (por defecto `robot-bridge/arm-shadow.json`, fuera de git) y si no de los valores por defecto (0.06–0.09 m, ±20°), estrechos y sin calibrar. El archivo lo escribe `make calibrar-sombra` en el robot, con `make robot` corriendo: mueve solo el brazo por las 12 poses más distintas de `gestures.rs` (`select_poses`, muestreo del punto más lejano con la pinza a 0.25; `--todas` las mide todas), toma como brazo todo eco a menos de 30 cm dentro de ±90°, agrega 1 cm y 2° de margen y aborta si la banda pasa de 0.25 m. Antes revisa que `/scan` cubra al menos la mitad del frente (`cone_coverage`); si no, y girado 180° sí, ofrece escribir `lidar-mount.json`. Después hay que reiniciar el bridge; el worker dice en stderr de dónde salió la banda.
 
 Tests sin rclpy: `python3 -m unittest discover -s robot-bridge/scripts -p 'test_*.py'`.
 

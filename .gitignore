@@ -21,5 +21,6 @@ __pycache__/
 *.local.sh
 .bridge-token.*
 ensayo-*.log
-# Arm-shadow calibration measured on each robot (make calibrar-sombra)
+# Per-robot calibration (make calibrar-sombra): arm shadow and LiDAR mount
 robot-bridge/arm-shadow.json
+robot-bridge/lidar-mount.json

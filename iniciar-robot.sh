@@ -61,6 +61,8 @@ if ! curl -s -m 2 http://127.0.0.1:9000/health >/dev/null 2>&1; then
     BRIDGE_HOST="0.0.0.0"
     # Igual que run.sh: re-revisa ESTOP_LOCK y libera /dev/rrc de los servicios de fábrica
     rosorin_pause_factory_services || exit 1
+    # start_app_node también lanzaba el LiDAR y la cámara: el backend ros2 los necesita
+    rosorin_start_sensors "$LOG_DIR"
   fi
   if [ -x "./target/release/rosorin-bridge" ]; then
     nohup ./target/release/rosorin-bridge --backend "$BACKEND" --host "$BRIDGE_HOST" --port 9000 --allow-mock-fallback >"$LOG_DIR/rosorin-bridge.log" 2>&1 &

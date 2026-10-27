@@ -73,7 +73,8 @@ En el robot, `run.sh`:
 
 - Carga ROS 2 Humble (`/opt/ros/humble`, `~/ros2_ws`, `~/mission_ws`) y elige el backend `ros2` (o `serial` si no hay ROS 2 pero existe `/dev/rrc` o `/dev/ttyACM0`). Como el backend se autodetectó, pasa `--allow-mock-fallback`: si el hardware no arranca, cae a mock y lo avisa.
 - Toma el token de `BRIDGE_TOKEN` o de `.bridge-token`; si no existe, genera uno con `openssl rand -hex 16` y lo guarda en `.bridge-token` con permisos `600`.
-- Detiene con `sudo` `button_scan.service` y `start_app_node.service`, que ocupan `/dev/rrc`. Mientras corre el bridge, el botón físico de fábrica no actúa: usa el paro de emergencia de la web.
+- Detiene con `sudo` `button_scan.service` y `start_app_node.service`, que ocupan `/dev/rrc`. Mientras corre el bridge, el botón físico de fábrica no actúa: usa el **STOP** de la web.
+- `start_app_node.service` es el bringup completo de Hiwonder y también lanzaba el LiDAR y la cámara, así que con el backend `ros2` vuelve a levantar solo `peripherals lidar.launch.py` y `depth_camera.launch.py` (si ya corren, no los duplica) y los apaga al salir. Ver [`SECURITY.md`](./SECURITY.md#runsh-e-iniciar-robotsh-en-el-robot).
 - No toca `wifi.service`. Si existe `~/.openclaw/workspace/ESTOP_LOCK` (el candado de paro de otra app; otra ruta con `ROSORIN_ESTOP_LOCK_FILE`), aborta sin borrarlo.
 - Levanta `rosorin-bridge` en `0.0.0.0:9000` con `cargo run --release` y el token por variable de entorno (no aparece en `ps`).
 
@@ -90,6 +91,7 @@ En tu laptop, desde la raíz del repo:
 ```
 
 - Lee `.bridge-token` del robot por SSH (el token viaja por la salida de `ssh`, nunca en argumentos) y lo guarda en tu `.bridge-token` con permisos `600`.
+- Si ya tienes `.bridge-token` y el bridge del robot lo acepta, no lo vuelve a copiar. Si el bridge no responde, lo trae y solo reemplaza el tuyo si cambió. `--force` lo trae siempre (`./traer-token.sh --force <usuario>@<IP>`).
 - Sin `<usuario>@` usa `ROBOT_USER` o tu usuario local.
 - Busca el repo en `~/Desktop/rosorin-jsconf` del robot. Si está en otra ruta, pásala como segundo argumento (`./traer-token.sh <usuario>@<IP> <ruta-del-repo>`) o en `ROBOT_REPO`.
 - Si falla, revisa la IP, el usuario y que `make robot` ya haya corrido en el robot (es lo que genera el token).
@@ -121,7 +123,7 @@ Al cerrar `run.sh` con Ctrl+C, el script manda `POST /stop` al bridge, también 
 
 Otras formas de pasar el token o el bridge:
 
-- Pulsa la píldora del robot en la barra superior: abre un panel con el host del bridge, su URL, el token, «Conectar al robot» y «Paro de emergencia».
+- Pulsa la píldora del robot en la barra superior: abre un panel con el host del bridge, su URL, el token, «Conectar al robot» y **STOP**.
 - `?bridge=http://<IP>:9000` en cualquier ruta cambia el bridge (solo acepta `localhost` o IPs de la red local). Si el host cambia, la web borra el token guardado, salvo que la misma URL traiga uno nuevo.
 - `?token=<token>` también funciona, pero `#token=` es preferible. `?bridge=reset` y `#token=reset` borran lo guardado.
 
@@ -129,7 +131,7 @@ Nunca pongas el token en una variable `NEXT_PUBLIC_*`: se incrusta en el bundle.
 
 ### Paso 5: ensayar con el robot
 
-Antes de subir al escenario, corre `./ensayo.sh --robot-ip <IP_DEL_ROBOT> --ssh <usuario>@<IP_DEL_ROBOT>` en otra terminal de la laptop. Revisa versión, token, worker, LiDAR, sombra del brazo, ruedas, paros y demos, y deja una bitácora con los valores medidos. Todo el flujo está en [`ENSAYO.md`](./ENSAYO.md).
+Antes de subir al escenario, corre `./ensayo.sh --robot` en el robot (actualiza, compila, imprime la IP y levanta el bridge) y `./ensayo.sh --laptop --ip <IP_DEL_ROBOT>` en la laptop (trae el token, levanta la web y corre la guía). Los pasos 1 a 4 quedan hechos por el script. La guía revisa versión, token, worker, LiDAR, sombra del brazo, ruedas, paros y demos, y deja una bitácora con los valores medidos. Todo el flujo está en [`ENSAYO.md`](./ENSAYO.md).
 
 > [!IMPORTANT]
 > **¿Por qué `http://localhost:3000` y no la IP del robot en el navegador?** El micrófono (`getUserMedia`) solo funciona en contextos seguros: `https://` o `http://localhost`. Además, el sitio público (`https://jsconfmx26.web.app`) no sirve para el robot físico: su CSP solo permite `localhost:9000` y `127.0.0.1:9000`, y una página `https://` no puede llamar a una IP `http://` de la red local.
@@ -139,9 +141,9 @@ Antes de subir al escenario, corre `./ensayo.sh --robot-ip <IP_DEL_ROBOT> --ssh 
 ## 4. Paro de emergencia
 
 - **Activar:**
-  - Botón **PARO** fijo en la barra superior o tecla **Escape** (no actúa mientras escribes en un campo; si el panel del robot está abierto, primero lo cierra). Funciona aunque el WebSocket esté caído.
-  - Botón **PARO** en `/face` (aparece siempre que el bridge está habilitado).
-  - Botón «Paro de emergencia» del panel del robot.
+  - Botón **STOP** fijo en la barra superior o tecla **Escape** (no actúa mientras escribes en un campo; si el panel del robot está abierto, primero lo cierra). Funciona aunque el WebSocket esté caído.
+  - Botón **STOP** en `/face` (aparece siempre que el bridge está habilitado).
+  - Botón **STOP** del panel del robot.
   - `make reset` en la máquina del bridge, o `printf 'x-bridge-token: %s\n' "$(cat .bridge-token)" | curl -H @- -X POST http://<IP>:9000/stop`.
 - **Efecto:** motores a 0, brazo congelado donde está (no vuelve a `home`) y E-stop enclavada. Toda ruta de movimiento responde `423 estop_latched` y la web muestra el banner «Paro de emergencia activo».
 - **Liberar:** botón «Liberar» del banner, `make release` o el mismo `curl` contra `/estop/release`.
@@ -182,8 +184,8 @@ Variables de entorno que lee `run.sh`: `BRIDGE_TOKEN`, `ROBOT_BACKEND` (explíci
 | `403 forbidden_origin` o `forbidden_host` | La página o el nombre del robot no están permitidos. Agrega el origen a `BRIDGE_ALLOWED_ORIGINS` o el nombre (por ejemplo `rosorin.local`) a `BRIDGE_ALLOWED_HOSTS`. En mock, abre `http://localhost:3000` y no la IP de la laptop. |
 | Banner «LiDAR sin datos: chasis bloqueado» | Con `ros2` no llega `/scan` desde hace más de 300 ms (o el worker murió). El brazo sigue funcionando; revisa el driver del LiDAR con `ros2 topic hz /scan`. |
 | `connected=false` en `/status` y las herramientas responden `worker_dead` | El worker no contesta el *heartbeat*. Lo más común: bridge y worker de versiones distintas. En el robot, `git pull`, `make build-robot` y reinicia `make robot`. |
-| El robot no avanza aunque no hay nada enfrente | El frente está bloqueado por la sombra del brazo o por un sector ciego. Mira `lidar.front_m` en `/status`: si vale `0.0`, el sector está ciego (LiDAR tapado o sucio, o un driver que reporta el vacío como `0`/`NaN`; ver [`SECURITY.md`](./SECURITY.md#lidar-que-falla-cerrado)); si es menor a 0.28 m, el brazo cae fuera de la banda de sombra: en el robot, con `make robot` corriendo, corre `make calibrar-sombra` y reinicia `make robot` ([`SECURITY.md`](./SECURITY.md#sombra-del-brazo)). |
+| El robot no avanza aunque no hay nada enfrente | El frente está bloqueado por la sombra del brazo o por un sector ciego. Mira `lidar.front_m` en `/status`: si vale `0.0`, el sector está ciego (LiDAR tapado o sucio, o un driver que reporta el vacío como `0`/`NaN`; ver [`SECURITY.md`](./SECURITY.md#lidar-que-falla-cerrado)); si es menor a 0.28 m, el brazo cae fuera de la banda de sombra: en el robot, con `make robot` corriendo, corre `make calibrar-sombra` y reinicia `make robot` ([`SECURITY.md`](./SECURITY.md#sombra-del-brazo)). Si el frente está ciego aunque el LiDAR esté limpio, revisa la orientación: un LiDAR girado 180° necesita `robot-bridge/lidar-mount.json` (sección 3 de [`ENSAYO.md`](./ENSAYO.md)). |
 | Todo responde `423` | La E-stop está enclavada (también pasa al cerrar `run.sh` en la laptop, que manda `/stop`). Libérala con «Liberar» o `make release`. |
 | `429 rate_limited` | Más de 30 POST por segundo (ráfaga de 60). `/stop` siempre pasa. |
 | `git pull` falla en el robot | El historial se reescribió: `git fetch origin && git reset --hard origin/main`. |
-| La página muestra «Sin WebGL: el simulador 3D no está disponible» | El navegador no tiene WebGL. El resto de la página sigue funcionando, incluido el PARO; prueba otro navegador o activa la aceleración por hardware. |
+| La página muestra «Sin WebGL: el simulador 3D no está disponible» | El navegador no tiene WebGL. El resto de la página sigue funcionando, incluido el STOP; prueba otro navegador o activa la aceleración por hardware. |
