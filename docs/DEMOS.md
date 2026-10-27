@@ -83,8 +83,8 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
 - **Herramienta:** `play_radio_sequence({ clip_ids, dance_gesture, radio_caption })`. El modelo pide 1 o 2 IDs. Si ningún ID existe en el catálogo, elige el clip un buscador local. Si el servidor cancela la llamada (`toolCallCancellation`, normalmente porque lo interrumpiste) antes de que el robot empiece a bailar, la secuencia se corta y esa llamada no recibe respuesta.
 - **Audio bloqueado por el navegador:** si el navegador no deja reproducir sin un toque previo, la demo muestra «El navegador bloqueó el audio: toca la página una vez y vuelve a intentarlo.», distinto del aviso de clip faltante. «Cortar» limpia el aviso.
 - **Flujo:**
-  1. Pulsa **📻 Iniciar Conversación Musical** (necesita API key) y háblale.
-  2. Sin API key también funciona por texto: las frases rápidas («¡Hola Bumblebee! ¿Cómo estás hoy?», «El deploy en viernes salió perfecto a la primera.», «Se cayó producción y nadie sabe por qué.») y el cuadro de texto usan el buscador local de canciones.
+  1. Pulsa **📻 Iniciar Conversación Musical** (necesita API key) y háblale, o toca una frase rápida («¡Hola Bumblebee! ¿Cómo estás hoy?», «El deploy en viernes salió perfecto a la primera.», «Se cayó producción y nadie sabe por qué.») o escribe en el cuadro de texto. Con API key, cada frase es un turno de la **misma** conversación en vivo: si no estaba abierta, la abre (con micrófono, si el navegador lo permite) y sigue abierta después de la respuesta, hasta **⏹ Detener Conversación Musical**. Si Gemini no responde con `play_radio_sequence`, el buscador local elige el clip y la conversación sigue abierta. Sin micrófono (contexto no seguro o permiso denegado), la conversación sigue por texto.
+  2. Sin API key funciona solo por texto: las frases rápidas y el cuadro de texto usan el buscador local de canciones, sin conversación en vivo, y la página lo dice bajo las frases rápidas.
   3. El robot sintoniza, muestra la letra en el dial y en `/face`, y baila. El historial «Secuencias Musicales Sintonizadas» guarda cada turno.
 
 ---

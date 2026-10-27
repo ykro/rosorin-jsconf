@@ -36,8 +36,10 @@ export type ClipUnavailableReason = 'missing' | 'blocked';
 export interface BumblebeeCallbacks {
   onConnectionStatus: (status: LiveStatus) => void;
   onPlaybackStatus: (status: PlaybackStatus) => void;
-  /** True while the microphone is open and streaming to Gemini Live. */
+  /** True while the Gemini Live conversation is open (with or without the microphone). */
   onConversationActiveChange: (active: boolean) => void;
+  /** True while the microphone is open and streaming to Gemini Live. */
+  onMicOpenChange?: (open: boolean) => void;
   onUserTranscript: (text: string) => void;
   onNowPlaying: (clip: SongClip | null, frequencyMhz: string, caption: string) => void;
   onTurnLog: (turn: RadioTurnLog) => void;
@@ -150,6 +152,8 @@ export class BumblebeeRadioSession {
   private readonly cancelledToolCallIds = new Set<string>();
   /** Sequence started by a tool call: which ids it answers and whether the robot already danced. */
   private toolSequence: { seq: number; ids: string[]; started: boolean } | null = null;
+  /** Start in progress, shared so two quick taps do not open two sessions or two mics. */
+  private starting: Promise<boolean> | null = null;
 
   constructor(
     bridge: RobotActionHandler | undefined | null,
@@ -473,6 +477,46 @@ export class BumblebeeRadioSession {
     await this.playClipSequence(matched.clips, matched.gesture, matched.caption, clean);
   }
 
+  /**
+   * A quick phrase or typed text. With a Gemini key it is a turn in the live conversation, which
+   * is opened on demand (mic included) and stays open afterwards until the user ends it: the model
+   * answers with play_radio_sequence, and if it does not, turnComplete falls back to the local
+   * matcher (handleMessage). Without a key, or if Live cannot connect, it is answered locally
+   * (text only, no conversation). Returns where the turn went.
+   */
+  public async sendTextTurn(userText: string): Promise<'live' | 'local'> {
+    const clean = userText.trim();
+    if (!clean) return 'local';
+    this.unlockAudioContext();
+    if (!this.conversationActive || !this.live.isOpen) {
+      this.starting ??= this.startRadioConversation().finally(() => {
+        this.starting = null;
+      });
+      const started = await this.starting;
+      if (!started || !this.live.isOpen) {
+        await this.respondWithMusic(clean);
+        return 'local';
+      }
+    }
+    // A new turn interrupts the song that is playing, like a spoken barge-in.
+    if (this.isPlayingRadio) this.stopCurrentPlayback();
+    if (this.silenceDebounceTimer) clearTimeout(this.silenceDebounceTimer);
+    this.silenceDebounceTimer = null;
+    this.currentUserTurnText = clean;
+    this.toolHandledCurrentTurn = false;
+    this.callbacks.onUserTranscript(clean);
+    const sent = this.live.sendClientContent({
+      turns: [{ role: 'user', parts: [{ text: clean }] }],
+      turnComplete: true,
+    });
+    if (!sent) {
+      this.currentUserTurnText = '';
+      await this.respondWithMusic(clean);
+      return 'local';
+    }
+    return 'live';
+  }
+
   private buildSystemPrompt(): string {
     const byRole: Record<string, SongClip[]> = {};
     for (const c of this.catalog) {
@@ -702,6 +746,8 @@ ${sections.join('\n')}`;
       this.callbacks.onMicWarning(CONNECT_FAILED_WARNING);
       return false;
     }
+    // The conversation is open from here on, with or without the mic (text turns keep working).
+    this.callbacks.onConversationActiveChange(true);
 
     const res = await this.mic.start((frame, sampleRate) => this.onMicFrame(frame, sampleRate));
     if (!this.conversationActive) {
@@ -710,7 +756,7 @@ ${sections.join('\n')}`;
     }
     if (res === 'ok') {
       this.callbacks.onMicWarning(null);
-      this.callbacks.onConversationActiveChange(true);
+      this.callbacks.onMicOpenChange?.(true);
       void this.hudClient.updateHud({
         speaking: false,
         listening: true,
@@ -720,11 +766,11 @@ ${sections.join('\n')}`;
       });
     } else if (res === 'unsupported') {
       this.callbacks.onMicWarning(
-        'Micrófono bloqueado por HTTP sobre IP. Usa las frases rápidas, escribe abajo o abre http://localhost:3000/demos/bumblebee en tu laptop.'
+        'Micrófono bloqueado (la página no está en un contexto seguro): la conversación sigue activa por texto, con las frases rápidas o el cuadro de abajo.'
       );
     } else if (res === 'denied') {
       this.callbacks.onMicWarning(
-        'No se pudo abrir el micrófono. Puedes conversar escribiendo o usando las frases rápidas.'
+        'No se pudo abrir el micrófono: la conversación sigue activa por texto, con las frases rápidas o el cuadro de abajo.'
       );
     }
     return true;
@@ -753,6 +799,7 @@ ${sections.join('\n')}`;
     this.silenceDebounceTimer = null;
     this.mic.stop();
     this.callbacks.onConversationActiveChange(false);
+    this.callbacks.onMicOpenChange?.(false);
     this.callbacks.onMicLevelChange(0);
   }
 

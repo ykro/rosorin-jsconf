@@ -7,6 +7,7 @@ import { ApiKeyCollapsible } from '@/components/ApiKeyCollapsible';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { useLiteMode } from '@/lib/use-lite-mode';
 import type { LiveStatus } from '@/lib/live-connection';
+import { API_KEY_UPDATED_EVENT, getEffectiveApiKey } from '@/lib/api-key';
 import {
   BUMBLEBEE_DANCE_LABELS,
   BumblebeeRadioSession,
@@ -75,6 +76,8 @@ export default function BumblebeeDemoPage() {
   const [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>('idle');
   const [clipUnavailable, setClipUnavailable] = useState<ClipUnavailableReason | null>(null);
   const [conversationActive, setConversationActive] = useState(false);
+  const [micOpen, setMicOpen] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(false);
   const [userTranscript, setUserTranscript] = useState('');
   const [nowPlaying, setNowPlaying] = useState<SongClip | null>(null);
   const [frequencyMhz, setFrequencyMhz] = useState('104.7 FM');
@@ -109,6 +112,7 @@ export default function BumblebeeDemoPage() {
         onPlaybackStatus: setPlaybackStatus,
         onClipUnavailable: (clip, reason) => setClipUnavailable(clip ? (reason ?? 'missing') : null),
         onConversationActiveChange: (act) => setConversationActive(act),
+        onMicOpenChange: (open) => setMicOpen(open),
         onUserTranscript: (txt) => setUserTranscript(txt),
         onNowPlaying: (clip, freq, cap) => {
           setNowPlaying(clip);
@@ -138,21 +142,27 @@ export default function BumblebeeDemoPage() {
     }
   }, [catalog]);
 
+  useEffect(() => {
+    const refresh = () => setHasApiKey(Boolean(getEffectiveApiKey()));
+    refresh();
+    window.addEventListener(API_KEY_UPDATED_EVENT, refresh);
+    return () => window.removeEventListener(API_KEY_UPDATED_EVENT, refresh);
+  }, []);
+
   const handleToggleConversation = async () => {
     if (!sessionRef.current) return;
     if (conversationActive) {
       sessionRef.current.stopRadioConversation('user');
     } else {
-      await sessionRef.current.startRadioConversation();
-      await sessionRef.current.respondWithMusic(
-        '¡Hola Bumblebee! ¿Cómo estás hoy?'
-      );
+      // Opens the live conversation (and the mic) and greets inside it; it stays open afterwards.
+      await sessionRef.current.sendTextTurn('¡Hola Bumblebee! ¿Cómo estás hoy?');
     }
   };
 
+  // Quick phrases and typed text are turns of the same live conversation (opened on demand).
   const handleSendPrompt = async (text: string) => {
     if (!text.trim() || !sessionRef.current) return;
-    await sessionRef.current.respondWithMusic(text);
+    await sessionRef.current.sendTextTurn(text);
   };
 
   const controlsColumn = (
@@ -234,7 +244,7 @@ export default function BumblebeeDemoPage() {
                 aria-live="polite"
                 className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-white/80"
               >
-                {dialLabel(playbackStatus, connectionStatus, conversationActive)}
+                {dialLabel(playbackStatus, connectionStatus, micOpen)}
               </span>
             </div>
 
@@ -325,6 +335,11 @@ export default function BumblebeeDemoPage() {
           <p className="text-[11px] font-bold uppercase tracking-wider text-[#5F6368]">
             Frases rápidas para probar en vivo:
           </p>
+          {!hasApiKey && (
+            <p className="mt-1 text-[11px] text-[#5F6368]">
+              Sin API key de Gemini: solo texto (búsqueda local de canciones), sin conversación en vivo.
+            </p>
+          )}
           <div className="mt-2 flex flex-wrap gap-1.5">
             {QUICK_PROMPTS.map((q) => (
               <button
