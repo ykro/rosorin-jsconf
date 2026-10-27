@@ -38,6 +38,11 @@ El CI (`.github/workflows/ci.yml`) corre en cada push y PR todo lo anterior meno
 - Por defecto, `ensayo.sh --robot` y `demo.sh --robot` sirven la web desde el robot: un build estático (`web/out`, sin `NEXT_PUBLIC_GEMINI_API_KEY` ni modo ligero) con un servidor Python en `0.0.0.0:3000`. La laptop la abre en Chrome con `--unsafely-treat-insecure-origin-as-secure=http://<IP>:3000` y el perfil `~/.cache/rosorin-chrome`; sin esa bandera, `http://<IP>` no da micrófono. `--laptop-server` vuelve a la web en `localhost` de la laptop.
 - En Bash, un proceso en segundo plano de un shell no interactivo nace ignorando SIGINT. Para apagarlo, mándale TERM.
 
+## Publicar
+
+- **Hosting** (`jsconfmx26.web.app`, proyecto `ai-experiments-487722`): se despliega desde un worktree limpio del commit (`git worktree add --detach`), con los MP3 copiados a `web/public/songs/clips/` y `npm run build`, y luego `firebase deploy --only hosting`. Así no se publica trabajo a medias del árbol. El build no debe llevar ninguna key (`grep -r AIza web/out` vacío).
+- **Robot:** `git fetch origin && git merge --ff-only origin/main`, `make build-robot` (el bridge y el worker van juntos) y el build estático de la web (`robot_build_web` de `ensayo.sh`). Nada de esto mueve el robot.
+
 ## Reglas
 
 - **No versiones MP3.** Los clips de `web/public/songs/clips/` tienen derechos de autor: `.gitignore` los deja fuera de git. No los agregues a git. El hosting sí los publica (decisión del autor, 2026-10-27): `firebase deploy` los sube desde `web/out`, que los copia de `web/public/songs/clips/` de la laptop.
