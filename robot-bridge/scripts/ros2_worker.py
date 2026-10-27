@@ -340,6 +340,10 @@ def compute_lidar_sectors(
     - Blind sector: if fewer than `min_valid_fraction` of the sector's rays are usable (echo or free
       space; NaN/-inf/0/too close are not), the sector reports 0.0 m (blocking) and is listed in
       `blind`. A covered or dirty LiDAR therefore blocks.
+    - Uncovered sector: the scan has no rays in it at all (the LiDAR does not look there, e.g. the
+      robot's back hidden by the chassis and cropped by the driver's filter). It reports 0.0 m, so a
+      bridge that does not know `uncovered` fails closed, and is listed in `uncovered` (not in
+      `blind`): the bridge does not brake on it and limits the gestures' reverse instead.
     - Arm shadow: echoes between `shadow_min_m` and `shadow_max_m` within ±`shadow_half_angle_deg`
       of the front are ignored while the sector has other usable rays; if the arm is the only thing
       the sector can see, the closest arm echo is reported (blocking). Echoes closer than
@@ -398,13 +402,16 @@ def compute_lidar_sectors(
             usable_outside_shadow[sector] += 1
             valid[sector] = min(valid[sector], r)
 
+    def is_uncovered(name: str) -> bool:
+        return total[name] == 0
+
     def is_blind(name: str) -> bool:
-        if min_valid_fraction <= 0.0 or total[name] == 0:
+        if min_valid_fraction <= 0.0 or is_uncovered(name):
             return False
         return usable[name] / total[name] < min_valid_fraction
 
     def sector_value(name: str) -> float:
-        if is_blind(name):
+        if is_blind(name) or is_uncovered(name):
             return LIDAR_BLIND_M
         if math.isfinite(valid[name]):
             return valid[name]
@@ -420,6 +427,9 @@ def compute_lidar_sectors(
         "back_m": round(sector_value("back"), 3),
         # Diagnostics only (the bridge ignores it): sectors reported as 0.0 for lack of usable rays.
         "blind": [n for n in names if is_blind(n)],
+        # Sectors with no rays at all (the LiDAR does not cover them): reported as 0.0, but the
+        # bridge does not brake on them (see LidarSectors::uncovered in backend.rs).
+        "uncovered": [n for n in names if is_uncovered(n)],
     }
 
 

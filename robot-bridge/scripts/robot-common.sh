@@ -3,15 +3,16 @@
 # robot-common.sh — Salvaguardas compartidas por run.sh e iniciar-robot.sh.
 # Se carga con `source`; no se ejecuta. Mensajes con el prefijo $ROSORIN_LOG_TAG.
 #   rosorin_ensure_bridge_token <archivo>  BRIDGE_TOKEN del entorno, del archivo o uno nuevo (600)
-#   rosorin_check_estop_lock               falla si otra app dejó el candado de paro de emergencia
+#   rosorin_check_estop_lock               falla si otra app dejó el candado de E-stop
 #   rosorin_pause_factory_services         libera /dev/rrc (button_scan / start_app_node)
 #   rosorin_start_sensors <dir-de-logs>    levanta solo el LiDAR y la cámara de Hiwonder (sin /dev/rrc)
 #   rosorin_stop_sensors                   apaga lo que levantó rosorin_start_sensors
 #   rosorin_curl_with_token <args curl>    curl con x-bridge-token por stdin (nunca en argv)
+#   rosorin_gemini_key <raíz-del-repo>     imprime la API key de Gemini (GEMINI_API_KEY) o nada
 # ==============================================================================
 
 ROSORIN_LOG_TAG="${ROSORIN_LOG_TAG:-[rosorin]}"
-# Candado de paro de emergencia de otra app (p. ej. el botón físico). Si existe, alguien pidió
+# Candado de E-stop de otra app (p. ej. el botón físico). Si existe, alguien pidió
 # detener el robot: no se borra ni se ignora.
 ROSORIN_ESTOP_LOCK_FILE="${ROSORIN_ESTOP_LOCK_FILE:-$HOME/.openclaw/workspace/ESTOP_LOCK}"
 
@@ -37,10 +38,10 @@ rosorin_ensure_bridge_token() {
   echo "$ROSORIN_LOG_TAG Token del puente generado en $token_file (cópialo a tu laptop para usar --robot-ip)."
 }
 
-# Devuelve 1 (con explicación) si existe el candado de paro de emergencia de otra app.
+# Devuelve 1 (con explicación) si existe el candado de E-stop de otra app.
 rosorin_check_estop_lock() {
   if [ -e "$ROSORIN_ESTOP_LOCK_FILE" ]; then
-    echo "$ROSORIN_LOG_TAG Hay un paro de emergencia activo de otra app: $ROSORIN_ESTOP_LOCK_FILE" >&2
+    echo "$ROSORIN_LOG_TAG Hay un STOP activo de otra app (candado de E-stop): $ROSORIN_ESTOP_LOCK_FILE" >&2
     echo "$ROSORIN_LOG_TAG Revisa por qué se activó y libéralo desde esa app (o bórralo tú a conciencia) antes de mover el robot." >&2
     return 1
   fi
@@ -49,11 +50,11 @@ rosorin_check_estop_lock() {
 
 # En el robot físico: detener button_scan.service y start_app_node.service, que acaparan
 # /dev/rrc (/dev/ttyACM0) e impiden mover servos y ruedas. No se toca wifi.service (perderíamos
-# la red del escenario). Antes revisa el candado de paro de emergencia (devuelve 1 si existe).
+# la red del escenario). Antes revisa el candado de E-stop (devuelve 1 si existe).
 rosorin_pause_factory_services() {
   rosorin_check_estop_lock || return 1
   echo "$ROSORIN_LOG_TAG Liberando /dev/rrc: deteniendo temporalmente button_scan.service y start_app_node.service..."
-  echo "$ROSORIN_LOG_TAG Ojo: mientras corre el puente, el botón físico de fábrica no actúa; usa POST /stop o el botón de paro de la web."
+  echo "$ROSORIN_LOG_TAG Ojo: mientras corre el puente, el botón físico de fábrica no actúa; usa POST /stop o el botón STOP de la web."
   sudo systemctl stop button_scan.service start_app_node.service 2>/dev/null || true
   pkill -f "[b]utton_scan.py" 2>/dev/null || true
   pkill -f "[r]os_robot_controller" 2>/dev/null || true
@@ -102,4 +103,36 @@ rosorin_stop_sensors() {
 # `ps` ni en la URL. Uso: rosorin_curl_with_token -s -X POST http://127.0.0.1:9000/stop
 rosorin_curl_with_token() {
   printf 'x-bridge-token: %s\n' "${BRIDGE_TOKEN:-}" | curl -H @- "$@"
+}
+
+# API key de Gemini para el navegador: GEMINI_API_KEY del entorno, si no la de web/.env.local o
+# web/.env, y como último recurso NEXT_PUBLIC_GEMINI_API_KEY (desaconsejada: Next la incrusta en el
+# bundle público). Los lanzadores la pasan solo en el fragmento de la URL (#token=…&gemini_key=…),
+# que no llega al servidor; la web la guarda en localStorage y la quita de la barra.
+# Uso: GEMINI_KEY="$(rosorin_gemini_key "$ROOT_DIR")"
+rosorin_gemini_key() {
+  local root="$1" file var value
+  if [ -n "${GEMINI_API_KEY:-}" ]; then
+    printf '%s' "$GEMINI_API_KEY"
+    return 0
+  fi
+  for var in GEMINI_API_KEY NEXT_PUBLIC_GEMINI_API_KEY; do
+    for file in "$root/web/.env.local" "$root/web/.env"; do
+      [ -f "$file" ] || continue
+      value="$(sed -n "s/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}$var[[:space:]]*=[[:space:]]*//p" "$file" | tail -n1)"
+      value="$(printf '%s' "$value" | sed "s/[[:space:]]*#.*$//; s/^[\"']//; s/[\"']$//" | tr -d '[:space:]')"
+      if [ -n "$value" ]; then
+        if [ "$var" = "NEXT_PUBLIC_GEMINI_API_KEY" ]; then
+          echo "$ROSORIN_LOG_TAG AVISO: uso NEXT_PUBLIC_GEMINI_API_KEY de $file; renómbrala a GEMINI_API_KEY (lo NEXT_PUBLIC_* termina en el bundle público)." >&2
+        fi
+        printf '%s' "$value"
+        return 0
+      fi
+    done
+  done
+  if [ -n "${NEXT_PUBLIC_GEMINI_API_KEY:-}" ]; then
+    echo "$ROSORIN_LOG_TAG AVISO: uso NEXT_PUBLIC_GEMINI_API_KEY del entorno; usa GEMINI_API_KEY." >&2
+    printf '%s' "$NEXT_PUBLIC_GEMINI_API_KEY"
+  fi
+  return 0
 }

@@ -15,7 +15,7 @@ Para el ensayo con el robot físico antes de la charla sigue [`ENSAYO.md`](./ENS
 
 - **Node.js 22** ([`.nvmrc`](../.nvmrc); `web/package.json` exige `>= 22.6`) y `npm`.
 - **Rust con `cargo >= 1.87`**. En Linux o WSL instala antes `libudev-dev` y `pkg-config` (`sudo apt-get install -y libudev-dev pkg-config`), que pide el crate `serialport`. Si falta, `./run.sh` pregunta antes de instalarlo con rustup; en una terminal no interactiva aborta salvo con `--yes` o `ASSUME_YES=1`. Lo mismo hace con Node (vía fnm).
-- **API key de Gemini** de [Google AI Studio](https://aistudio.google.com/apikey). Pégala en el navegador (botón «Ingresar API Key» de la consola de cada demo, o panel «Gemini Live API Key» en `/demo`); se guarda en `localStorage` como `rosorin_gemini_api_key`. Para desarrollo local puedes copiar [`web/.env.example`](../web/.env.example) a `web/.env.local` y llenar `NEXT_PUBLIC_GEMINI_API_KEY`, pero no hagas `npm run build` ni despliegues con ella: quedaría en el bundle público.
+- **API key de Gemini** de [Google AI Studio](https://aistudio.google.com/apikey). Lo más cómodo: copia [`web/.env.example`](../web/.env.example) a `web/.env` y llena `GEMINI_API_KEY` (no es `NEXT_PUBLIC_`, así que no entra al bundle). `run.sh` la pasa en el fragmento de la URL que imprime (`#token=…&gemini_key=…`) y la web ya no la pide. Si no la defines, pégala en el navegador (botón «Ingresar API Key» de la consola de cada demo, o panel «Gemini Live API Key» en `/demo`). En los dos casos se guarda en `localStorage` como `rosorin_gemini_api_key`.
 - **En el robot:** Ubuntu 22.04 con ROS 2 Humble y el SDK de Hiwonder (lo usa `robot-bridge/scripts/ros2_worker.py`).
 
 ---
@@ -75,12 +75,12 @@ En el robot, `run.sh`:
 - Toma el token de `BRIDGE_TOKEN` o de `.bridge-token`; si no existe, genera uno con `openssl rand -hex 16` y lo guarda en `.bridge-token` con permisos `600`.
 - Detiene con `sudo` `button_scan.service` y `start_app_node.service`, que ocupan `/dev/rrc`. Mientras corre el bridge, el botón físico de fábrica no actúa: usa el **STOP** de la web.
 - `start_app_node.service` es el bringup completo de Hiwonder y también lanzaba el LiDAR y la cámara, así que con el backend `ros2` vuelve a levantar solo `peripherals lidar.launch.py` y `depth_camera.launch.py` (si ya corren, no los duplica) y los apaga al salir. Ver [`SECURITY.md`](./SECURITY.md#runsh-e-iniciar-robotsh-en-el-robot).
-- No toca `wifi.service`. Si existe `~/.openclaw/workspace/ESTOP_LOCK` (el candado de paro de otra app; otra ruta con `ROSORIN_ESTOP_LOCK_FILE`), aborta sin borrarlo.
+- No toca `wifi.service`. Si existe `~/.openclaw/workspace/ESTOP_LOCK` (el candado de E-stop de otra app; otra ruta con `ROSORIN_ESTOP_LOCK_FILE`), aborta sin borrarlo.
 - Levanta `rosorin-bridge` en `0.0.0.0:9000` con `cargo run --release` y el token por variable de entorno (no aparece en `ps`).
 
 Estas salvaguardas viven en [`robot-bridge/scripts/robot-common.sh`](../robot-bridge/scripts/robot-common.sh), que comparten `run.sh` e `iniciar-robot.sh`.
 
-Si corres `./run.sh` en el robot sin `--bridge-only`, también levanta la web en el propio robot (`127.0.0.1:3000`, modo ligero). Para la pantalla de 7" está `./iniciar-robot.sh`: aborta si existe el candado de paro, arranca bridge (con `target/release/rosorin-bridge` si existe) y web si hace falta, y abre `/face#token=<token>` en modo kiosco.
+Si corres `./run.sh` en el robot sin `--bridge-only`, también levanta la web en el propio robot (`127.0.0.1:3000`, modo ligero). Para la pantalla de 7" está `./iniciar-robot.sh`: aborta si existe el candado de E-stop, arranca bridge (con `target/release/rosorin-bridge` si existe) y web si hace falta, y abre `/face#token=<token>` en modo kiosco.
 
 ### Paso 3: traer el token a tu laptop
 
@@ -117,7 +117,7 @@ Sin token, el script se detiene y te sugiere `./traer-token.sh`. Con token, impr
 http://localhost:3000/?bridge=http://<IP_DEL_ROBOT>:9000#token=<token>
 ```
 
-Ábrela. El token va en el fragmento (`#token=`), que el navegador no manda al servidor de Next. La web guarda el token en `localStorage` (`ROSORIN_BRIDGE_TOKEN`) y la URL del bridge (`ROSORIN_BRIDGE_URL`), y quita el token de la barra de direcciones. Desde ahí lo manda como `x-bridge-token` en cada petición y como `?token=` al abrir `/ws`.
+Ábrela. El token va en el fragmento (`#token=`, y `&gemini_key=` si definiste `GEMINI_API_KEY`), que el navegador no manda al servidor de Next. La web guarda el token en `localStorage` (`ROSORIN_BRIDGE_TOKEN`) y la URL del bridge (`ROSORIN_BRIDGE_URL`), y quita el token de la barra de direcciones. Desde ahí lo manda como `x-bridge-token` en cada petición y como `?token=` al abrir `/ws`.
 
 Al cerrar `run.sh` con Ctrl+C, el script manda `POST /stop` al bridge, también al del robot: la E-stop queda enclavada hasta que la liberes.
 
@@ -131,21 +131,21 @@ Nunca pongas el token en una variable `NEXT_PUBLIC_*`: se incrusta en el bundle.
 
 ### Paso 5: ensayar con el robot
 
-Antes de subir al escenario, corre `./ensayo.sh --robot` en el robot (actualiza, compila, imprime la IP y levanta el bridge) y `./ensayo.sh --laptop --ip <IP_DEL_ROBOT>` en la laptop (trae el token, levanta la web y corre la guía). Los pasos 1 a 4 quedan hechos por el script. La guía revisa versión, token, worker, LiDAR, sombra del brazo, ruedas, paros y demos, y deja una bitácora con los valores medidos. Todo el flujo está en [`ENSAYO.md`](./ENSAYO.md).
+Antes de subir al escenario, corre `./ensayo.sh --robot` en el robot (actualiza, compila, imprime la IP y levanta el bridge) y `./ensayo.sh --laptop --ip <IP_DEL_ROBOT>` en la laptop (trae el token, levanta la web y corre la guía). Los pasos 1 a 4 quedan hechos por el script. La guía revisa versión, token, worker, LiDAR, sombra del brazo, ruedas, STOP y demos, y deja una bitácora con los valores medidos. Todo el flujo está en [`ENSAYO.md`](./ENSAYO.md).
 
 > [!IMPORTANT]
 > **¿Por qué `http://localhost:3000` y no la IP del robot en el navegador?** El micrófono (`getUserMedia`) solo funciona en contextos seguros: `https://` o `http://localhost`. Además, el sitio público (`https://jsconfmx26.web.app`) no sirve para el robot físico: su CSP solo permite `localhost:9000` y `127.0.0.1:9000`, y una página `https://` no puede llamar a una IP `http://` de la red local.
 
 ---
 
-## 4. Paro de emergencia
+## 4. STOP / E-stop
 
 - **Activar:**
   - Botón **STOP** fijo en la barra superior o tecla **Escape** (no actúa mientras escribes en un campo; si el panel del robot está abierto, primero lo cierra). Funciona aunque el WebSocket esté caído.
   - Botón **STOP** en `/face` (aparece siempre que el bridge está habilitado).
   - Botón **STOP** del panel del robot.
   - `make reset` en la máquina del bridge, o `printf 'x-bridge-token: %s\n' "$(cat .bridge-token)" | curl -H @- -X POST http://<IP>:9000/stop`.
-- **Efecto:** motores a 0, brazo congelado donde está (no vuelve a `home`) y E-stop enclavada. Toda ruta de movimiento responde `423 estop_latched` y la web muestra el banner «Paro de emergencia activo».
+- **Efecto:** motores a 0, brazo congelado donde está (no vuelve a `home`) y E-stop enclavada. Toda ruta de movimiento responde `423 estop_latched` y la web muestra el banner «STOP activo».
 - **Liberar:** botón «Liberar» del banner, `make release` o el mismo `curl` contra `/estop/release`.
 
 `make reset` y `make release` leen el token de `BRIDGE_TOKEN` o de `.bridge-token` y se lo pasan a `curl` por stdin.
@@ -184,6 +184,7 @@ Variables de entorno que lee `run.sh`: `BRIDGE_TOKEN`, `ROBOT_BACKEND` (explíci
 | `403 forbidden_origin` o `forbidden_host` | La página o el nombre del robot no están permitidos. Agrega el origen a `BRIDGE_ALLOWED_ORIGINS` o el nombre (por ejemplo `rosorin.local`) a `BRIDGE_ALLOWED_HOSTS`. En mock, abre `http://localhost:3000` y no la IP de la laptop. |
 | Banner «LiDAR sin datos: chasis bloqueado» | Con `ros2` no llega `/scan` desde hace más de 300 ms (o el worker murió). El brazo sigue funcionando; revisa el driver del LiDAR con `ros2 topic hz /scan`. |
 | `connected=false` en `/status` y las herramientas responden `worker_dead` | El worker no contesta el *heartbeat*. Lo más común: bridge y worker de versiones distintas. En el robot, `git pull`, `make build-robot` y reinicia `make robot`. |
+| El robot retrocede sin frenar ante algo detrás | Es lo esperado: el LiDAR del ROSOrin Pro solo cubre el frente y los lados (`lidar.uncovered: ["back"]`). La reversa manual no frena y los gestos retroceden lento. Mira detrás antes de retroceder y nunca lo hagas en una mesa. |
 | El robot no avanza aunque no hay nada enfrente | El frente está bloqueado por la sombra del brazo o por un sector ciego. Mira `lidar.front_m` en `/status`: si vale `0.0`, el sector está ciego (LiDAR tapado o sucio, o un driver que reporta el vacío como `0`/`NaN`; ver [`SECURITY.md`](./SECURITY.md#lidar-que-falla-cerrado)); si es menor a 0.28 m, el brazo cae fuera de la banda de sombra: en el robot, con `make robot` corriendo, corre `make calibrar-sombra` y reinicia `make robot` ([`SECURITY.md`](./SECURITY.md#sombra-del-brazo)). Si el frente está ciego aunque el LiDAR esté limpio, revisa la orientación: un LiDAR girado 180° necesita `robot-bridge/lidar-mount.json` (sección 3 de [`ENSAYO.md`](./ENSAYO.md)). |
 | Todo responde `423` | La E-stop está enclavada (también pasa al cerrar `run.sh` en la laptop, que manda `/stop`). Libérala con «Liberar» o `make release`. |
 | `429 rate_limited` | Más de 30 POST por segundo (ráfaga de 60). `/stop` siempre pasa. |

@@ -16,6 +16,12 @@ El robot se mueve de verdad, así que `robot-bridge` aplica estas reglas. El con
 - Si cambias el bridge a otro host (con `?bridge=` o desde el panel), la web borra el token guardado para no mandarlo a un host para el que no se emitió, salvo que la misma URL traiga uno nuevo. El panel muestra el host del bridge y avisa cuando borró el token.
 - **Nunca va en una variable `NEXT_PUBLIC_*`**, porque esas terminan en el bundle público.
 
+### La API key de Gemini
+
+- Va en `GEMINI_API_KEY` (entorno o `web/.env`), nunca en `NEXT_PUBLIC_*`. Los lanzadores la pasan al navegador una sola vez en el mismo fragmento que el token (`#token=<t>&gemini_key=<k>`): no llega al servidor de Next ni a sus logs. La web la guarda en `localStorage` como `rosorin_gemini_api_key` y la quita de la barra; `#gemini_key=reset` la borra.
+- La URL completa con el fragmento lleva el token y la key: no la proyectes. `ensayo.sh` y `demo.sh` la abren con una página local que redirige, así no aparece en la terminal ni en argumentos de procesos; `run.sh` la imprime en su terminal. `iniciar-robot.sh` se la pasa al navegador del kiosco como argumento, igual que el token.
+- `NEXT_PUBLIC_GEMINI_API_KEY` se sigue leyendo por compatibilidad (con aviso), pero queda en el bundle si compilas: no la uses.
+
 ## Origen y host
 
 - Se aceptan orígenes de loopback, `localhost`, `jsconfmx26.web.app`, `jsconfmx26.firebaseapp.com` y los que agregues en `BRIDGE_ALLOWED_ORIGINS`.
@@ -26,7 +32,7 @@ El robot se mueve de verdad, así que `robot-bridge` aplica estas reglas. El con
 
 30 POST por segundo con ráfaga de 60, global. `/stop` y `/estop/release` no cuentan.
 
-## Paro de emergencia enclavado
+## STOP / E-stop enclavada
 
 `POST /stop` detiene motores, congela el brazo donde está y bloquea todo movimiento con `423 estop_latched` hasta `POST /estop/release`. Se dispara con:
 
@@ -46,18 +52,19 @@ El bridge y `ros2_worker.py` se actualizan juntos. Un worker anterior al *heartb
 
 ## LiDAR que falla cerrado
 
+- **Cobertura: frente y lados.** En el ROSOrin Pro el LiDAR ve el frente y los costados; atrás lo tapan el chasis y los cables, y el filtro de Hiwonder recorta esa zona del `/scan`. Un sector sin ningún rayo en el scan se reporta en `0.0` y en `lidar.uncovered` (por ejemplo `["back"]`): el bridge no frena por él y lo deja fuera de `obstacle_alert`. **Riesgo aceptado a propósito por el autor:** la reversa manual (flecha ↓, «↓ Atrás», `cmd_vel` con `vx < 0`) no la frena el LiDAR, y los gestos que retroceden (`facepalm`) lo hacen lento (0.05 m/s como máximo) y por poco tiempo, también sin freno. Un obstáculo o el borde de una mesa detrás del robot no lo detienen: antes de retroceder, mira detrás. En mock el LiDAR es de 360° (`uncovered: []`).
 - Con `ros2`, si no llega un scan en más de 300 ms o el worker muere, el chasis queda bloqueado (`lidar_stale: true`).
 - Al arrancar, antes del primer scan, los 4 sectores valen `0.0` y `obstacle_alert` es `true`.
 - **Cómo lee cada rayo** (REP 117). Un valor finito dentro de `[range_min, range_max]` es un eco. `+inf` o un valor mayor que `range_max` es espacio libre («nada dentro del alcance»), así que un escenario abierto se reporta abierto (4.0 m). `NaN`, `-inf`, `0` o un valor menor que `range_min` son rayos inválidos: el sensor vio algo demasiado cerca o falló (ventana tapada o sucia).
-- **Sector ciego.** Si en un sector menos de `LIDAR_MIN_VALID_FRACTION` (0.25 por defecto) de los rayos es utilizable (eco o espacio libre), el worker lo reporta en `0.0` y el bridge lo trata como obstáculo: bloquea el avance hacia ese lado y limita `|wz|` a 0.3 rad/s. Así, un LiDAR tapado o sucio bloquea el chasis. Con `LIDAR_MIN_VALID_FRACTION=0` la revisión se apaga y el worker lo avisa en stderr.
-- **Orientación.** El worker asume REP-103 (ángulo 0 al frente, positivo a la izquierda). Si el driver o el montaje no coinciden, un offset (por ejemplo 180°) y un reflejo corrigen el scan antes de calcular los sectores y la sombra; la sección 3 de [`ensayo.sh`](./ENSAYO.md) dice cuál hace falta. Los valores salen, en este orden, de `LIDAR_ANGLE_OFFSET_DEG` y `LIDAR_FLIP` en el entorno, del archivo de cada robot `robot-bridge/lidar-mount.json` (`{"offset_deg": 180, "flip": false}`; otra ruta con `LIDAR_MOUNT_FILE`; fuera de git) y de 0° sin reflejo. Al arrancar, el worker escribe en la terminal el offset que usa y de dónde salió. Con la orientación mal, el freno protege el lado equivocado: un LiDAR girado 180° cuyo driver recorta la parte de atrás deja el sector «frente» sin rayos (ciego, bloquea el avance) y el de atrás sin freno.
+- **Sector ciego.** Si un sector tiene rayos pero menos de `LIDAR_MIN_VALID_FRACTION` (0.25 por defecto) son utilizables (eco o espacio libre), el worker lo reporta en `0.0` y el bridge lo trata como obstáculo: bloquea el avance hacia ese lado y limita `|wz|` a 0.3 rad/s. Así, un LiDAR tapado o sucio bloquea el chasis. Con `LIDAR_MIN_VALID_FRACTION=0` la revisión se apaga y el worker lo avisa en stderr.
+- **Orientación.** El worker asume REP-103 (ángulo 0 al frente, positivo a la izquierda). Si el driver o el montaje no coinciden, un offset (por ejemplo 180°) y un reflejo corrigen el scan antes de calcular los sectores y la sombra; la sección 3 de [`ensayo.sh`](./ENSAYO.md) dice cuál hace falta. Los valores salen, en este orden, de `LIDAR_ANGLE_OFFSET_DEG` y `LIDAR_FLIP` en el entorno, del archivo de cada robot `robot-bridge/lidar-mount.json` (`{"offset_deg": 180, "flip": false}`; otra ruta con `LIDAR_MOUNT_FILE`; fuera de git) y de 0° sin reflejo. Al arrancar, el worker escribe en la terminal el offset que usa y de dónde salió. Con la orientación mal, el freno protege el lado equivocado: en un LiDAR girado 180° cuyo driver recorta la parte de atrás, el «frente» queda sin rayos y el bridge dejaría de frenar justo hacia adelante. Por eso la sección 3 del ensayo confirma el frente con un objeto.
 - **Escenario abierto.** Un frente con más de 12 m vacíos se ve abierto (4.0 m) y no bloquea. El riesgo es el de cualquier LiDAR 2D: una superficie negra mate que no devuelve eco también se ve como espacio libre, así que no confíes en el freno frente a telas o mamparas negras.
 - **Drivers que no siguen REP 117.** Si tu driver reporta el espacio vacío como `0` o `NaN` en vez de `+inf`, los sectores abiertos se verán ciegos. `make calibrar-sombra` cuenta los rayos de cada tipo en el último scan y avisa si la mayoría son inválidos.
 - Con `serial` no hay LiDAR: la telemetría dice `lidar_source: "none"` y la velocidad lineal se limita a 0.15 m/s.
 
 ## Freno por eje
 
-Si un sector está a menos de 0.28 m se anula la velocidad hacia ese lado (`vx` con frente y atrás, `vy` con izquierda y derecha) y `|wz|` se limita a 0.3 rad/s. `obstacle_alert` se enciende con cualquier sector por debajo de 0.35 m. Cuando el freno cambia un comando, la respuesta trae `blocked: "braked"`.
+Si un sector está a menos de 0.28 m se anula la velocidad hacia ese lado (`vx` con frente y atrás, `vy` con izquierda y derecha) y `|wz|` se limita a 0.3 rad/s. `obstacle_alert` se enciende con cualquier sector por debajo de 0.35 m. Los sectores en `lidar.uncovered` (en el ROSOrin Pro, atrás) no frenan ni encienden `obstacle_alert`: ver «Cobertura» arriba. Cuando el freno cambia un comando, la respuesta trae `blocked: "braked"`.
 
 ## Sombra del brazo
 
@@ -65,10 +72,10 @@ El brazo está montado sobre el frente y el LiDAR lo ve. El worker descarta los 
 
 Los valores salen, en este orden, de las variables de entorno, del archivo de calibración `robot-bridge/arm-shadow.json` (otra ruta con `ARM_SHADOW_FILE`; está en `.gitignore` porque es de cada robot) y de los valores por defecto: 0.06 a 0.09 m dentro de ±20°. Los valores por defecto son estrechos y no están calibrados para tu robot: si el brazo cae fuera de la banda, el frente queda bloqueado (falla cerrado). **Calíbralo en el robot**:
 
-1. Con el bridge corriendo (`make robot`) y 50 cm despejados alrededor, corre `make calibrar-sombra` en otra terminal del robot (o `./ensayo.sh --robot --calibrar`, que levanta y apaga el bridge por ti). El script ([`calibrar_sombra.py`](../robot-bridge/scripts/calibrar_sombra.py)) pide confirmar que el área está despejada, mueve **solo el brazo** por las 12 poses más distintas de los gestos de `gestures.rs` con `POST /arm` (unos 23 s; `--todas` mide todas, unas 60), lee el `/scan` en cada pose, sin el filtro de sombra, y toma como brazo todo eco a menos de 30 cm dentro de ±90° del frente. Elige las poses por muestreo del punto más lejano: arranca en `home` y suma cada vez la pose más distinta de las ya elegidas (la pinza pesa 0.25, porque abrirla casi no cambia la silueta), así que los extremos del brazo entran primero.
+1. Con el bridge corriendo (`make robot`) y 50 cm despejados alrededor, corre `make calibrar-sombra` en otra terminal del robot (o `./ensayo.sh --robot --calibrar`, que levanta y apaga el bridge por ti). El script ([`calibrar_sombra.py`](../robot-bridge/scripts/calibrar_sombra.py)) pide confirmar que el área está despejada, mueve **solo el brazo** con `POST /arm` por las 12 poses de los gestos de `gestures.rs` que más se acercan al plano del LiDAR (unos 23 s; `--todas` mide todas, unas 60), lee el `/scan` en cada pose, sin el filtro de sombra, y toma como brazo todo eco a menos de 30 cm dentro de ±90° del frente. Para elegir las poses calcula la cinemática directa del brazo con el URDF del gemelo 3D (`ARM_CHAIN`, copiado de `Rosorin3DViewer.tsx`) y ordena cada pose por cuánto baja el brazo hacia la altura del LiDAR (`scan_clearance`). Descarta las variantes casi iguales (solo cambia la pinza) y recorre las elegidas de un lado al otro de la base. Basta con medir las poses quietas porque el movimiento entre dos poses de un gesto nunca baja más que sus extremos. Hoy entran las 3 poses de `bumblebee_sad_droop`, que son las únicas que cruzan el plano, más `bumblebee_rock_out`, `nod_yes`, `point_gemini_live`, `trash_toss`, `suspicious_inspect` y las bandejas de `gatekeeper`.
    - Si en 10 s no llega `/scan`, dice si es porque no ve ningún publicador (el driver no corre, o corre con otro `ROS_DOMAIN_ID` o `ROS_LOCALHOST_ONLY`) o porque hay publicador pero no llegan mensajes.
    - Antes de mover nada revisa qué parte del frente (±90°) cubre `/scan` con la orientación actual. Si cubre menos de la mitad y girado 180° la cubriría, ofrece guardar ese offset en `robot-bridge/lidar-mount.json` y calibrar con él. Con `--yes`, o si girar no ayuda, se detiene sin calibrar.
-2. Guarda la banda medida (con 1 cm y 2° de margen) en `robot-bridge/arm-shadow.json`. Si el LiDAR nunca ve el brazo, deja el filtro desactivado (`max_m = 0`). Si la banda llega a más de 0.25 m, no guarda nada: probablemente había algo dentro de los 30 cm.
+2. Guarda la banda medida (con 1 cm y 2° de margen) en `robot-bridge/arm-shadow.json`. Si el LiDAR nunca ve el brazo, deja el filtro desactivado (`max_m = 0`), salvo que según el modelo alguna pose cruce el plano con seguridad (más de 2 cm por debajo): en ese caso el scan no está mirando al brazo (orientación o área), así que no guarda nada. Si la banda llega a más de 0.25 m, no guarda nada: probablemente había algo dentro de los 30 cm.
 3. Reinicia el bridge (Ctrl+C y `make robot`). Al arrancar, el worker escribe en la terminal la banda que usa y de dónde salió (entorno, archivo o valores por defecto).
 4. Repite la sección 4 de [`ensayo.sh`](./ENSAYO.md) para confirmar que ningún gesto baja un sector de 0.28 m.
 
@@ -78,7 +85,7 @@ Para fijar los valores a mano, pásalos en el entorno de `make robot` (por ejemp
 
 Los dos usan [`robot-bridge/scripts/robot-common.sh`](../robot-bridge/scripts/robot-common.sh):
 
-- Abortan si existe el candado de paro de emergencia de otra app, `~/.openclaw/workspace/ESTOP_LOCK` (otra ruta con `ROSORIN_ESTOP_LOCK_FILE`). Nunca lo borran.
+- Abortan si existe el candado de E-stop de otra app, `~/.openclaw/workspace/ESTOP_LOCK` (otra ruta con `ROSORIN_ESTOP_LOCK_FILE`). Nunca lo borran.
 - Detienen `button_scan.service` y `start_app_node.service`, que ocupan `/dev/rrc`. Mientras corre el bridge, el botón físico de fábrica no actúa.
 - `start_app_node.service` es el bringup completo de Hiwonder (`bringup.launch.py`): además del controlador lanza el LiDAR, la cámara Aurora, rosbridge, el joystick e `init_pose`. Con el backend `ros2` vuelven a levantar solo `ros2 launch peripherals lidar.launch.py` y `depth_camera.launch.py`, con el entorno de `~/.zshrc` (si alguno ya corre, no lo duplican). Sin eso no hay `/scan` y el chasis queda bloqueado. `run.sh` los apaga (SIGTERM) al salir; `iniciar-robot.sh` los deja corriendo. Ninguno vuelve a arrancar `start_app_node.service` (su `init_pose` mueve el brazo): para regresar al stack de fábrica, `sudo systemctl start start_app_node`.
 - No tocan `wifi.service`.

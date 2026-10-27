@@ -22,6 +22,11 @@ pub const LIDAR_BRAKE_M: f32 = 0.28;
 pub const LIDAR_ALERT_M: f32 = 0.35;
 /// Max |wz| while any sector is below `LIDAR_BRAKE_M` (the arm sweeps when spinning).
 pub const LIDAR_BRAKE_MAX_WZ: f32 = 0.30;
+/// Gestures reversing while the back is uncovered (the LiDAR does not look there) go at most this
+/// fast...
+pub const GESTURE_BLIND_REVERSE_MPS: f32 = 0.05;
+/// ...and for at most this long per step. Manual `cmd_vel` is not limited beyond `protocol.rs`.
+pub const GESTURE_BLIND_REVERSE_MAX_MS: u64 = 800;
 /// With the `ros2` backend, scans older than this make the chassis fail closed.
 pub const LIDAR_STALE_AFTER: Duration = Duration::from_millis(300);
 /// The `serial` backend has no LiDAR: linear speed is capped instead.
@@ -43,7 +48,9 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(100);
 /// acknowledged ping is older than this, the worker is stuck: `connected=false`, chassis blocked.
 pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_millis(400);
 /// Message returned (HTTP 423 / WS error event) while the E-stop is latched.
-pub const ESTOP_MESSAGE: &str = "Paro de emergencia activo. POST /estop/release para liberar.";
+pub const ESTOP_MESSAGE: &str = "STOP activo (E-stop enclavada). POST /estop/release para liberar.";
+
+pub const LIDAR_SECTORS: [&str; 4] = ["front", "left", "right", "back"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LidarSectors {
@@ -52,15 +59,49 @@ pub struct LidarSectors {
     pub right_m: f32,
     pub back_m: f32,
     pub obstacle_alert: bool,
+    /// Sectors the LiDAR does not cover at all (no rays in the scan, e.g. the back hidden by the
+    /// chassis). Their distance arrives as 0.0 but the brake ignores them: manual reverse is free and
+    /// gestures reverse slowly (`GESTURE_BLIND_REVERSE_MPS`). A *blind* sector (rays present but
+    /// unusable: covered or dirty LiDAR) is not uncovered and still blocks.
+    #[serde(default)]
+    pub uncovered: Vec<String>,
 }
 
 impl LidarSectors {
-    pub fn min_m(&self) -> f32 {
-        self.front_m
-            .min(self.left_m)
-            .min(self.right_m)
-            .min(self.back_m)
+    pub fn covers(&self, sector: &str) -> bool {
+        !self.uncovered.iter().any(|s| s == sector)
     }
+
+    /// Closest distance among the sectors the LiDAR covers (`f32::INFINITY` if it covers none).
+    pub fn min_m(&self) -> f32 {
+        [
+            ("front", self.front_m),
+            ("left", self.left_m),
+            ("right", self.right_m),
+            ("back", self.back_m),
+        ]
+        .into_iter()
+        .filter(|(name, _)| self.covers(name))
+        .map(|(_, m)| m)
+        .fold(f32::INFINITY, f32::min)
+    }
+}
+
+/// Parses the worker's `uncovered` list. Only known sector names count, and a scan that would leave
+/// every sector uncovered is treated as covering all of them (their 0.0 then blocks).
+fn parse_uncovered(v: Option<&serde_json::Value>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for name in v.and_then(|a| a.as_array()).into_iter().flatten() {
+        if let Some(n) = name.as_str().filter(|n| LIDAR_SECTORS.contains(n)) {
+            if !out.iter().any(|s| s == n) {
+                out.push(n.to_string());
+            }
+        }
+    }
+    if out.len() == LIDAR_SECTORS.len() {
+        out.clear();
+    }
+    out
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +181,7 @@ impl Default for TelemetryState {
                 right_m: 1.76,
                 back_m: 2.10,
                 obstacle_alert: false,
+                uncovered: Vec::new(),
             },
             last_command_ms_ago: 0,
             timestamp_ms: now_ms(),
@@ -186,15 +228,17 @@ pub fn xml_escape(input: &str) -> String {
 /// Per-axis LiDAR reflex (REP-103: +x forward, +y left, +wz counter-clockwise).
 /// `vx>0` checks `front_m`, `vx<0` `back_m`, `vy>0` `left_m`, `vy<0` `right_m`;
 /// if any sector is under `LIDAR_BRAKE_M`, |wz| is limited to `LIDAR_BRAKE_MAX_WZ`.
-/// Returns the braked velocity and whether anything was clamped.
+/// Sectors listed in `uncovered` (the LiDAR does not look there) are skipped, including for the
+/// |wz| limit. Returns the braked velocity and whether anything was clamped.
 pub fn apply_lidar_brake(l: &LidarSectors, vx: f32, vy: f32, wz: f32) -> (f32, f32, f32, bool) {
     let (mut vx, mut vy, mut wz) = (vx, vy, wz);
     let mut braked = false;
-    if (vx > 0.0 && l.front_m < LIDAR_BRAKE_M) || (vx < 0.0 && l.back_m < LIDAR_BRAKE_M) {
+    let near = |sector: &str, m: f32| l.covers(sector) && m < LIDAR_BRAKE_M;
+    if (vx > 0.0 && near("front", l.front_m)) || (vx < 0.0 && near("back", l.back_m)) {
         vx = 0.0;
         braked = true;
     }
-    if (vy > 0.0 && l.left_m < LIDAR_BRAKE_M) || (vy < 0.0 && l.right_m < LIDAR_BRAKE_M) {
+    if (vy > 0.0 && near("left", l.left_m)) || (vy < 0.0 && near("right", l.right_m)) {
         vy = 0.0;
         braked = true;
     }
@@ -676,6 +720,7 @@ impl RobotController {
                     right_m: 0.0,
                     back_m: 0.0,
                     obstacle_alert: true,
+                    uncovered: Vec::new(),
                 };
             }
         }
@@ -1420,8 +1465,9 @@ impl RobotController {
 
         let ctrl = Arc::clone(self);
         tokio::spawn(async move {
+            let mut reverse_logged = false;
             for step in &seq.steps {
-                if !ctrl.gesture_step(my_epoch, step) {
+                if !ctrl.gesture_step(my_epoch, step, &seq.name, &mut reverse_logged) {
                     return;
                 }
                 let mut remaining = step.duration_ms as u64;
@@ -1445,21 +1491,36 @@ impl RobotController {
     /// One gesture step, atomically checked against the latch and the gesture epoch
     /// (returns false if the gesture was cancelled). The velocity is then kept alive by the
     /// tick resend until the step ends, unless the gesture is cancelled first.
-    fn gesture_step(&self, epoch: u64, step: &GestureStep) -> bool {
+    fn gesture_step(
+        &self,
+        epoch: u64,
+        step: &GestureStep,
+        gesture: &str,
+        reverse_logged: &mut bool,
+    ) -> bool {
         let mut gate = lock(&self.gate);
         if !gate.is_current(epoch) {
             return false;
         }
         self.apply_arm_locked(step.duration_ms, &step.servos);
         if let Some((vx, vy, wz)) = step.velocity {
-            let out = self.apply_velocity_locked(
-                &mut gate,
-                vx,
-                vy,
-                wz,
-                Some(step.duration_ms as u64 + 100),
-                true,
-            );
+            let mut vx = vx;
+            let mut duration_ms = step.duration_ms as u64 + 100;
+            let back_uncovered =
+                self.lidar_source != LidarSource::None && !lock(&self.state).lidar.covers("back");
+            if vx < 0.0 && back_uncovered {
+                // Nothing senses behind the robot: reverse slowly and briefly.
+                vx = vx.max(-GESTURE_BLIND_REVERSE_MPS);
+                duration_ms = duration_ms.min(GESTURE_BLIND_REVERSE_MAX_MS);
+                if !*reverse_logged {
+                    info!(
+                        "Gesto {}: el LiDAR no cubre atrás; reversa limitada a {:.2} m/s y {} ms",
+                        gesture, GESTURE_BLIND_REVERSE_MPS, GESTURE_BLIND_REVERSE_MAX_MS
+                    );
+                    *reverse_logged = true;
+                }
+            }
+            let out = self.apply_velocity_locked(&mut gate, vx, vy, wz, Some(duration_ms), true);
             let (ax, ay, aw) = out.applied;
             gate.gesture_velocity_epoch = is_moving(ax, ay, aw).then_some(epoch);
         }
@@ -1817,6 +1878,8 @@ fn handle_worker_line(
                 if let Some(b) = v.get("back_m").and_then(|n| n.as_f64()) {
                     st.lidar.back_m = (b as f32).clamp(0.0, 12.0);
                 }
+                // An older worker sends no `uncovered`: every sector counts (fail closed).
+                st.lidar.uncovered = parse_uncovered(v.get("uncovered"));
                 st.lidar.obstacle_alert = st.lidar.min_m() < LIDAR_ALERT_M;
             }
             *lock(last_scan) = Some(Instant::now());
@@ -2003,6 +2066,7 @@ mod tests {
             right_m: 2.0,
             back_m: 2.0,
             obstacle_alert: false,
+            uncovered: Vec::new(),
         };
         assert_eq!(
             apply_lidar_brake(&open, 0.2, 0.2, 0.8),
@@ -2123,6 +2187,111 @@ mod tests {
         assert_eq!(applied.applied, (0.0, 0.0, 0.0));
         assert_eq!(applied.blocked, Some(BlockReason::WorkerDead));
         assert_eq!(ctrl.driver_block(), Some(BlockReason::WorkerDead));
+    }
+
+    #[test]
+    fn test_uncovered_sector_is_ignored_by_brake_and_alert() {
+        let back_uncovered = LidarSectors {
+            front_m: 2.0,
+            left_m: 2.0,
+            right_m: 2.0,
+            back_m: 0.0,
+            obstacle_alert: false,
+            uncovered: vec!["back".into()],
+        };
+        // Reverse is not braked and the 0.0 does not cap |wz|
+        assert_eq!(
+            apply_lidar_brake(&back_uncovered, -0.2, 0.0, 0.8),
+            (-0.2, 0.0, 0.8, false)
+        );
+        assert_eq!(back_uncovered.min_m(), 2.0);
+        // The covered sectors still brake
+        let front_close = LidarSectors {
+            front_m: 0.2,
+            ..back_uncovered.clone()
+        };
+        assert_eq!(
+            apply_lidar_brake(&front_close, 0.1, 0.0, 0.0),
+            (0.0, 0.0, 0.0, true)
+        );
+        // Only known names count, and "everything uncovered" means nothing is
+        let v: serde_json::Value = serde_json::json!(["back", "back", "up"]);
+        assert_eq!(parse_uncovered(Some(&v)), vec!["back".to_string()]);
+        let all: serde_json::Value = serde_json::json!(["front", "left", "right", "back"]);
+        assert!(parse_uncovered(Some(&all)).is_empty());
+        assert!(parse_uncovered(None).is_empty());
+    }
+
+    #[test]
+    fn test_uncovered_back_allows_manual_reverse_but_blind_back_brakes() {
+        let (ctrl, _rx) = RobotController::new_with_test_driver(LidarSource::Ros2, 600);
+        ctrl.feed_worker_line(
+            r#"{"event":"lidar","front_m":1.5,"left_m":1.2,"right_m":1.1,"back_m":0.0,"uncovered":["back"]}"#,
+        );
+        let snap = ctrl.snapshot();
+        assert_eq!(snap.lidar.uncovered, vec!["back".to_string()]);
+        assert!(!snap.lidar.obstacle_alert);
+        let out = ctrl
+            .set_velocity_with_duration(-0.15, 0.0, 0.0, Some(500))
+            .unwrap();
+        assert_eq!(out.applied, (-0.15, 0.0, 0.0));
+        assert_eq!(out.blocked, None);
+
+        // Same 0.0 without `uncovered` (blind back or an older worker): reverse is braked
+        ctrl.feed_worker_line(
+            r#"{"event":"lidar","front_m":1.5,"left_m":1.2,"right_m":1.1,"back_m":0.0}"#,
+        );
+        let snap = ctrl.snapshot();
+        assert!(snap.lidar.uncovered.is_empty());
+        assert!(snap.lidar.obstacle_alert);
+        let out = ctrl
+            .set_velocity_with_duration(-0.15, 0.0, 0.0, Some(500))
+            .unwrap();
+        assert_eq!(out.applied, (0.0, 0.0, 0.0));
+        assert_eq!(out.blocked, Some(BlockReason::Braked));
+    }
+
+    #[test]
+    fn test_gesture_reverse_is_slow_and_short_when_back_is_uncovered() {
+        let (ctrl, _rx) = RobotController::new_with_test_driver(LidarSource::Ros2, 600);
+        ctrl.feed_worker_line(
+            r#"{"event":"lidar","front_m":1.5,"left_m":1.2,"right_m":1.1,"back_m":0.0,"uncovered":["back"]}"#,
+        );
+        let step = GestureStep {
+            duration_ms: 1500,
+            servos: Vec::new(),
+            velocity: Some((-0.14, 0.05, 0.2)),
+        };
+        let epoch = {
+            let mut gate = lock(&ctrl.gate);
+            ctrl.cancel_gesture_locked(&mut gate)
+        };
+        let mut logged = false;
+        assert!(ctrl.gesture_step(epoch, &step, "facepalm", &mut logged));
+        assert!(logged);
+        let snap = ctrl.snapshot();
+        assert_eq!(
+            (snap.odometry.vx, snap.odometry.vy, snap.odometry.wz),
+            (-GESTURE_BLIND_REVERSE_MPS, 0.05, 0.2)
+        );
+        let deadline = lock(&ctrl.gate)
+            .deadline
+            .expect("reverse step has a deadline");
+        assert!(
+            deadline.saturating_duration_since(Instant::now())
+                <= Duration::from_millis(GESTURE_BLIND_REVERSE_MAX_MS)
+        );
+
+        // With the back covered (mock, 360°) the gesture reverses as written
+        let ctrl = mock();
+        let epoch = {
+            let mut gate = lock(&ctrl.gate);
+            ctrl.cancel_gesture_locked(&mut gate)
+        };
+        let mut logged = false;
+        assert!(ctrl.gesture_step(epoch, &step, "facepalm", &mut logged));
+        assert!(!logged);
+        assert_eq!(ctrl.snapshot().odometry.vx, -0.14);
     }
 
     #[test]

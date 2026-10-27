@@ -125,7 +125,7 @@ export function TopNav({ robot, liteMode: propLite }: TopNavProps) {
       ? 'El bridge pide token'
       : bridge.connected
         ? bridge.estopLatched
-          ? 'Robot en paro'
+          ? 'STOP activo'
           : 'Robot conectado'
         : bridge.enabled
           ? 'Robot sin conexión'
@@ -204,9 +204,9 @@ export function TopNav({ robot, liteMode: propLite }: TopNavProps) {
                   type="button"
                   onClick={() => void handleEmergencyStop()}
                   disabled={stopState.busy}
-                  aria-label="Paro de emergencia del robot (tecla Escape)"
+                  aria-label="STOP del robot (tecla Escape)"
                   aria-keyshortcuts={ESTOP_KEY}
-                  title="Paro de emergencia (Esc)"
+                  title="STOP (Esc)"
                   className="flex items-center gap-1.5 rounded-xl bg-[#D93025] px-3 py-1.5 text-xs font-extrabold text-white hover:bg-[#B3261E] disabled:opacity-50"
                 >
                   STOP

@@ -48,7 +48,7 @@ Seguridad:
   - En --mock el puente escucha solo en 127.0.0.1.
   - La URL de la web se imprime con #token=... (fragmento: no llega al servidor ni a sus logs);
     la web lo guarda y lo quita de la barra. Los curl internos pasan el token por stdin, no en argv.
-  - Si existe ~/.openclaw/workspace/ESTOP_LOCK (paro de emergencia de otra app) no arranca con hardware.
+  - Si existe ~/.openclaw/workspace/ESTOP_LOCK (candado de E-stop de otra app) no arranca con hardware.
 EOF
 }
 
@@ -241,7 +241,7 @@ curl_bridge() {
   rosorin_curl_with_token -s -m 2 -X POST "http://${BRIDGE_HOST_TARGET}:${BRIDGE_PORT}$1"
 }
 
-# 4. En el robot físico: abortar si hay un paro de emergencia de otra app
+# 4. En el robot físico: abortar si hay un STOP (candado de E-stop) de otra app
 #    (~/.openclaw/workspace/ESTOP_LOCK, nunca se borra aquí) y detener button_scan.service y
 #    start_app_node.service, que acaparan /dev/rrc. Con ros2, levantar de nuevo solo el LiDAR y la
 #    cámara (start_app_node los lanzaba). Ver robot-bridge/scripts/robot-common.sh.
@@ -382,20 +382,25 @@ if [ -z "$REMOTE_ROBOT_IP" ] && [ "$ROBOT_BACKEND" != "mock" ]; then
   export NEXT_PUBLIC_LITE_MODE="1"
 fi
 
-# El token viaja una sola vez en el fragmento (#token=): el navegador no lo manda al servidor de
-# Next ni queda en sus logs; la web lo guarda en localStorage y lo quita de la barra.
-# Formato: http://localhost:3000/#token=<t>  ·  con robot: http://localhost:3000/?bridge=http://IP:9000#token=<t>
+# El token y la API key de Gemini (GEMINI_API_KEY del entorno o de web/.env) viajan una sola vez
+# en el fragmento (#token=…&gemini_key=…): el navegador no lo manda al servidor de Next ni queda en
+# sus logs; la web los guarda en localStorage y los quita de la barra.
+# Formato: http://localhost:3000/#token=<t>&gemini_key=<k>  ·  con robot: http://localhost:3000/?bridge=http://IP:9000#token=<t>&gemini_key=<k>
 WEB_PATH="/"
 if [ -n "$REMOTE_ROBOT_IP" ]; then
   WEB_PATH="/?bridge=${BRIDGE_PUBLIC_URL}"
 fi
+GEMINI_KEY="$(rosorin_gemini_key "$ROOT_DIR")"
+WEB_FRAGMENT_PARAMS=()
+[ -n "$BRIDGE_TOKEN" ] && WEB_FRAGMENT_PARAMS+=("token=${BRIDGE_TOKEN}")
+[ -n "$GEMINI_KEY" ] && WEB_FRAGMENT_PARAMS+=("gemini_key=${GEMINI_KEY}")
 WEB_FRAGMENT=""
-if [ -n "$BRIDGE_TOKEN" ]; then
-  WEB_FRAGMENT="#token=${BRIDGE_TOKEN}"
+if [ ${#WEB_FRAGMENT_PARAMS[@]} -gt 0 ]; then
+  WEB_FRAGMENT="#$(IFS='&'; echo "${WEB_FRAGMENT_PARAMS[*]}")"
 fi
 
 echo "================================================================"
-echo " Abre esta URL (incluye el token del puente; no la proyectes):"
+echo " Abre esta URL (incluye el token y la API key; no la proyectes):"
 echo "   http://localhost:${WEB_PORT}${WEB_PATH}${WEB_FRAGMENT}"
 echo " Hub Ligero (Sin 3D) : http://localhost:${WEB_PORT}/robot"
 echo " Bridge Hardware     : ${BRIDGE_PUBLIC_URL}"

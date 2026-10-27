@@ -11,7 +11,7 @@ Repositorio de la charla **«De Web a Physical AI: agentes físicos con Gemini L
 
 - **Gemini Live (`gemini-3.8-live`)** por WebSocket desde el navegador, con herramientas que devuelven al modelo el resultado real de cada movimiento.
 - **Gemelo digital en Three.js** armado con las 16 mallas `.stl` del fabricante.
-- **Bridge en Rust (`robot-bridge`, puerto 9000)** con loop de control de 40 Hz, freno por LiDAR, paro de emergencia enclavado y token fuera de `localhost`.
+- **Bridge en Rust (`robot-bridge`, puerto 9000)** con loop de control de 40 Hz, freno por LiDAR, STOP (E-stop enclavada) y token fuera de `localhost`.
 - **Hiwonder ROSOrin Pro** con Jetson Orin Nano, ROS 2 Humble y un STM32 por UART a 1 Mbps.
 
 ## Pruébalo
@@ -37,7 +37,7 @@ Abre la URL que imprime `run.sh` (`http://localhost:3000/`). Para conectar tu la
 | [`docs/COMMANDS.md`](./docs/COMMANDS.md) | Comandos de `make`, `run.sh`, `traer-token.sh`, `ensayo.sh`, `demo.sh`, `iniciar-robot.sh` y scripts de la web. |
 | [`docs/WEB.md`](./docs/WEB.md) | Sitio público, rutas de la web y gestos del simulador. |
 | [`docs/DEMOS.md`](./docs/DEMOS.md) | Las 4 demos (Repo Roaster, Gatekeeper CI/CD, Bug Hunter y Bumblebee Radio), los MP3 y los props imprimibles. |
-| [`docs/SECURITY.md`](./docs/SECURITY.md) | Token, orígenes, paro de emergencia, LiDAR que falla cerrado y operación en el robot. |
+| [`docs/SECURITY.md`](./docs/SECURITY.md) | Token, orígenes, STOP (E-stop), LiDAR que falla cerrado y operación en el robot. |
 | [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Capas, tiempos, por qué Rust y la pantalla `/face`. |
 | [`docs/RUST_FOR_WEB_DEVS.md`](./docs/RUST_FOR_WEB_DEVS.md) | Cómo funciona `robot-bridge` explicado desde Node.js. |
 | [`docs/API.md`](./docs/API.md) · [`docs/openapi.yaml`](./docs/openapi.yaml) | Contrato HTTP y WebSocket del bridge, errores y herramientas de Gemini. |

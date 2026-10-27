@@ -12,7 +12,11 @@
  *   variables: those end up in the public bundle.
  * - On the public site (any non-local hostname) the page does not contact
  *   localhost:9000 until the presenter enables it (button, `?bridge=` or a token).
+ * - `#gemini_key=<k>`, handed over by the launchers next to the token, is consumed here too
+ *   (see api-key.ts), so any page that touches the bridge also strips the key from the bar.
  */
+import { consumeApiKeyFromUrl } from './api-key';
+
 export const BRIDGE_URL_STORAGE_KEY = 'ROSORIN_BRIDGE_URL';
 export const BRIDGE_TOKEN_STORAGE_KEY = 'ROSORIN_BRIDGE_TOKEN';
 export const BRIDGE_ENABLED_STORAGE_KEY = 'ROSORIN_BRIDGE_ENABLED';
@@ -108,6 +112,7 @@ function storeBridgeUrl(next: string | null, keepToken: boolean): boolean {
 export function consumeBridgeParamsFromUrl() {
   if (typeof window === 'undefined' || urlParamsConsumed) return;
   urlParamsConsumed = true;
+  consumeApiKeyFromUrl();
   let url: URL;
   try {
     url = new URL(window.location.href);

@@ -76,6 +76,12 @@ export default function RobotLiteHubPage() {
           e.preventDefault();
           moveChassis(0, -0.15, 0);
           break;
+        case 'z':
+          moveChassis(0, 0, 0.45);
+          break;
+        case 'x':
+          moveChassis(0, 0, -0.45);
+          break;
         case 'f':
           triggerGesture('facepalm', 'manual');
           break;

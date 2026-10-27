@@ -28,7 +28,7 @@ if [ -e "/dev/rrc" ] || [ -e "/dev/ttyACM0" ] || [ -f "/opt/ros/humble/setup.bas
   ON_ROBOT=true
 fi
 
-# 0. Paro de emergencia de otra app: no arrancar nada (ni abrir el rostro) hasta que se libere.
+# 0. STOP (candado de E-stop) de otra app: no arrancar nada (ni abrir el rostro) hasta que se libere.
 if [ "$ON_ROBOT" = true ]; then
   rosorin_check_estop_lock || exit 1
 fi
@@ -88,8 +88,9 @@ for _ in {1..30}; do
 done
 
 # 6. Abrir el Rostro Cinético (/face) en la pantalla de 7" del robot (o en Mac).
-#    El token va una sola vez en el fragmento (#token=), que no llega al servidor ni a sus logs:
-#    la web lo guarda y lo quita de la barra.
+#    El token (y la API key de Gemini, si hay GEMINI_API_KEY) van una sola vez en el fragmento
+#    (#token=…&gemini_key=…), que no llega al servidor ni a sus logs: la web los guarda y los quita
+#    de la barra.
 export DISPLAY="${DISPLAY:-:0}"
 if [ -f "/run/user/1000/gdm/Xauthority" ]; then
   export XAUTHORITY="/run/user/1000/gdm/Xauthority"
@@ -98,6 +99,8 @@ elif [ -f "$HOME/.Xauthority" ]; then
 fi
 FACE_URL="http://localhost:3000/face"
 FACE_URL_WITH_TOKEN="${FACE_URL}#token=${BRIDGE_TOKEN}"
+GEMINI_KEY="$(rosorin_gemini_key "$ROOT_DIR")"
+[ -n "$GEMINI_KEY" ] && FACE_URL_WITH_TOKEN="${FACE_URL_WITH_TOKEN}&gemini_key=${GEMINI_KEY}"
 
 if [ -x "/usr/local/bin/firefox" ]; then
   setsid /usr/local/bin/firefox --kiosk "$FACE_URL_WITH_TOKEN" >"$LOG_DIR/firefox-face.log" 2>&1 < /dev/null &

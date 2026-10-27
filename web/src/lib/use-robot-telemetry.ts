@@ -355,13 +355,13 @@ export function useRobotTelemetry() {
     try {
       await client.emergencyStop();
       setBridge((prev) => ({ ...prev, estopLatched: true }));
-      return { ok: true, target: 'robot', message: 'Paro de emergencia enviado al robot.' };
+      return { ok: true, target: 'robot', message: 'STOP enviado al robot.' };
     } catch (err) {
       const { code, message } = describeBridgeError(err);
       console.warn(`[robot] stop falló (${code}): ${message}`);
       if (code === 'estop_latched') {
         setBridge((prev) => (prev.estopLatched ? prev : { ...prev, estopLatched: true }));
-        return { ok: true, target: 'robot', message: 'El paro de emergencia ya estaba activo.' };
+        return { ok: true, target: 'robot', message: 'El STOP ya estaba activo.' };
       }
       if (code === 'worker_dead') {
         // The bridge accepted /stop and latched the E-stop, but the robot driver is not answering.
@@ -369,7 +369,7 @@ export function useRobotTelemetry() {
         return {
           ok: true,
           target: 'robot',
-          message: 'Paro enviado, pero el control del robot no responde: si sigue moviéndose, apágalo.',
+          message: 'STOP enviado, pero el control del robot no responde: si sigue moviéndose, apágalo.',
         };
       }
       return { ok: false, target: 'robot', code, message };

@@ -1,9 +1,17 @@
+export type LidarSectorName = 'front' | 'left' | 'right' | 'back';
+
 export interface LidarSectors {
   front_m: number;
   left_m: number;
   right_m: number;
   back_m: number;
   obstacle_alert: boolean;
+  /**
+   * Sectors the LiDAR has no rays in at all (on the ROSOrin Pro the chassis and cables cover the
+   * rear: `["back"]`). They read 0.0 but the bridge does not brake on them and leaves them out of
+   * `obstacle_alert`. Absent on older bridges and in mock (360°).
+   */
+  uncovered?: LidarSectorName[];
 }
 
 export interface OdometryState {

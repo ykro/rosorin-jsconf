@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { TelemetryState } from '@/lib/types';
+import { isSectorUncovered } from '@/lib/lidar';
 import { shouldIgnoreShortcut } from '@/lib/keyboard';
 import { ViewerErrorBoundary } from './ViewerErrorBoundary';
 
@@ -265,6 +266,14 @@ function Rosorin3DViewerScene({
           setLastKeyPressed('Strafe Derecha');
           move?.(0, -0.15, 0);
           break;
+        case 'z':
+          setLastKeyPressed('Giro Izquierda');
+          move?.(0, 0, 0.45);
+          break;
+        case 'x':
+          setLastKeyPressed('Giro Derecha');
+          move?.(0, 0, -0.45);
+          break;
         case 'f':
           setLastKeyPressed('Gesto: Facepalm');
           trigger?.('facepalm');
@@ -389,7 +398,8 @@ function Rosorin3DViewerScene({
     const baseFootprint = new THREE.Group();
     rosWorld.add(baseFootprint);
 
-    // 360° LiDAR Safety Perimeter Ring (radius = 0.25m on floor around robot)
+    // LiDAR safety perimeter ring (radius 0.25 m on the floor). 360° in mock; with the real robot an
+    // uncovered rear (telemetry lidar.uncovered) leaves a gap behind the robot.
     const lidarRingMat = new THREE.MeshBasicMaterial({
       color: 0x0284c7,
       side: THREE.DoubleSide,
@@ -399,6 +409,7 @@ function Rosorin3DViewerScene({
     const lidarRing = new THREE.Mesh(new THREE.RingGeometry(0.242, 0.252, 64), lidarRingMat);
     lidarRing.position.set(0, 0, 0.003);
     baseFootprint.add(lidarRing);
+    let lidarRingRearGap = false;
 
     // Rotating LiDAR Scan Sector Fan on floor
     const lidarBeamMat = new THREE.MeshBasicMaterial({
@@ -794,6 +805,16 @@ function Rosorin3DViewerScene({
       lidarJoint.pivot.rotation.z += 4.8 * dt;
       lidarBeam.rotation.z += 4.8 * dt;
 
+      const rearGap = isSectorUncovered(st.lidar, 'back');
+      if (rearGap !== lidarRingRearGap) {
+        lidarRingRearGap = rearGap;
+        lidarRing.geometry.dispose();
+        // Sector "back" is |angle| > 135°: the covered arc runs from -135° to +135° (front = +x).
+        lidarRing.geometry = rearGap
+          ? new THREE.RingGeometry(0.242, 0.252, 64, 1, (-3 * Math.PI) / 4, (3 * Math.PI) / 2)
+          : new THREE.RingGeometry(0.242, 0.252, 64);
+      }
+
       const frontDist = st.lidar?.front_m ?? 1.42;
       const isAlert = frontDist < 0.28 || st.lidar?.obstacle_alert;
       lidarRingMat.color.setHex(isAlert ? 0xdc2626 : 0x0284c7);
@@ -1016,6 +1037,12 @@ function Rosorin3DViewerScene({
                 ↑↓←→
               </kbd>{' '}
               Ruedas
+            </span>
+            <span>
+              <kbd className="rounded border border-[#DADCE0] bg-[#F8F9FA] px-1.5 py-0.5 font-mono text-xs font-semibold text-[#202124]">
+                Z / X
+              </kbd>{' '}
+              Giro
             </span>
           </div>
 

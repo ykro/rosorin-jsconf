@@ -2,6 +2,7 @@
 
 import React, { useRef, useState } from 'react';
 import type { TelemetryState } from '@/lib/types';
+import { isSectorUncovered } from '@/lib/lidar';
 
 interface HardwareControlPanelProps {
   telemetry: TelemetryState;
@@ -187,7 +188,7 @@ export function HardwareControlPanel({
                   Mover Ruedas
                 </h2>
               </div>
-              <span className="font-mono text-xs text-[#5F6368]">Flechas ↑↓←→</span>
+              <span className="font-mono text-xs text-[#5F6368]">Flechas ↑↓←→ · Giro Z / X</span>
             </div>
 
             <div className="grid grid-cols-3 gap-2.5">
@@ -196,7 +197,7 @@ export function HardwareControlPanel({
                 onClick={() => onMoveChassis?.(0, 0, 0.45)}
                 className="h-12 rounded-xl border border-[#DADCE0] bg-[#F8F9FA] text-sm font-bold text-[#202124] transition-colors hover:border-[#1A73E8] hover:bg-[#E8F0FE] hover:text-[#1A73E8] active:scale-95"
               >
-                Giro Izq
+                Giro Izq (Z)
               </button>
               <button
                 type="button"
@@ -210,7 +211,7 @@ export function HardwareControlPanel({
                 onClick={() => onMoveChassis?.(0, 0, -0.45)}
                 className="h-12 rounded-xl border border-[#DADCE0] bg-[#F8F9FA] text-sm font-bold text-[#202124] transition-colors hover:border-[#1A73E8] hover:bg-[#E8F0FE] hover:text-[#1A73E8] active:scale-95"
               >
-                Giro Der
+                Giro Der (X)
               </button>
 
               <button
@@ -245,6 +246,11 @@ export function HardwareControlPanel({
               </button>
               <div />
             </div>
+            {isSectorUncovered(telemetry.lidar, 'back') && (
+              <p className="mt-3 rounded-xl bg-[#FEF7E0] px-3 py-2 text-xs font-bold text-[#B06000]">
+                Atrás sin LiDAR (lo tapan el chasis y los cables): la reversa no frena. Mira detrás del robot.
+              </p>
+            )}
           </section>
 
           {/* 2. Expressive Gestures */}

@@ -22,7 +22,7 @@ export function ApiKeyCollapsible() {
       const source = getApiKeySource();
       setSourceLabel(source);
       setHasKey(source !== 'none');
-      setKeyInput(source === 'browser' ? getStoredApiKey() : '');
+      setKeyInput(source === 'browser' || source === 'launcher' ? getStoredApiKey() : '');
     };
     syncKeyState();
     window.addEventListener('storage', syncKeyState);
@@ -74,11 +74,13 @@ export function ApiKeyCollapsible() {
                 : 'bg-[#FEF7E0] text-[#B06000]'
             }`}
           >
-            {sourceLabel === 'browser'
-              ? 'Cargada en navegador (localStorage)'
-              : sourceLabel === 'env'
-                ? 'Cargada desde .env'
-                : 'No configurada — clic para ingresar en navegador'}
+            {sourceLabel === 'launcher'
+              ? 'Cargada desde GEMINI_API_KEY (.env)'
+              : sourceLabel === 'browser'
+                ? 'Cargada en navegador (localStorage)'
+                : sourceLabel === 'env'
+                  ? 'Cargada desde NEXT_PUBLIC_GEMINI_API_KEY (desaconsejado)'
+                  : 'No configurada — clic para ingresar en navegador'}
           </span>
         </div>
         <span className="font-mono text-xs font-bold text-[#5F6368]">
@@ -92,7 +94,9 @@ export function ApiKeyCollapsible() {
           className="border-t border-[#DADCE0] bg-[#F8F9FA] px-4 py-3.5"
         >
           <p className="text-xs text-[#5F6368]">
-            Se lee de <code className="font-mono text-[#202124]">.env.local</code> en desarrollo o se guarda únicamente en el{' '}
+            Define <code className="font-mono text-[#202124]">GEMINI_API_KEY</code> en{' '}
+            <code className="font-mono text-[#202124]">web/.env</code> y <code className="font-mono text-[#202124]">run.sh</code> la
+            trae sola en el fragmento de la URL, o pégala aquí. Se guarda únicamente en el{' '}
             <code className="font-mono text-[#202124]">localStorage</code> de tu navegador (nunca se sube al repositorio ni al servidor).
           </p>
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
@@ -113,7 +117,7 @@ export function ApiKeyCollapsible() {
             >
               {savedNotice ? '✓ Guardada' : 'Guardar en navegador'}
             </button>
-            {sourceLabel === 'browser' && (
+            {(sourceLabel === 'browser' || sourceLabel === 'launcher') && (
               <button
                 type="button"
                 onClick={handleClear}

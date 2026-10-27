@@ -114,7 +114,7 @@ export const EMBODIED_TOOLS: FunctionDeclaration[] = [
   {
     name: 'move_chassis',
     description:
-      'Drive the ROSOrin Pro Mecanum omnidirectional chassis (forward, back, strafe left/right, or spin). Protected by LiDAR safety reflex.',
+      'Drive the ROSOrin Pro Mecanum omnidirectional chassis (forward, back, strafe left/right, or spin). Forward and sideways moves are protected by the LiDAR safety reflex; the LiDAR does not see behind the robot, so moving back is not braked.',
     parameters: {
       type: Type.OBJECT,
       properties: {

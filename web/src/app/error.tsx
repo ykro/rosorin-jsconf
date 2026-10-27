@@ -22,7 +22,7 @@ export default function RouteError({ error, reset }: { error: Error & { digest?:
   const handleStop = async () => {
     try {
       await new RobotBridgeClient().emergencyStop();
-      setStopNotice('Paro de emergencia enviado al robot.');
+      setStopNotice('STOP enviado al robot.');
     } catch (err) {
       setStopNotice(describeBridgeError(err).message);
     }

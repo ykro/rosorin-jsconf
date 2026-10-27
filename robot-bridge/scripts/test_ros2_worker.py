@@ -128,6 +128,41 @@ class LidarSectorTests(unittest.TestCase):
         self.assertAlmostEqual(sectors["front_m"], 3.0)
         self.assertNotIn("front", sectors["blind"])
 
+    def cropped_scan(self, value=2.0):
+        # This robot: LiDAR turned 180° and the driver filter keeps only 72°..291° raw, so with
+        # offset 180 the robot's back has no rays at all.
+        return SimpleNamespace(
+            angle_min=math.radians(72.0), angle_increment=math.radians(0.9), range_min=0.1,
+            range_max=10.0, ranges=[value] * 244,
+        )
+
+    def sectors_with_offset_180(self, scan, min_valid_fraction=0.25):
+        old = worker.LIDAR_ANGLE_OFFSET_DEG
+        worker.LIDAR_ANGLE_OFFSET_DEG = 180.0
+        try:
+            return worker.compute_lidar_sectors(scan, 0.12, 35.0, 0.06, min_valid_fraction)
+        finally:
+            worker.LIDAR_ANGLE_OFFSET_DEG = old
+
+    def test_sector_cropped_out_of_the_scan_is_uncovered_not_blind(self):
+        sectors = self.sectors_with_offset_180(self.cropped_scan())
+        # 0.0 so a bridge that does not know `uncovered` fails closed
+        self.assertEqual(sectors["back_m"], 0.0)
+        self.assertEqual(sectors["uncovered"], ["back"])
+        self.assertNotIn("back", sectors["blind"])
+        self.assertAlmostEqual(sectors["front_m"], 2.0)
+        # Uncovered does not depend on the blind check
+        sectors = self.sectors_with_offset_180(self.cropped_scan(), min_valid_fraction=0.0)
+        self.assertEqual(sectors["uncovered"], ["back"])
+
+    def test_covered_lidar_is_blind_not_uncovered(self):
+        # Rays present but all invalid (hand on the LiDAR): blind, never uncovered
+        sectors = self.sectors_with_offset_180(self.cropped_scan(math.nan))
+        self.assertEqual(sectors["blind"], ["front", "left", "right"])
+        self.assertEqual(sectors["uncovered"], ["back"])
+        sectors = worker.compute_lidar_sectors(make_scan({}, default=0.0))
+        self.assertEqual(sectors["uncovered"], [])
+
     def test_min_valid_fraction_zero_disables_blind_check(self):
         scan = make_scan({}, default=math.nan)
         sectors = worker.compute_lidar_sectors(scan, 0.12, 35.0, 0.06, 0.0)

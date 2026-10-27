@@ -39,7 +39,7 @@ Cada petición pasa, de afuera hacia adentro, por: `Host` y `Origin` → CORS �
 Los errores que genera el bridge son JSON:
 
 ```json
-{ "status": "estop_latched", "message": "Paro de emergencia activo. POST /estop/release para liberar." }
+{ "status": "estop_latched", "message": "STOP activo (E-stop enclavada). POST /estop/release para liberar." }
 ```
 
 | HTTP | `status` | Cuándo |
@@ -64,7 +64,7 @@ Otros errores los produce `axum` antes de llegar al handler y su cuerpo es **tex
 | `404` | Ruta inexistente | vacío |
 | `405` | Método equivocado (por ejemplo `GET /stop`) | vacío |
 
-### Paro de emergencia enclavado
+### STOP / E-stop enclavada
 
 `POST /stop` enclava la E-stop. Mientras está enclavada, estas rutas responden `423 estop_latched`: `/cmd_vel`, `/arm`, `/servo/jog`, `/arm/jog`, `/gesture`, `/scene/reset` y `/buzzer`. Siguen funcionando `/hud`, `/rgb`, `/simulate/lidar`, `/status`, `/camera/frame` y `/ws`. Solo `POST /estop/release` la libera; el watchdog no la toca.
 
@@ -143,7 +143,7 @@ Devuelve la telemetría actual. Ejemplo real del backend mock recién arrancado:
   "hud_headline": "LISTO EN ESCENARIO",
   "hud_subtext": "ROSOrin Pro · Gemini Live",
   "odometry": { "x_m": 0.0, "y_m": 0.0, "yaw_rad": 0.0, "vx": 0.0, "vy": 0.0, "wz": 0.0 },
-  "lidar": { "front_m": 1.42, "left_m": 1.85, "right_m": 1.76, "back_m": 2.1, "obstacle_alert": false },
+  "lidar": { "front_m": 1.42, "left_m": 1.85, "right_m": 1.76, "back_m": 2.1, "obstacle_alert": false, "uncovered": [] },
   "last_command_ms_ago": 1127,
   "timestamp_ms": 1793056719929,
   "estop_latched": false,
@@ -162,9 +162,10 @@ Devuelve la telemetría actual. Ejemplo real del backend mock recién arrancado:
 - `linear_x` y `linear_y` se recortan a `±0.25 m/s` y `angular_z` a `±0.8 rad/s`. Con el backend `serial` (sin LiDAR) las lineales se recortan a `±0.15 m/s`.
 - `duration_ms` se recorta a `100..2500`. Si no lo mandas, vale lo mismo que el watchdog (`CMD_VEL_WATCHDOG_MS`, 600 ms por defecto). Al vencer, el chasis se detiene; para moverte más tiempo, manda otro comando antes.
 - Mientras el comando está vigente, el loop reenvía la velocidad al driver cada ~100 ms. El worker de ROS 2 tiene su propio watchdog de 500 ms: si deja de recibir comandos, detiene los motores.
-- **Freno por eje** (al recibir el comando y en cada tick de 40 Hz): `vx > 0` se anula si `front_m < 0.28`, `vx < 0` si `back_m < 0.28`, `vy > 0` si `left_m < 0.28` y `vy < 0` si `right_m < 0.28`. Si cualquier sector está por debajo de 0.28 m, `|angular_z|` se limita a 0.3.
+- **Freno por eje** (al recibir el comando y en cada tick de 40 Hz): `vx > 0` se anula si `front_m < 0.28`, `vx < 0` si `back_m < 0.28`, `vy > 0` si `left_m < 0.28` y `vy < 0` si `right_m < 0.28`. Si cualquier sector está por debajo de 0.28 m, `|angular_z|` se limita a 0.3. Los sectores listados en `lidar.uncovered` no cuentan para el freno ni para ese límite.
 - **LiDAR sin datos** (solo `ros2`): si el último scan tiene más de 300 ms o el worker murió, la velocidad aplicada es 0, `lidar_stale` es `true` y `blocked` es `lidar_stale` (o `worker_dead`).
 - **Sectores en 0.0** (solo `ros2`): al arrancar, antes del primer scan, los 4 sectores valen `0.0` y `obstacle_alert` es `true`. Un sector «ciego» (menos del 25 % de rayos utilizables, por ejemplo con el LiDAR tapado o sucio; ver [`SECURITY.md`](./SECURITY.md#lidar-que-falla-cerrado)) también llega en `0.0` y bloquea el avance hacia ese lado.
+- **Sectores sin cobertura** (`lidar.uncovered`, solo `ros2`): un sector donde el scan no trae ningún rayo, porque el LiDAR no mira hacia ahí (en el ROSOrin Pro, la parte de atrás, tapada por el chasis y los cables y recortada por el filtro de Hiwonder). Llega en `0.0`, pero el bridge no frena por él: el control manual (`/cmd_vel`, `cmd_vel` por WebSocket) puede retroceder sin freno, y los gestos retroceden a lo sumo a 0.05 m/s y por 800 ms por paso. Un sector con rayos pero inutilizables (LiDAR tapado o sucio) es ciego, no «sin cobertura», y sigue bloqueando. Un worker anterior que no manda `uncovered` deja la lista vacía y el `0.0` bloquea. Bridge y worker van juntos: en el robot corre `make build-robot`.
 - El campo `action` muestra la velocidad que de verdad se aplicó y `blocked` dice por qué cambió. Respuesta real del mock con un obstáculo a 0.2 m al frente:
 
   ```json
@@ -208,6 +209,7 @@ Devuelve la telemetría actual. Ejemplo real del backend mock recién arrancado:
 - `mood` es opcional (máximo 64 caracteres). Si falta, se usa el nombre del gesto.
 - El gesto corre en segundo plano: la respuesta llega de inmediato y los pasos se ejecutan después. Cualquier comando nuevo de movimiento (otro gesto, `cmd_vel`, `/arm`, un *jog* o `/scene/reset`) o `/stop` lo cancela, y la velocidad del gesto cancelado no se vuelve a enviar: con `/arm` o un *jog* el chasis pasa a 0 en ese mismo momento. En cambio, `/arm` no detiene un `cmd_vel` que mandó un cliente.
 - `blocked` dice lo que impediría el gesto en el momento de pedirlo (ver la tabla de arriba).
+- Si `lidar.uncovered` incluye `back` (el LiDAR no ve atrás), los pasos que retroceden van a lo sumo a 0.05 m/s y por 800 ms (`GESTURE_BLIND_REVERSE_MPS` y `GESTURE_BLIND_REVERSE_MAX_MS` en `backend.rs`). El resto del paso (brazo, `linear_y`, `angular_z`) no cambia.
 
 Gestos:
 
@@ -266,7 +268,7 @@ const ws = new WebSocket(`ws://${host}:9000/ws?token=${encodeURIComponent(token)
 - Errores de comandos como evento:
 
   ```json
-  { "event": "error", "op": "cmd_vel", "status": "estop_latched", "message": "Paro de emergencia activo. POST /estop/release para liberar." }
+  { "event": "error", "op": "cmd_vel", "status": "estop_latched", "message": "STOP activo (E-stop enclavada). POST /estop/release para liberar." }
   ```
 
   `status` puede ser `estop_latched`, `rate_limited`, `invalid_request` o `not_found`. Un mensaje que no es un comando válido responde con `op: "unknown"` e `invalid_request`.
@@ -352,14 +354,15 @@ No hay `op` para liberar la E-stop: usa `POST /estop/release`. La web de este re
     },
     "lidar": {
       "type": "object",
-      "description": "Distancia mínima por sector. Con ros2, 0.0 antes del primer scan y en un sector ciego (bloquea). Con lidar_source 'none' los valores no son reales.",
-      "required": ["front_m", "left_m", "right_m", "back_m", "obstacle_alert"],
+      "description": "Distancia mínima por sector. Con ros2, 0.0 antes del primer scan, en un sector ciego (bloquea) y en un sector sin cobertura (no bloquea, ver uncovered). Con lidar_source 'none' los valores no son reales.",
+      "required": ["front_m", "left_m", "right_m", "back_m", "obstacle_alert", "uncovered"],
       "properties": {
         "front_m": { "type": "number", "minimum": 0.0, "maximum": 12.0 },
         "left_m": { "type": "number", "minimum": 0.0, "maximum": 12.0 },
         "right_m": { "type": "number", "minimum": 0.0, "maximum": 12.0 },
         "back_m": { "type": "number", "minimum": 0.0, "maximum": 12.0 },
-        "obstacle_alert": { "type": "boolean", "description": "true si algún sector está a menos de 0.35 m (siempre false con lidar_source 'none')." }
+        "obstacle_alert": { "type": "boolean", "description": "true si algún sector cubierto está a menos de 0.35 m (siempre false con lidar_source 'none')." },
+        "uncovered": { "type": "array", "items": { "type": "string", "enum": ["front", "left", "right", "back"] }, "description": "Sectores que el LiDAR no cubre (el scan no trae rayos ahí). Valen 0.0 y el freno los ignora; los gestos retroceden a lo sumo a 0.05 m/s si 'back' está aquí. Vacío en mock y con lidar_source 'none'." }
       }
     },
     "last_command_ms_ago": { "type": "integer", "minimum": 0, "description": "Desde el último comando de un cliente o paso de gesto; el watchdog, el freno y el reenvío no cuentan." },
@@ -446,7 +449,7 @@ Respuesta que recibe el modelo:
 {
   "status": "error",
   "code": "estop_latched",
-  "message": "Paro de emergencia activo. POST /estop/release para liberar.",
+  "message": "STOP activo (E-stop enclavada). POST /estop/release para liberar.",
   "hint": "The emergency stop is engaged. Tell the audience in Spanish that the robot is in emergency stop until someone releases it. Do not retry any movement."
 }
 ```

@@ -3,9 +3,10 @@
 Calibrates the LiDAR arm-shadow filter of ros2_worker.py on the real robot.
 
 Runs ON THE ROBOT with the bridge up (`make robot`) and ROS 2 sourced (`make calibrar-sombra` does
-both checks). It moves only the arm (POST /arm, never the chassis) through every pose used by the
-gestures in robot-bridge/src/gestures.rs, reads the raw /scan while each pose holds, and measures
-where the arm shows up. With the area clear (nothing within ARM_SEARCH_RADIUS_M of the LiDAR), every
+both checks). It moves only the arm (POST /arm, never the chassis) through the gesture poses of
+robot-bridge/src/gestures.rs that come closest to the LiDAR's scan plane (forward kinematics of the
+URDF, see `scan_clearance`; `--todas` holds every pose), reads the raw /scan while each pose holds,
+and measures where the arm shows up. With the area clear (nothing within ARM_SEARCH_RADIUS_M of the LiDAR), every
 echo that close is the robot itself. The band it finds is written to robot-bridge/arm-shadow.json,
 which the worker loads on start (environment variables still override it).
 
@@ -35,10 +36,32 @@ ANGLE_MARGIN_DEG = 2.0
 MAX_SAFE_BAND_M = 0.25  # a band reaching the 0.28 m brake would hide real obstacles
 SERVO_IDS = (1, 2, 3, 4, 5, 10)
 SCAN_WAIT_S = 10.0  # DDS discovery on the Jetson can take a few seconds
-MAX_POSES = 12  # the gestures use ~60 poses; the most different ones bound the arm's envelope
-# Distance weights per servo for picking poses (j1..j5, gripper): opening the gripper barely changes
-# the arm's footprint in the LiDAR plane.
+MAX_POSES = 12  # the gestures use ~60 poses; only the ones that reach the scan plane matter
+# Two poses closer than this (pulses, gripper weighted 0.25: it barely changes the arm's footprint)
+# would measure the same shadow: only the lower one is kept.
+POSE_DEDUP_PULSES = 15
 POSE_WEIGHTS = (1.0, 1.0, 1.0, 1.0, 1.0, 0.25)
+
+# ROSOrin Pro URDF, copied from the 3D twin (web/src/components/Rosorin3DViewer.tsx): joint origin
+# (xyz, rpy) relative to the parent frame and rotation axis, j1..j5, all in base_link (x forward,
+# z up). Keep both in sync if the arm changes.
+ARM_CHAIN = (
+    ((0.04662, 0.0000754, 0.16044), (0.0087266, 0.0, 0.0), (-0.0000545, -0.0087266, -0.99996)),
+    ((0.000012, 0.018766, 0.030345), (0.0, 0.0, 0.0), (0.0, 0.99996, -0.0087265)),
+    ((0.00025563, 0.00074282, 0.08513), (0.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+    ((-0.00056892, 0.00074297, 0.085147), (0.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+    ((-0.0010116, -0.018014, 0.05577), (0.0, 0.0, 0.0), (0.0, 0.0, -1.0)),
+)
+GRIPPER_BASE = ((0.0, 0.0, 0.0030019), (-3.1416, -1.5681, 3.1416))
+GRIPPER_REACH_M = 0.09  # fingers past the gripper base, along its x axis
+LIDAR_ORIGIN = (0.048156, 0.0000755, 0.106748)  # lidar_link in base_link: the scan plane height
+PULSE_RAD = math.radians(240.0) / 1000.0  # bus servos: 1000 pulses span 240°
+# Arm points closer than this to the LiDAR's axis are the turret right above it: they are there in
+# every pose and say nothing about which pose dips into the scan.
+TURRET_RADIUS_M = 0.06
+# A pose whose skeleton ends this far below the scan plane is in the scan for sure (the model is
+# good to a couple of cm): if none of them leaves an echo, the scan is not looking at the arm.
+SURE_CROSSING_M = -0.02
 MIN_CONE_COVERAGE = 0.5  # below this, /scan barely covers the front cone: the mount is wrong
 
 
@@ -58,22 +81,96 @@ def gesture_poses(rust_source: str) -> list:
     return poses
 
 
+def _mat_mul(a, b):
+    return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+
+
+def _mat_vec(a, v):
+    return [sum(a[i][k] * v[k] for k in range(3)) for i in range(3)]
+
+
+def _rpy(roll, pitch, yaw):
+    """URDF rpy: R = Rz(yaw) · Ry(pitch) · Rx(roll)."""
+    cr, sr, cp, sp, cy, sy = (f(t) for t in (roll, pitch, yaw) for f in (math.cos, math.sin))
+    rx = [[1, 0, 0], [0, cr, -sr], [0, sr, cr]]
+    ry = [[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]]
+    rz = [[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]]
+    return _mat_mul(rz, _mat_mul(ry, rx))
+
+
+def _axis_angle(axis, angle):
+    n = math.sqrt(sum(a * a for a in axis))
+    x, y, z = (a / n for a in axis)
+    c, s, C = math.cos(angle), math.sin(angle), 1 - math.cos(angle)
+    return [
+        [c + x * x * C, x * y * C - z * s, x * z * C + y * s],
+        [y * x * C + z * s, c + y * y * C, y * z * C - x * s],
+        [z * x * C - y * s, z * y * C + x * s, c + z * z * C],
+    ]
+
+
+def joint_angle(index: int, pulse: int) -> float:
+    """Pulse → joint angle in rad, as the 3D twin does (j2..j4 count down from 500)."""
+    return (500 - pulse) * PULSE_RAD if index in (2, 3, 4) else (pulse - 500) * PULSE_RAD
+
+
+def arm_points(pose: tuple) -> list:
+    """Forward kinematics: j1..j5 origins, gripper base and fingertip in base_link."""
+    rot = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    pos = [0.0, 0.0, 0.0]
+    points = []
+    for i, (xyz, rpy, axis) in enumerate(ARM_CHAIN, 1):
+        pos = [p + d for p, d in zip(pos, _mat_vec(rot, xyz))]
+        rot = _mat_mul(rot, _mat_mul(_rpy(*rpy), _axis_angle(axis, joint_angle(i, pose[i - 1]))))
+        points.append(pos)
+    gripper = [p + d for p, d in zip(pos, _mat_vec(rot, GRIPPER_BASE[0]))]
+    gripper_rot = _mat_mul(rot, _rpy(*GRIPPER_BASE[1]))
+    points.append(gripper)
+    points.append([p + d for p, d in zip(gripper, _mat_vec(gripper_rot, (GRIPPER_REACH_M, 0.0, 0.0)))])
+    return points
+
+
+def scan_clearance(pose: tuple, step_m: float = 0.005) -> float:
+    """
+    Lowest height (m) above the LiDAR's scan plane of the arm skeleton within ARM_SEARCH_RADIUS_M of
+    the LiDAR (outside the turret right above it). Negative: the skeleton crosses the plane. The links
+    are a few cm thick, so anything below ~+0.03 m can show up in the scan.
+    """
+    points = arm_points(pose)[1:]  # from j2 on: j1 is the turret
+    best = math.inf
+    for a, b in zip(points, points[1:]):
+        n = max(1, int(math.dist(a, b) / step_m))
+        for t in range(n + 1):
+            p = [a[k] + (b[k] - a[k]) * t / n for k in range(3)]
+            reach = math.hypot(p[0] - LIDAR_ORIGIN[0], p[1] - LIDAR_ORIGIN[1])
+            if TURRET_RADIUS_M <= reach <= ARM_SEARCH_RADIUS_M:
+                best = min(best, p[2] - LIDAR_ORIGIN[2])
+    return best
+
+
+def unseen_crossings(poses: list, echoes: int) -> list:
+    """Poses the model is sure cut the scan plane, when the scan saw no arm echo at all."""
+    if echoes:
+        return []
+    return [p for p in poses if scan_clearance(p) < SURE_CROSSING_M]
+
+
 def select_poses(poses: list, home: tuple, limit: int = MAX_POSES) -> list:
     """
-    Farthest-point sampling in joint space: starts at `home` and keeps adding the pose that is the
-    most different from everything already chosen. The extremes come first, and they are the poses
-    that bound where the arm can show up in the LiDAR.
+    The `limit` poses that come closest to the scan plane (lowest `scan_clearance` first), skipping
+    near-duplicates. Ordered by base rotation (j1) so the arm sweeps instead of jumping side to side.
+    Moving between gesture poses never dips lower than its endpoints, so holding them is enough.
     """
     def dist(a, b):
         return math.sqrt(sum((w * (x - y)) ** 2 for w, x, y in zip(POSE_WEIGHTS, a, b)))
 
-    chosen = [home]
-    rest = [p for p in poses if p != home]
-    while rest and len(chosen) < limit:
-        best = max(rest, key=lambda p: min(dist(p, c) for c in chosen))
-        chosen.append(best)
-        rest.remove(best)
-    return chosen
+    chosen = []
+    for pose in sorted(set(poses) | {home}, key=lambda p: (scan_clearance(p), p)):
+        if all(dist(pose, c) >= POSE_DEDUP_PULSES for c in chosen):
+            chosen.append(pose)
+        if len(chosen) == limit:
+            break
+    return sorted(chosen, key=lambda p: (p[0], p))
 
 
 def cone_coverage(msg, offset_deg: float, flip: bool, half_angle_deg: float = ARM_SEARCH_HALF_ANGLE_DEG) -> float:
@@ -206,7 +303,7 @@ def main() -> int:
 
     token = read_token()
     print(f"[calibrar] {len(poses)} de {len(all_poses)} poses del brazo de gestures.rs"
-          f"{'' if args.todas else ' (las más distintas; --todas para medirlas todas)'}"
+          f"{'' if args.todas else ' (las que más se acercan al plano del LiDAR; --todas para medirlas todas)'}"
           f" · ~{round(len(poses) * (0.9 + args.hold))} s · bridge {args.bridge}")
     print(f"[calibrar] Solo se mueve el brazo. Despeja {int(ARM_SEARCH_RADIUS_M * 100) + 20} cm alrededor del robot:")
     print("[calibrar] todo eco a menos de 30 cm se tomará como parte del robot.")
@@ -288,7 +385,8 @@ def main() -> int:
             time.sleep(args.hold)
             with lock:
                 state["collect"] = False
-            print(f"[calibrar] pose {i:2d}/{len(poses)} {pose}: {len(state['samples'])} ecos del brazo acumulados")
+            print(f"[calibrar] pose {i:2d}/{len(poses)} {pose} (modelo: {scan_clearance(pose):+.2f} m sobre el plano): "
+                  f"{len(state['samples'])} ecos del brazo acumulados")
     finally:
         try:
             bridge_post(args.bridge, token, "/arm", {"servos": [{"id": s, "position": p} for s, p in zip(SERVO_IDS, home)], "duration_ms": 800})
@@ -299,6 +397,16 @@ def main() -> int:
 
     msg = state["last"]
     band = analyze_shadow(state["samples"], max(0.05, float(msg.range_min)))
+    crossing = unseen_crossings(poses, band["echoes"])
+    if crossing:
+        # The URDF says the arm cuts the scan plane: seeing nothing means the search cone is not
+        # where the arm is (mount/orientation) or the scan does not cover the front.
+        print(f"[calibrar] El modelo del brazo cruza el plano del LiDAR en {len(crossing)} pose(s) "
+              f"(p. ej. {crossing[0]}), pero /scan no vio ningún eco a menos de "
+              f"{ARM_SEARCH_RADIUS_M:.2f} m.", file=sys.stderr)
+        print("[calibrar] Revisa la orientación (sección 3 de ensayo.sh) y que el área estuviera despejada. "
+              "No guardo nada.", file=sys.stderr)
+        return 1
     if band["echoes"] == 0:
         print("[calibrar] El LiDAR no ve el brazo en ninguna pose: el filtro queda desactivado (max_m = 0).")
     elif band["max_m"] > MAX_SAFE_BAND_M:

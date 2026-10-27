@@ -287,7 +287,7 @@ export class RobotBridgeClient {
         case 423:
           throw new BridgeError(
             'estop_latched',
-            detail || 'Paro de emergencia activo: el robot no se moverá hasta liberarlo.',
+            detail || 'STOP activo: el robot no se moverá hasta liberarlo.',
             423
           );
         case 429:

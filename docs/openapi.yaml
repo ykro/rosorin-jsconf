@@ -19,7 +19,7 @@ info:
     - Límite global de 30 POST/s con ráfaga de 60; `/stop` y `/estop/release` no cuentan.
     - Cuerpos de máximo 8 KiB (413).
 
-    **Paro de emergencia:** `POST /stop` enclava la E-stop y las rutas de movimiento responden 423 hasta
+    **STOP / E-stop:** `POST /stop` enclava la E-stop y las rutas de movimiento responden 423 hasta
     `POST /estop/release`. Al apagarse (SIGINT o SIGTERM) el bridge también la enclava.
 
     **Campo `blocked`:** toda respuesta de acción (200) trae `blocked`: `null` si se ejecutó como se pidió, o
@@ -58,7 +58,7 @@ tags:
   - name: perifericos
     description: HUD, LEDs y simulación
   - name: seguridad
-    description: Paro de emergencia
+    description: STOP / E-stop
 paths:
   /health:
     get:
@@ -469,7 +469,7 @@ paths:
   /stop:
     post:
       tags: [seguridad]
-      summary: Paro de emergencia (enclava la E-stop)
+      summary: STOP (enclava la E-stop)
       operationId: postStop
       description: >
         Cancela el gesto activo, pone el chasis en 0, apaga el buzzer y congela el brazo donde está (no lo
@@ -590,7 +590,7 @@ components:
             $ref: '#/components/schemas/ErrorResponse'
           example:
             status: estop_latched
-            message: Paro de emergencia activo. POST /estop/release para liberar.
+            message: STOP activo (E-stop enclavada). POST /estop/release para liberar.
     RateLimited:
       description: Más de 30 POST/s (ráfaga de 60)
       content:
@@ -782,9 +782,10 @@ components:
     LidarSummary:
       type: object
       description: >
-        Distancia mínima por sector. Con ros2 vale 0.0 antes del primer scan y en un sector ciego (bloquea).
-        Con lidar_source `none` los valores no son reales.
-      required: [front_m, left_m, right_m, back_m, obstacle_alert]
+        Distancia mínima por sector. Con ros2 vale 0.0 antes del primer scan, en un sector ciego (bloquea)
+        y en un sector sin cobertura (no bloquea, ver `uncovered`). Con lidar_source `none` los valores no
+        son reales.
+      required: [front_m, left_m, right_m, back_m, obstacle_alert, uncovered]
       properties:
         front_m:
           type: number
@@ -804,7 +805,17 @@ components:
           maximum: 12.0
         obstacle_alert:
           type: boolean
-          description: true si algún sector está a menos de 0.35 m (siempre false con lidar_source `none`)
+          description: true si algún sector cubierto está a menos de 0.35 m (siempre false con lidar_source `none`)
+        uncovered:
+          type: array
+          items:
+            type: string
+            enum: [front, left, right, back]
+          description: >
+            Sectores que el LiDAR no cubre: el scan no trae ningún rayo ahí (en el ROSOrin Pro, atrás,
+            tapado por el chasis y los cables). Valen 0.0 pero el freno los ignora: el control manual
+            retrocede sin freno y los gestos a lo sumo a 0.05 m/s y 800 ms por paso. Un sector ciego
+            (rayos inutilizables) no está aquí y sigue bloqueando. Vacío en mock y con lidar_source `none`.
     TelemetryState:
       type: object
       required:

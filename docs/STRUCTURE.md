@@ -5,8 +5,8 @@ rosorin-jsconf/
 ├── run.sh                    # Lanzador: --mock | --robot-ip <IP> | --serial | --ros2 | --bridge-only (--help)
 ├── iniciar-robot.sh          # Arranque en el robot: bridge + web + /face#token= en kiosco
 ├── traer-token.sh            # En la laptop: trae .bridge-token del robot por SSH (permisos 600)
-├── ensayo.sh                 # Ensayo: --robot (Wi-Fi, IP, build, bridge) y --laptop (token, MP3, web, guía; ensayo-<fecha>.log)
-├── demo.sh                   # Charla: ensayo.sh --demo (--robot / --laptop sin la guía)
+├── ensayo.sh                 # Ensayo: --robot (Wi-Fi, IP, build, bridge y web :3000) y --laptop (token, MP3, Chrome, guía; ensayo-<fecha>.log); --laptop-server
+├── demo.sh                   # Charla: ensayo.sh --demo (--robot / --laptop sin la guía; --laptop-server)
 ├── Makefile                  # up, robot, bridge, web, reset, release, test, lint, build-robot, calibrar-sombra
 ├── .nvmrc                    # Node 22
 ├── firebase.json             # Hosting de jsconfmx26.web.app (CSP, sin songs/clips/)
@@ -40,7 +40,7 @@ rosorin-jsconf/
     ├── scripts/              # check-css-classes.mjs, gen-gestures.mjs
     └── src/
         ├── app/              # /, /demo, /simulator, /robot, /face, /presenter, /props, /demos/*,
-        │                     # error.tsx (error de ruta con paro de emergencia)
+        │                     # error.tsx (error de ruta con botón STOP)
         ├── components/       # Rosorin3DViewer, ViewerErrorBoundary, HardwareControlPanel, GeminiLiveConsole,
         │                     # TopNav (STOP y tecla Escape), BridgeControls
         └── lib/              # gemini-live, live-connection, live-turn-gate, tool-policy, tool-args,

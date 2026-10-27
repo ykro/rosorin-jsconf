@@ -69,23 +69,60 @@ class ScanDiagnosisTests(unittest.TestCase):
         self.assertIn("ROS_LOCALHOST_ONLY=0", msg)
 
 
+class ArmModelTests(unittest.TestCase):
+    HOME = (500, 430, 310, 380, 500, 500)
+    SAD_DROOP = (500, 330, 230, 260, 500, 620)
+
+    def test_home_holds_the_gripper_forward_above_the_scan(self):
+        tip = cal.arm_points(self.HOME)[-1]
+        self.assertGreater(tip[0], 0.25)  # forward of the base
+        self.assertGreater(cal.scan_clearance(self.HOME), 0.1)
+
+    def test_sad_droop_crosses_the_scan_plane(self):
+        # Measured in the rehearsal: front sector at 0.11 m during bumblebee_sad_droop
+        self.assertLess(cal.scan_clearance(self.SAD_DROOP), 0.0)
+
+    def test_poses_not_seen_in_the_rehearsal_stay_above_the_plane(self):
+        # facepalm, chef_kiss and wave_hello never got under 0.35 m in section 4
+        for pose in ((500, 520, 200, 220, 500, 680), (580, 370, 290, 360, 720, 220), (340, 430, 320, 390, 320, 220)):
+            self.assertGreater(cal.scan_clearance(pose), 0.03, pose)
+
+    def test_unseen_crossings_only_without_echoes(self):
+        poses = [self.HOME, self.SAD_DROOP, (420, 320, 220, 250, 440, 640)]
+        self.assertEqual(cal.unseen_crossings(poses, echoes=5), [])
+        self.assertEqual(cal.unseen_crossings(poses, echoes=0), [(420, 320, 220, 250, 440, 640)])
+
+
 class SelectPosesTests(unittest.TestCase):
     HOME = (500, 430, 310, 380, 500, 500)
 
-    def test_real_gestures_reduce_to_twelve_starting_at_home(self):
+    def real_selection(self):
         with open(cal.GESTURES_RS, encoding="utf-8") as f:
             poses = cal.gesture_poses(f.read())
-        chosen = cal.select_poses(poses, self.HOME)
+        return poses, cal.select_poses(poses, self.HOME)
+
+    def test_real_gestures_reduce_to_twelve_closest_to_the_scan(self):
+        poses, chosen = self.real_selection()
         self.assertGreater(len(poses), cal.MAX_POSES)
         self.assertEqual(len(chosen), cal.MAX_POSES)
-        self.assertEqual(chosen[0], self.HOME)
         self.assertEqual(len(set(chosen)), len(chosen))
+        worst_chosen = max(cal.scan_clearance(p) for p in chosen)
+        self.assertLess(worst_chosen, cal.scan_clearance(self.HOME))
 
-    def test_extremes_come_before_near_duplicates(self):
-        near = (505, 430, 310, 380, 500, 500)
-        far = (100, 800, 150, 850, 900, 200)
-        chosen = cal.select_poses([near, far], self.HOME, limit=2)
-        self.assertEqual(chosen, [self.HOME, far])
+    def test_includes_every_bumblebee_sad_droop_pose(self):
+        _, chosen = self.real_selection()
+        for pose in ((500, 330, 230, 260, 500, 620), (420, 320, 220, 250, 440, 640), (580, 320, 220, 250, 560, 640)):
+            self.assertIn(pose, chosen)
+
+    def test_sorted_by_base_rotation(self):
+        _, chosen = self.real_selection()
+        self.assertEqual([p[0] for p in chosen], sorted(p[0] for p in chosen))
+
+    def test_gripper_only_variants_count_once(self):
+        low = (500, 340, 270, 340, 500, 220)
+        same_but_closed = (500, 340, 270, 340, 500, 260)
+        chosen = cal.select_poses([low, same_but_closed], self.HOME, limit=3)
+        self.assertEqual(len([p for p in chosen if p[:5] == low[:5]]), 1)
 
 
 def fake_scan(angle_min_deg, angle_max_deg, inc_deg=1.0):

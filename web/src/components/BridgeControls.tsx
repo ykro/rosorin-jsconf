@@ -49,7 +49,7 @@ export function BridgeAlerts({ bridge, onReleaseEstop, onOpenSettings }: BridgeA
           role="alert"
           className="pointer-events-auto flex flex-wrap items-center gap-3 rounded-xl border-2 border-[#D93025] bg-[#FCE8E6] px-4 py-2.5 text-sm font-bold text-[#A50E0E] shadow-md"
         >
-          <span>Paro de emergencia activo</span>
+          <span>STOP activo</span>
           {onReleaseEstop && (
             <button
               type="button"
@@ -187,7 +187,7 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
   const handleStop = async () => {
     if (!onEmergencyStop) return;
     const result = await onEmergencyStop();
-    setNotice(result.ok ? 'Paro de emergencia enviado.' : result.message);
+    setNotice(result.ok ? 'STOP enviado.' : result.message);
   };
 
   return (

@@ -80,11 +80,12 @@ Gemini Live nunca habla directo con el bus serie. Cada comando pasa por estas ba
    pub fn apply_lidar_brake(l: &LidarSectors, vx: f32, vy: f32, wz: f32) -> (f32, f32, f32, bool) {
        let (mut vx, mut vy, mut wz) = (vx, vy, wz);
        let mut braked = false;
-       if (vx > 0.0 && l.front_m < LIDAR_BRAKE_M) || (vx < 0.0 && l.back_m < LIDAR_BRAKE_M) {
+       let near = |sector: &str, m: f32| l.covers(sector) && m < LIDAR_BRAKE_M;
+       if (vx > 0.0 && near("front", l.front_m)) || (vx < 0.0 && near("back", l.back_m)) {
            vx = 0.0;
            braked = true;
        }
-       if (vy > 0.0 && l.left_m < LIDAR_BRAKE_M) || (vy < 0.0 && l.right_m < LIDAR_BRAKE_M) {
+       if (vy > 0.0 && near("left", l.left_m)) || (vy < 0.0 && near("right", l.right_m)) {
            vy = 0.0;
            braked = true;
        }
@@ -96,7 +97,7 @@ Gemini Live nunca habla directo con el bus serie. Cada comando pasa por estas ba
    }
    ```
 
-   `LIDAR_BRAKE_M` es 0.28 m y `LIDAR_BRAKE_MAX_WZ` 0.3 rad/s. Con `ros2`, si el último scan tiene más de 300 ms la velocidad es 0 sin importar el sector. Los datos vienen de `/scan` vía `ros2_worker.py`, o de `/simulate/lidar` en mock. Un sector ciego llega como `0.0`, así que esta misma función lo trata como obstáculo. El `bool` que devuelve es el que termina como `blocked: "braked"` en la respuesta HTTP.
+   `LIDAR_BRAKE_M` es 0.28 m y `LIDAR_BRAKE_MAX_WZ` 0.3 rad/s. Con `ros2`, si el último scan tiene más de 300 ms la velocidad es 0 sin importar el sector. Los datos vienen de `/scan` vía `ros2_worker.py`, o de `/simulate/lidar` en mock. Un sector ciego llega como `0.0`, así que esta misma función lo trata como obstáculo. Un sector sin cobertura (en `uncovered`, como atrás en el ROSOrin Pro, que lo tapan el chasis y los cables) no frena: `covers()` lo excluye. El `bool` que devuelve es el que termina como `blocked: "braked"` en la respuesta HTTP.
 4. **Límites de chasis y watchdog.** Las velocidades se recortan a `±0.25 m/s` y `±0.8 rad/s` (`±0.15 m/s` lineal con `serial`), y cada comando dura `100..2500 ms` (600 ms si no dices). Al vencer, el loop pone el chasis en 0.
 5. **E-stop enclavada.** Después de `POST /stop`, toda ruta de movimiento responde `423` hasta `POST /estop/release`.
 

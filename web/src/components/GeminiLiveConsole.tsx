@@ -183,7 +183,7 @@ export function GeminiLiveConsole({
           <p className="text-xs font-medium text-[#B06000]">
             {hasKey
               ? 'Actualiza tu GEMINI_API_KEY en el navegador (se guarda solo en localStorage):'
-              : 'No se pudo cargar GEMINI_API_KEY desde .env. Ingresa tu API Key aquí para guardarla en tu navegador:'}
+              : 'No hay GEMINI_API_KEY (defínela en web/.env y abre la URL que imprime run.sh) o pégala aquí para guardarla en tu navegador:'}
           </p>
           <div className="flex items-center gap-2">
             <label htmlFor="gemini-console-api-key" className="sr-only">
