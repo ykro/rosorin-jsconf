@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { TopNav } from '@/components/TopNav';
 import { GeminiLiveConsole } from '@/components/GeminiLiveConsole';
+import { ApiKeyGate } from '@/components/ApiKeyGate';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { useEmbodiedLiveSession } from '@/lib/use-embodied-live-session';
 import { useLiteMode } from '@/lib/use-lite-mode';
@@ -64,12 +65,15 @@ export default function RepoRoasterDemoPage() {
           </button>
         </div>
 
+        {/* Without a Gemini key only the key prompt is shown here */}
+        <div className="mt-4">
+        <ApiKeyGate>
         <form
           onSubmit={(e) => {
             e.preventDefault();
             handleAnalyzeAndRoast();
           }}
-          className="mt-4 flex flex-col gap-3"
+          className="flex flex-col gap-3"
         >
           <label htmlFor="roaster-repo-input" className="text-xs font-bold text-[#5F6368]">
             Repositorio de GitHub
@@ -107,14 +111,18 @@ export default function RepoRoasterDemoPage() {
             </button>
           ))}
         </div>
+        </ApiKeyGate>
+        </div>
       </div>
 
       {/* 2. Gemini Live Voice & Follow-up Conversation */}
-      <GeminiLiveConsole
-        {...consoleProps}
-        placeholderHeadline="Selecciona un repositorio y presiona Analizar y Roastear para iniciar la conversación."
-        quickQuestions={FOLLOW_UP_QUESTIONS}
-      />
+      <ApiKeyGate quiet>
+        <GeminiLiveConsole
+          {...consoleProps}
+          placeholderHeadline="Selecciona un repositorio y presiona Analizar y Roastear para iniciar la conversación."
+          quickQuestions={FOLLOW_UP_QUESTIONS}
+        />
+      </ApiKeyGate>
     </div>
   );
 

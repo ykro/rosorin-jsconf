@@ -10,34 +10,12 @@ import {
   type ApiKeySource,
   type BridgeKeyStatus,
 } from '@/lib/api-key';
-import { bridgeHost, resolveBridgeUrl } from '@/lib/bridge-config';
-
-export const MISSING_KEY_NOTICE =
-  'Falta la API key de Gemini: agrégala a web/.env del robot (GEMINI_API_KEY) o ingrésala aquí.';
-export const MEMORY_ONLY_NOTICE = 'Solo se usa mientras esta página está abierta; no se guarda.';
-
-/** Why there is no key, from what the bridge answered (or that it could not be asked). */
-export function missingKeyNotice(status: BridgeKeyStatus, host = bridgeHost(resolveBridgeUrl())): string {
-  const where = host ? ` (${host})` : '';
-  switch (status) {
-    case 'idle':
-    case 'loading':
-      return `Buscando la API key de Gemini en el bridge${where}…`;
-    case 'unreachable':
-      return `No pude pedirle la API key al bridge${where}: no responde. Ingrésala aquí mientras tanto.`;
-    case 'missing':
-      return `El bridge${where} no tiene GEMINI_API_KEY en web/.env: agrégala ahí o ingrésala aquí.`;
-    case 'disabled':
-      return 'Esta página no carga la API key desde un bridge: ingrésala aquí.';
-    default:
-      return MISSING_KEY_NOTICE;
-  }
-}
+import { missingKeyNotice } from '@/lib/api-key-gate';
 
 function sourceText(source: ApiKeySource, bridge: BridgeKeyStatus): string {
-  if (source === 'manual') return 'Ingresada a mano (solo esta página)';
+  if (source === 'manual') return 'Ingresada a mano';
   if (source === 'bridge') return 'Cargada desde GEMINI_API_KEY (web/.env del robot)';
-  if (bridge === 'loading' || bridge === 'idle') return 'Buscando la key en el bridge…';
+  if (bridge === 'loading' || bridge === 'idle') return 'Buscando la key…';
   return 'Falta la API key — clic para ingresarla';
 }
 
@@ -128,8 +106,7 @@ export function ApiKeyCollapsible() {
           )}
           <p className="text-xs text-[#5F6368]">
             La web le pide la key al bridge del robot (<code className="font-mono text-[#202124]">GEMINI_API_KEY</code> en{' '}
-            <code className="font-mono text-[#202124]">web/.env</code>). Si la pegas aquí, gana sobre la del bridge.{' '}
-            {MEMORY_ONLY_NOTICE}
+            <code className="font-mono text-[#202124]">web/.env</code>). Si la pegas aquí, gana sobre la del bridge.
           </p>
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
             <label htmlFor="api-key-collapsible-input" className="sr-only">
@@ -147,7 +124,7 @@ export function ApiKeyCollapsible() {
               type="submit"
               className="rounded-xl bg-[#1A73E8] px-4 py-2 text-xs font-bold text-white hover:bg-[#1557B0]"
             >
-              {savedNotice ? '✓ Lista' : 'Usar en esta página'}
+              {savedNotice ? '✓ Lista' : 'Usar'}
             </button>
             {sourceLabel === 'manual' && (
               <button

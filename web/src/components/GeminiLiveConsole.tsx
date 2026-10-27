@@ -9,7 +9,7 @@ import {
   setManualApiKey,
   type BridgeKeyStatus,
 } from '@/lib/api-key';
-import { MEMORY_ONLY_NOTICE, missingKeyNotice } from './ApiKeyCollapsible';
+import { missingKeyNotice } from '@/lib/api-key-gate';
 import type { LiveStatus } from '@/lib/live-connection';
 
 interface GeminiLiveConsoleProps {
@@ -189,7 +189,7 @@ export function GeminiLiveConsole({
           className="mt-3 flex flex-col gap-2 rounded-xl border border-[#F9AB00] bg-[#FEF7E0]/60 p-3"
         >
           <p className="text-xs font-medium text-[#B06000]">
-            {hasKey ? 'Cambia la GEMINI_API_KEY de esta página.' : missingKeyNotice(bridgeKeyStatus)} {MEMORY_ONLY_NOTICE}
+            {hasKey ? 'Cambia la GEMINI_API_KEY.' : missingKeyNotice(bridgeKeyStatus)}
           </p>
           <div className="flex items-center gap-2">
             <label htmlFor="gemini-console-api-key" className="sr-only">

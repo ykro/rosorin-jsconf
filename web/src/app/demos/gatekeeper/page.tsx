@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { TopNav } from '@/components/TopNav';
 import { GeminiLiveConsole } from '@/components/GeminiLiveConsole';
 import { SceneScanPanel } from '@/components/SceneScanPanel';
+import { ApiKeyGate } from '@/components/ApiKeyGate';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { useEmbodiedLiveSession } from '@/lib/use-embodied-live-session';
 import { useLiteMode } from '@/lib/use-lite-mode';
@@ -96,7 +97,10 @@ export default function GatekeeperDemoPage() {
           </div>
         </div>
 
-        <form onSubmit={handleEvaluatePr} className="mt-4 flex flex-col gap-3">
+        {/* Without a Gemini key only the key prompt is shown here */}
+        <div className="mt-4">
+        <ApiKeyGate>
+        <form onSubmit={handleEvaluatePr} className="flex flex-col gap-3">
           <label htmlFor="gatekeeper-pr-input" className="text-xs font-bold text-[#5F6368]">
             Pull Request de GitHub
           </label>
@@ -134,6 +138,8 @@ export default function GatekeeperDemoPage() {
             </button>
           ))}
         </div>
+        </ApiKeyGate>
+        </div>
       </div>
 
       {/* «Reconocer»: where the trays really are (the gestures aim there) */}
@@ -146,11 +152,13 @@ export default function GatekeeperDemoPage() {
       />
 
       {/* 2. Gemini Live Voice & Follow-up Conversation */}
-      <GeminiLiveConsole
-        {...consoleProps}
-        placeholderHeadline="Selecciona un Pull Request de GitHub y pulsa Evaluar PR para iniciar la conversación."
-        quickQuestions={FOLLOW_UP_QUESTIONS}
-      />
+      <ApiKeyGate quiet>
+        <GeminiLiveConsole
+          {...consoleProps}
+          placeholderHeadline="Selecciona un Pull Request de GitHub y pulsa Evaluar PR para iniciar la conversación."
+          quickQuestions={FOLLOW_UP_QUESTIONS}
+        />
+      </ApiKeyGate>
     </div>
   );
 

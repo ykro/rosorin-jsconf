@@ -3,11 +3,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { TopNav } from '@/components/TopNav';
-import { ApiKeyCollapsible } from '@/components/ApiKeyCollapsible';
+import { ApiKeyGate } from '@/components/ApiKeyGate';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { useLiteMode } from '@/lib/use-lite-mode';
 import type { LiveStatus } from '@/lib/live-connection';
-import { API_KEY_UPDATED_EVENT, getEffectiveApiKey } from '@/lib/api-key';
 import { shouldIgnoreShortcut } from '@/lib/keyboard';
 import {
   BUMBLEBEE_DANCE_LABELS,
@@ -78,7 +77,6 @@ export default function BumblebeeDemoPage() {
   const [clipUnavailable, setClipUnavailable] = useState<ClipUnavailableReason | null>(null);
   const [conversationActive, setConversationActive] = useState(false);
   const [micOpen, setMicOpen] = useState(false);
-  const [hasApiKey, setHasApiKey] = useState(false);
   const [userTranscript, setUserTranscript] = useState('');
   const [nowPlaying, setNowPlaying] = useState<SongClip | null>(null);
   const [frequencyMhz, setFrequencyMhz] = useState('104.7 FM');
@@ -149,13 +147,6 @@ export default function BumblebeeDemoPage() {
     }
   }, [catalog]);
 
-  useEffect(() => {
-    const refresh = () => setHasApiKey(Boolean(getEffectiveApiKey()));
-    refresh();
-    window.addEventListener(API_KEY_UPDATED_EVENT, refresh);
-    return () => window.removeEventListener(API_KEY_UPDATED_EVENT, refresh);
-  }, []);
-
   // Manual barge-in: Space (when not typing or on a button) cuts the song and opens the mic.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -187,8 +178,6 @@ export default function BumblebeeDemoPage() {
 
   const controlsColumn = (
     <div className="flex flex-col gap-4">
-      <ApiKeyCollapsible />
-
       {/* 1. Hero Card: Bumblebee Radio Mode */}
       <div className="rounded-2xl border-2 border-[#F9AB00] bg-white p-5 shadow-xs">
         <div className="flex items-center justify-between gap-2">
@@ -210,7 +199,10 @@ export default function BumblebeeDemoPage() {
           </button>
         </div>
 
-        <div className="mt-3.5 flex flex-col gap-2.5 sm:flex-row">
+        {/* Without a Gemini key only the key prompt is shown here */}
+        <div className="mt-3.5">
+        <ApiKeyGate>
+        <div className="flex flex-col gap-2.5 sm:flex-row">
           <button
             type="button"
             onClick={handleToggleConversation}
@@ -366,11 +358,6 @@ export default function BumblebeeDemoPage() {
           <p className="text-[11px] font-bold uppercase tracking-wider text-[#5F6368]">
             Frases rápidas para probar en vivo:
           </p>
-          {!hasApiKey && (
-            <p className="mt-1 text-[11px] text-[#5F6368]">
-              Sin API key de Gemini: solo texto (búsqueda local de canciones), sin conversación en vivo.
-            </p>
-          )}
           <div className="mt-2 flex flex-wrap gap-1.5">
             {QUICK_PROMPTS.map((q) => (
               <button
@@ -383,6 +370,8 @@ export default function BumblebeeDemoPage() {
               </button>
             ))}
           </div>
+        </div>
+        </ApiKeyGate>
         </div>
       </div>
 

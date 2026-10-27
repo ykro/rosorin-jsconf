@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { TopNav } from '@/components/TopNav';
 import { GeminiLiveConsole } from '@/components/GeminiLiveConsole';
 import { SceneScanPanel } from '@/components/SceneScanPanel';
+import { ApiKeyGate } from '@/components/ApiKeyGate';
 import { formatBearing } from '@/lib/scene-scan';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { useEmbodiedLiveSession } from '@/lib/use-embodied-live-session';
@@ -114,7 +115,10 @@ export default function BugHunterDemoPage() {
           </button>
         </div>
 
-        <form onSubmit={handleHunt} className="mt-4 flex flex-col gap-3">
+        {/* Without a Gemini key only the key prompt is shown here */}
+        <div className="mt-4">
+        <ApiKeyGate>
+        <form onSubmit={handleHunt} className="flex flex-col gap-3">
           <label htmlFor="bughunter-issue-input" className="text-xs font-bold text-[#5F6368]">
             Issue de GitHub con el incidente
           </label>
@@ -152,6 +156,8 @@ export default function BugHunterDemoPage() {
             </button>
           ))}
         </div>
+        </ApiKeyGate>
+        </div>
 
         {activeTotemInfo && (
           <div className="mt-4 flex items-center justify-between rounded-xl border border-[#DADCE0] bg-[#F8F9FA] p-4">
@@ -178,11 +184,13 @@ export default function BugHunterDemoPage() {
       />
 
       {/* 2. Gemini Live Voice & Follow-up Conversation */}
-      <GeminiLiveConsole
-        {...consoleProps}
-        placeholderHeadline="Selecciona un Issue de GitHub y pulsa Diagnosticar y Señalar para conversar."
-        quickQuestions={FOLLOW_UP_QUESTIONS}
-      />
+      <ApiKeyGate quiet>
+        <GeminiLiveConsole
+          {...consoleProps}
+          placeholderHeadline="Selecciona un Issue de GitHub y pulsa Diagnosticar y Señalar para conversar."
+          quickQuestions={FOLLOW_UP_QUESTIONS}
+        />
+      </ApiKeyGate>
     </div>
   );
 
