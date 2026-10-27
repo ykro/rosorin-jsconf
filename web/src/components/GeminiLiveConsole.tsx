@@ -1,8 +1,15 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { API_KEY_UPDATED_EVENT, getEffectiveApiKey, getManualApiKey, setManualApiKey } from '@/lib/api-key';
-import { MEMORY_ONLY_NOTICE, MISSING_KEY_NOTICE } from './ApiKeyCollapsible';
+import {
+  API_KEY_UPDATED_EVENT,
+  getBridgeKeyStatus,
+  getEffectiveApiKey,
+  getManualApiKey,
+  setManualApiKey,
+  type BridgeKeyStatus,
+} from '@/lib/api-key';
+import { MEMORY_ONLY_NOTICE, missingKeyNotice } from './ApiKeyCollapsible';
 import type { LiveStatus } from '@/lib/live-connection';
 
 interface GeminiLiveConsoleProps {
@@ -38,11 +45,13 @@ export function GeminiLiveConsole({
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [hasKey, setHasKey] = useState(true);
+  const [bridgeKeyStatus, setBridgeKeyStatus] = useState<BridgeKeyStatus>('idle');
 
   useEffect(() => {
     const refreshKeyStatus = () => {
       setApiKeyDraft(getManualApiKey());
       setHasKey(Boolean(getEffectiveApiKey()));
+      setBridgeKeyStatus(getBridgeKeyStatus());
     };
     refreshKeyStatus();
     window.addEventListener(API_KEY_UPDATED_EVENT, refreshKeyStatus);
@@ -180,7 +189,7 @@ export function GeminiLiveConsole({
           className="mt-3 flex flex-col gap-2 rounded-xl border border-[#F9AB00] bg-[#FEF7E0]/60 p-3"
         >
           <p className="text-xs font-medium text-[#B06000]">
-            {hasKey ? 'Cambia la GEMINI_API_KEY de esta página.' : MISSING_KEY_NOTICE} {MEMORY_ONLY_NOTICE}
+            {hasKey ? 'Cambia la GEMINI_API_KEY de esta página.' : missingKeyNotice(bridgeKeyStatus)} {MEMORY_ONLY_NOTICE}
           </p>
           <div className="flex items-center gap-2">
             <label htmlFor="gemini-console-api-key" className="sr-only">
