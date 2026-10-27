@@ -9,7 +9,7 @@ import {
 import type { RepoAnalysis, RobotActionHandler, RobotActionResult, ToolCallLog } from './types';
 import { RobotBridgeClient, createBridgeActionHandler } from './robot-client';
 import { downsampleFloat32ToInt16_16kHz, int16ToBase64, type PcmWorkletFrame } from './audio-worklet';
-import { getEffectiveApiKey } from './api-key';
+import { getEffectiveApiKey, loadApiKeyFromBridge } from './api-key';
 import { LiveConnection, type LiveStatus } from './live-connection';
 import { MicCapture } from './mic-capture';
 import { PcmPlayer } from './pcm-player';
@@ -179,7 +179,7 @@ export interface LiveControllerCallbacks {
 }
 
 const NO_KEY_WARNING =
-  'No hay GEMINI_API_KEY. Ingrésala en el navegador (botón "Ingresar API Key") para conectar Gemini Live.';
+  'Falta la API key de Gemini: agrégala a web/.env del robot (GEMINI_API_KEY) o ingrésala aquí (botón "Ingresar API Key").';
 const CONNECT_FAILED_WARNING =
   'No se pudo conectar a Gemini Live. Verifica tu conexión y que tu GEMINI_API_KEY sea válida.';
 
@@ -276,6 +276,8 @@ export class EmbodiedGeminiLiveSession {
     this.claimGlobalSlot();
     this.player.unlock();
 
+    // The bridge key may still be on its way right after the page loads
+    if (!getEffectiveApiKey()) await loadApiKeyFromBridge();
     const key = getEffectiveApiKey();
     if (!key) {
       this.callbacks.onStatus('no_key');
@@ -475,6 +477,7 @@ export class EmbodiedGeminiLiveSession {
   }
 
   private async ensureLiveForTurn(apiKey?: string): Promise<boolean> {
+    if (!getEffectiveApiKey(apiKey)) await loadApiKeyFromBridge();
     const key = getEffectiveApiKey(apiKey);
     if (!key) {
       this.callbacks.onStatus('no_key');

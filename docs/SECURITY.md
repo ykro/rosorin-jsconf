@@ -18,9 +18,11 @@ El robot se mueve de verdad, así que `robot-bridge` aplica estas reglas. El con
 
 ### La API key de Gemini
 
-- Va en `GEMINI_API_KEY` (entorno o `web/.env`), nunca en `NEXT_PUBLIC_*`. Los lanzadores la pasan al navegador una sola vez en el mismo fragmento que el token (`#token=<t>&gemini_key=<k>`): no llega al servidor de Next ni a sus logs. La web la guarda en `localStorage` como `rosorin_gemini_api_key` y la quita de la barra; `#gemini_key=reset` la borra.
-- La URL completa con el fragmento lleva el token y la key: no la proyectes. `ensayo.sh` y `demo.sh` la abren con una página local que redirige, así no aparece en la terminal ni en argumentos de procesos; `run.sh` la imprime en su terminal. `iniciar-robot.sh` se la pasa al navegador del kiosco como argumento, igual que el token.
-- `NEXT_PUBLIC_GEMINI_API_KEY` se sigue leyendo por compatibilidad (con aviso), pero queda en el bundle si compilas: no la uses.
+- Va en `GEMINI_API_KEY`, en el `web/.env` de la máquina donde corre el bridge (o en su entorno), nunca en `NEXT_PUBLIC_*`: la web ya no lee `NEXT_PUBLIC_GEMINI_API_KEY`, así que ningún build puede llevarla.
+- **Nunca va en una URL.** Los lanzadores (`run.sh`, `iniciar-robot.sh`, `ensayo.sh`, `demo.sh`) se la dan al bridge por entorno (`rosorin_export_gemini_key`), como el token: no aparece en `ps`. El bridge no la escribe en sus logs; al arrancar solo dice `GEMINI_API_KEY=sí|no`, y no se la pasa al worker de Python.
+- La web la pide con `GET /config/gemini-key`, con el token del bridge como cualquier otra ruta y con `Cache-Control: no-store`. **Quien tenga el token del bridge en la LAN puede leerla**: protege el token igual que la key.
+- **Nunca se guarda en el navegador:** ni `localStorage`, ni `sessionStorage`, ni cookies, ni IndexedDB. La web la tiene solo en memoria mientras la página está abierta y la vuelve a pedir en cada carga. Una key pegada a mano también vive solo en memoria: al recargar hay que pegarla otra vez. Al cargar, la web borra las entradas viejas `rosorin_gemini_api_key` y `rosorin_gemini_api_key_origin` que dejaron versiones anteriores.
+- Si la URL trae un parámetro `gemini_key` (un enlace viejo), la web lo quita de la barra y lo ignora.
 
 ## Origen y host
 

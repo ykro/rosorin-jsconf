@@ -76,6 +76,7 @@ Solo se aceptan los IDs `{1, 2, 3, 4, 5, 10}`. Cualquier otro ID en `/arm` o `/s
 - Manda el token como `x-bridge-token: <t>` o `Authorization: Bearer <t>`. `?token=` solo vale en `/ws`. `GET /health` es público.
 - `Host` debe ser una IP, `localhost` o un nombre de `BRIDGE_ALLOWED_HOSTS`; `Origin`, una IP de loopback, `localhost`, el sitio de la charla o uno de `BRIDGE_ALLOWED_ORIGINS`. Las IPs privadas solo valen como origen si hay token o el bridge escucha fuera de loopback.
 - En la laptop, el token se trae con `./traer-token.sh <usuario>@<IP>` (no lo vuelve a copiar si el bridge ya acepta el que tienes; `--force` lo trae siempre) y la web lo recibe en `#token=<t>`. `./ensayo.sh --laptop --ip <IP>` hace las dos cosas y corre la guía del ensayo.
+- API key de Gemini: `GEMINI_API_KEY` en el `web/.env` de donde corre el bridge. Los lanzadores se la dan al bridge por entorno; la web la pide a `GET /config/gemini-key` (con token, `Cache-Control: no-store`) y la tiene solo en memoria. Nunca va en una URL ni en `localStorage`, `sessionStorage`, cookies o IndexedDB.
 - Límite global: 30 POST/s con ráfaga de 60 (`/stop` y `/estop/release` exentos).
 
 El token se le pasa a `curl` por stdin (`-H @-`, `curl >= 7.55`) para que no aparezca en `ps`, como hace `rosorin_curl_with_token` en `robot-bridge/scripts/robot-common.sh`:

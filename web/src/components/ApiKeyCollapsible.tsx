@@ -4,16 +4,30 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   API_KEY_UPDATED_EVENT,
   getApiKeySource,
-  getStoredApiKey,
-  saveApiKey,
+  getBridgeKeyStatus,
+  getManualApiKey,
+  setManualApiKey,
   type ApiKeySource,
+  type BridgeKeyStatus,
 } from '@/lib/api-key';
+
+export const MISSING_KEY_NOTICE =
+  'Falta la API key de Gemini: agrégala a web/.env del robot (GEMINI_API_KEY) o ingrésala aquí.';
+export const MEMORY_ONLY_NOTICE = 'Solo se usa mientras esta página está abierta; no se guarda.';
+
+function sourceText(source: ApiKeySource, bridge: BridgeKeyStatus): string {
+  if (source === 'manual') return 'Ingresada a mano (solo esta página)';
+  if (source === 'bridge') return 'Cargada desde GEMINI_API_KEY (web/.env del robot)';
+  if (bridge === 'loading' || bridge === 'idle') return 'Buscando la key en el bridge…';
+  return 'Falta la API key — clic para ingresarla';
+}
 
 export function ApiKeyCollapsible() {
   const [open, setOpen] = useState(false);
   const [keyInput, setKeyInput] = useState('');
   const [hasKey, setHasKey] = useState(false);
   const [sourceLabel, setSourceLabel] = useState<ApiKeySource>('none');
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeKeyStatus>('idle');
   const [savedNotice, setSavedNotice] = useState(false);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -21,14 +35,13 @@ export function ApiKeyCollapsible() {
     const syncKeyState = () => {
       const source = getApiKeySource();
       setSourceLabel(source);
+      setBridgeStatus(getBridgeKeyStatus());
       setHasKey(source !== 'none');
-      setKeyInput(source === 'browser' || source === 'launcher' ? getStoredApiKey() : '');
+      setKeyInput(getManualApiKey());
     };
     syncKeyState();
-    window.addEventListener('storage', syncKeyState);
     window.addEventListener(API_KEY_UPDATED_EVENT, syncKeyState);
     return () => {
-      window.removeEventListener('storage', syncKeyState);
       window.removeEventListener(API_KEY_UPDATED_EVENT, syncKeyState);
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     };
@@ -36,7 +49,7 @@ export function ApiKeyCollapsible() {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    saveApiKey(keyInput);
+    setManualApiKey(keyInput);
     setSavedNotice(true);
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     savedTimerRef.current = setTimeout(() => {
@@ -46,9 +59,11 @@ export function ApiKeyCollapsible() {
   };
 
   const handleClear = () => {
-    saveApiKey('');
+    setManualApiKey('');
     setKeyInput('');
   };
+
+  const missing = !hasKey && bridgeStatus !== 'loading' && bridgeStatus !== 'idle';
 
   return (
     <div className="rounded-2xl border border-[#DADCE0] bg-white shadow-2xs">
@@ -74,13 +89,7 @@ export function ApiKeyCollapsible() {
                 : 'bg-[#FEF7E0] text-[#B06000]'
             }`}
           >
-            {sourceLabel === 'launcher'
-              ? 'Cargada desde GEMINI_API_KEY (.env)'
-              : sourceLabel === 'browser'
-                ? 'Cargada en navegador (localStorage)'
-                : sourceLabel === 'env'
-                  ? 'Cargada desde NEXT_PUBLIC_GEMINI_API_KEY (desaconsejado)'
-                  : 'No configurada — clic para ingresar en navegador'}
+            {sourceText(sourceLabel, bridgeStatus)}
           </span>
         </div>
         <span className="font-mono text-xs font-bold text-[#5F6368]">
@@ -93,11 +102,15 @@ export function ApiKeyCollapsible() {
           onSubmit={handleSave}
           className="border-t border-[#DADCE0] bg-[#F8F9FA] px-4 py-3.5"
         >
+          {missing && (
+            <p role="alert" className="mb-2 text-xs font-semibold text-[#B06000]">
+              {MISSING_KEY_NOTICE}
+            </p>
+          )}
           <p className="text-xs text-[#5F6368]">
-            Define <code className="font-mono text-[#202124]">GEMINI_API_KEY</code> en{' '}
-            <code className="font-mono text-[#202124]">web/.env</code> y <code className="font-mono text-[#202124]">run.sh</code> la
-            trae sola en el fragmento de la URL, o pégala aquí. Se guarda únicamente en el{' '}
-            <code className="font-mono text-[#202124]">localStorage</code> de tu navegador (nunca se sube al repositorio ni al servidor).
+            La web le pide la key al bridge del robot (<code className="font-mono text-[#202124]">GEMINI_API_KEY</code> en{' '}
+            <code className="font-mono text-[#202124]">web/.env</code>). Si la pegas aquí, gana sobre la del bridge.{' '}
+            {MEMORY_ONLY_NOTICE}
           </p>
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
             <label htmlFor="api-key-collapsible-input" className="sr-only">
@@ -108,16 +121,16 @@ export function ApiKeyCollapsible() {
               type="password"
               value={keyInput}
               onChange={(e) => setKeyInput(e.target.value)}
-              placeholder="Pega tu GEMINI_API_KEY (AIzaSy...)"
+              placeholder="Pega tu GEMINI_API_KEY"
               className="min-w-[240px] flex-1 rounded-xl border border-[#DADCE0] bg-white px-3.5 py-2 font-mono text-xs text-[#202124] focus:border-[#1A73E8] focus:outline-none"
             />
             <button
               type="submit"
               className="rounded-xl bg-[#1A73E8] px-4 py-2 text-xs font-bold text-white hover:bg-[#1557B0]"
             >
-              {savedNotice ? '✓ Guardada' : 'Guardar en navegador'}
+              {savedNotice ? '✓ Lista' : 'Usar en esta página'}
             </button>
-            {(sourceLabel === 'browser' || sourceLabel === 'launcher') && (
+            {sourceLabel === 'manual' && (
               <button
                 type="button"
                 onClick={handleClear}

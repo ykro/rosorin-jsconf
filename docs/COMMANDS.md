@@ -2,7 +2,7 @@
 
 | Comando | Dónde | Qué hace |
 |---|---|---|
-| `./run.sh --mock` | Laptop | Bridge simulado en `127.0.0.1:9000` y web en `http://localhost:3000`. Las demás banderas están en [`ONBOARDING.md`](./ONBOARDING.md#5-banderas-de-runsh). |
+| `./run.sh --mock` | Laptop | Bridge simulado en `127.0.0.1:9000` y web en `http://localhost:3000`. Todo lanzador que levanta el bridge le da por entorno la `GEMINI_API_KEY` de `web/.env` (o avisa que falta); la web la pide a `GET /config/gemini-key`, nunca por la URL. Las demás banderas están en [`ONBOARDING.md`](./ONBOARDING.md#5-banderas-de-runsh). |
 | `./run.sh --robot-ip <IP>` | Laptop | Solo la web, contra el bridge del robot. Necesita el token; imprime `http://localhost:3000/?bridge=http://<IP>:9000#token=<t>`. Al cerrarlo manda `/stop` al robot. |
 | `./traer-token.sh [--force] [<usuario>@]<IP> [ruta]` | Laptop | Lee `.bridge-token` del robot por SSH y lo guarda en el `.bridge-token` local con permisos `600`. Si ya tienes uno y el bridge lo acepta (`/status` responde 200), no lo vuelve a copiar; si el bridge no responde, lo trae y solo reemplaza el tuyo si cambió. `--force` lo trae siempre. Usuario por defecto: `ROBOT_USER` o el local. Ruta por defecto: `~/Desktop/rosorin-jsconf` (o `ROBOT_REPO`). |
 | `./demo.sh --robot` / `./demo.sh --laptop --ip <IP>` | Robot / Laptop | Lo mismo que `ensayo.sh --robot` / `--laptop`, sin la guía: deja el bridge y la web listos para la charla. Por defecto la web corre en el robot y la laptop solo la abre en Chrome; `--laptop-server` (en los dos lados) la corre en la laptop. No calibra la sombra (solo avisa si falta). Ver [`ENSAYO.md`](./ENSAYO.md#demo-el-día-de-la-charla). |

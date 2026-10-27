@@ -10,7 +10,7 @@ import { RobotBridgeClient, createBridgeActionHandler } from './robot-client';
 import { stopAllActiveConversations, type StopReason } from './gemini-live';
 import type { RobotActionHandler, RobotActionResult } from './types';
 import { downsampleFloat32ToInt16_16kHz, int16ToBase64, type PcmWorkletFrame } from './audio-worklet';
-import { getEffectiveApiKey } from './api-key';
+import { getEffectiveApiKey, loadApiKeyFromBridge } from './api-key';
 import { LiveConnection, type LiveStatus } from './live-connection';
 import { MicCapture } from './mic-capture';
 import { sanitizeTranscriptChunk } from './transcript-filter';
@@ -106,7 +106,7 @@ const IDLE_FREQUENCY = '104.7 FM';
 const TAB_HIDDEN_WARNING =
   'La radio se detuvo al cambiar de pestaña para que el robot no responda mientras presentas. Pulsa de nuevo para reanudarla.';
 const NO_KEY_WARNING =
-  'No hay GEMINI_API_KEY: el micrófono no se abre. Configura la API key arriba, o usa las frases rápidas y el cuadro de texto (búsqueda local).';
+  'Falta la API key de Gemini (GEMINI_API_KEY en web/.env del robot, o ingrésala arriba): el micrófono no se abre. Las frases rápidas y el cuadro de texto siguen funcionando (búsqueda local).';
 const CONNECT_FAILED_WARNING =
   'No se pudo conectar a Gemini Live. Puedes seguir con las frases rápidas o el cuadro de texto.';
 
@@ -685,6 +685,7 @@ ${sections.join('\n')}`;
     setActiveBumblebeeSession(this);
     this.unlockAudioContext();
 
+    if (!getEffectiveApiKey()) await loadApiKeyFromBridge();
     const key = getEffectiveApiKey();
     if (!key) {
       this.callbacks.onConnectionStatus('no_key');

@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { API_KEY_UPDATED_EVENT, getEffectiveApiKey, getStoredApiKey, saveApiKey } from '@/lib/api-key';
+import { API_KEY_UPDATED_EVENT, getEffectiveApiKey, getManualApiKey, setManualApiKey } from '@/lib/api-key';
+import { MEMORY_ONLY_NOTICE, MISSING_KEY_NOTICE } from './ApiKeyCollapsible';
 import type { LiveStatus } from '@/lib/live-connection';
 
 interface GeminiLiveConsoleProps {
@@ -40,21 +41,19 @@ export function GeminiLiveConsole({
 
   useEffect(() => {
     const refreshKeyStatus = () => {
-      setApiKeyDraft(getStoredApiKey());
+      setApiKeyDraft(getManualApiKey());
       setHasKey(Boolean(getEffectiveApiKey()));
     };
     refreshKeyStatus();
     window.addEventListener(API_KEY_UPDATED_EVENT, refreshKeyStatus);
-    window.addEventListener('storage', refreshKeyStatus);
     return () => {
       window.removeEventListener(API_KEY_UPDATED_EVENT, refreshKeyStatus);
-      window.removeEventListener('storage', refreshKeyStatus);
     };
   }, []);
 
   const handleSaveKey = (e: React.FormEvent) => {
     e.preventDefault();
-    saveApiKey(apiKeyDraft);
+    setManualApiKey(apiKeyDraft);
     setShowKeyInput(false);
   };
 
@@ -181,9 +180,7 @@ export function GeminiLiveConsole({
           className="mt-3 flex flex-col gap-2 rounded-xl border border-[#F9AB00] bg-[#FEF7E0]/60 p-3"
         >
           <p className="text-xs font-medium text-[#B06000]">
-            {hasKey
-              ? 'Actualiza tu GEMINI_API_KEY en el navegador (se guarda solo en localStorage):'
-              : 'No hay GEMINI_API_KEY (defínela en web/.env y abre la URL que imprime run.sh) o pégala aquí para guardarla en tu navegador:'}
+            {hasKey ? 'Cambia la GEMINI_API_KEY de esta página.' : MISSING_KEY_NOTICE} {MEMORY_ONLY_NOTICE}
           </p>
           <div className="flex items-center gap-2">
             <label htmlFor="gemini-console-api-key" className="sr-only">
@@ -194,14 +191,14 @@ export function GeminiLiveConsole({
               type="password"
               value={apiKeyDraft}
               onChange={(e) => setApiKeyDraft(e.target.value)}
-              placeholder="AIzaSy... (GEMINI_API_KEY)"
+              placeholder="GEMINI_API_KEY"
               className="flex-1 rounded-lg border border-[#DADCE0] bg-white px-3 py-1.5 font-mono text-xs text-[#202124] focus:border-[#1A73E8] focus:outline-none"
             />
             <button
               type="submit"
               className="rounded-lg bg-[#1A73E8] px-3.5 py-1.5 text-xs font-bold text-white"
             >
-              Guardar
+              Usar
             </button>
           </div>
         </form>

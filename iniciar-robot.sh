@@ -64,6 +64,8 @@ if ! curl -s -m 2 http://127.0.0.1:9000/health >/dev/null 2>&1; then
     # start_app_node también lanzaba el LiDAR y la cámara: el backend ros2 los necesita
     rosorin_start_sensors "$LOG_DIR"
   fi
+  # GEMINI_API_KEY (entorno o web/.env) por entorno: la web se la pide al bridge, nunca por la URL
+  rosorin_export_gemini_key "$ROOT_DIR"
   if [ -x "./target/release/rosorin-bridge" ]; then
     nohup ./target/release/rosorin-bridge --backend "$BACKEND" --host "$BRIDGE_HOST" --port 9000 --allow-mock-fallback >"$LOG_DIR/rosorin-bridge.log" 2>&1 &
   else
@@ -88,9 +90,9 @@ for _ in {1..30}; do
 done
 
 # 6. Abrir el Rostro Cinético (/face) en la pantalla de 7" del robot (o en Mac).
-#    El token (y la API key de Gemini, si hay GEMINI_API_KEY) van una sola vez en el fragmento
-#    (#token=…&gemini_key=…), que no llega al servidor ni a sus logs: la web los guarda y los quita
-#    de la barra.
+#    El token va una sola vez en el fragmento (#token=), que no llega al servidor ni a sus logs: la
+#    web lo guarda y lo quita de la barra. La API key de Gemini nunca va en la URL: la web se la
+#    pide al bridge, que la recibió por entorno (rosorin_export_gemini_key, más arriba).
 export DISPLAY="${DISPLAY:-:0}"
 if [ -f "/run/user/1000/gdm/Xauthority" ]; then
   export XAUTHORITY="/run/user/1000/gdm/Xauthority"
@@ -99,8 +101,6 @@ elif [ -f "$HOME/.Xauthority" ]; then
 fi
 FACE_URL="http://localhost:3000/face"
 FACE_URL_WITH_TOKEN="${FACE_URL}#token=${BRIDGE_TOKEN}"
-GEMINI_KEY="$(rosorin_gemini_key "$ROOT_DIR")"
-[ -n "$GEMINI_KEY" ] && FACE_URL_WITH_TOKEN="${FACE_URL_WITH_TOKEN}&gemini_key=${GEMINI_KEY}"
 
 if [ -x "/usr/local/bin/firefox" ]; then
   setsid /usr/local/bin/firefox --kiosk "$FACE_URL_WITH_TOKEN" >"$LOG_DIR/firefox-face.log" 2>&1 < /dev/null &

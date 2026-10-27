@@ -816,6 +816,8 @@ impl RobotController {
         let mut child = Command::new("python3")
             .arg(&script_path)
             .env("ROS_LOCALHOST_ONLY", "1")
+            // The worker never needs the Gemini key the bridge serves on /config/gemini-key
+            .env_remove("GEMINI_API_KEY")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

@@ -12,10 +12,9 @@
  *   variables: those end up in the public bundle.
  * - On the public site (any non-local hostname) the page does not contact
  *   localhost:9000 until the presenter enables it (button, `?bridge=` or a token).
- * - `#gemini_key=<k>`, handed over by the launchers next to the token, is consumed here too
- *   (see api-key.ts), so any page that touches the bridge also strips the key from the bar.
+ * - The Gemini key never travels in a URL (see api-key.ts): a stray `gemini_key` parameter from an old
+ *   link is removed from the address bar and ignored.
  */
-import { consumeApiKeyFromUrl } from './api-key';
 
 export const BRIDGE_URL_STORAGE_KEY = 'ROSORIN_BRIDGE_URL';
 export const BRIDGE_TOKEN_STORAGE_KEY = 'ROSORIN_BRIDGE_TOKEN';
@@ -112,7 +111,6 @@ function storeBridgeUrl(next: string | null, keepToken: boolean): boolean {
 export function consumeBridgeParamsFromUrl() {
   if (typeof window === 'undefined' || urlParamsConsumed) return;
   urlParamsConsumed = true;
-  consumeApiKeyFromUrl();
   let url: URL;
   try {
     url = new URL(window.location.href);
@@ -122,6 +120,18 @@ export function consumeBridgeParamsFromUrl() {
   let changed = false;
 
   const hashParams = new URLSearchParams(url.hash.replace(/^#/, ''));
+  if (hashParams.has('gemini_key') || url.searchParams.has('gemini_key')) {
+    hashParams.delete('gemini_key');
+    url.searchParams.delete('gemini_key');
+    const rest = hashParams.toString();
+    url.hash = rest ? `#${rest}` : '';
+    try {
+      window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      // The address bar keeps it, but it is never read or stored.
+    }
+    console.warn('[bridge-config] Ignoré una API key en la URL: la web la pide al bridge (GEMINI_API_KEY en web/.env).');
+  }
   const hashToken = hashParams.get('token');
   const queryToken = url.searchParams.get('token');
   const token = hashToken ?? queryToken;

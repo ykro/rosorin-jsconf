@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { ApiKeyBoot } from '@/components/ApiKeyBoot';
 
 export const metadata: Metadata = {
   title: 'ROSOrin Pro · De Web a Physical AI con Gemini Live y JS (JSConf MX)',
@@ -15,7 +16,10 @@ export default function RootLayout({
   return (
     <html lang="es">
       {/* Fonts are loaded once from globals.css (@import of Google Fonts). */}
-      <body>{children}</body>
+      <body>
+        <ApiKeyBoot />
+        {children}
+      </body>
     </html>
   );
 }

@@ -148,6 +148,18 @@ struct AppState {
     tx: broadcast::Sender<TelemetryState>,
     security: Arc<SecurityConfig>,
     limiter: Arc<RateLimiter>,
+    /// Gemini API key for the web (GEMINI_API_KEY, read once at start; never from argv, never
+    /// logged). Served only on GET /config/gemini-key, behind the token like every other route.
+    gemini_key: Option<Arc<str>>,
+}
+
+/// GEMINI_API_KEY from the environment (the launchers load it from web/.env), trimmed; empty = none.
+fn gemini_key_from_env() -> Option<Arc<str>> {
+    std::env::var("GEMINI_API_KEY")
+        .ok()
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .map(Arc::from)
 }
 
 #[derive(Debug, Deserialize)]
@@ -492,6 +504,24 @@ async fn rate_limit_middleware(
 
 async fn get_health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "ok" }))
+}
+
+/// The web asks for the Gemini key here instead of receiving it in a URL. `no-store`: no cache
+/// (browser or proxy) keeps a copy.
+async fn get_gemini_key(State(state): State<AppState>) -> impl IntoResponse {
+    let body = match state.gemini_key.as_deref() {
+        Some(key) => serde_json::json!({
+            "configured": true,
+            "api_key": key,
+            "source": "GEMINI_API_KEY",
+        }),
+        None => serde_json::json!({ "configured": false }),
+    };
+    (
+        StatusCode::OK,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(body),
+    )
 }
 
 async fn get_status(State(state): State<AppState>) -> Json<TelemetryState> {
@@ -941,6 +971,7 @@ fn build_router(state: AppState) -> Router {
         .route("/estop/release", post(post_estop_release))
         .route("/simulate/lidar", post(post_simulate_lidar))
         .route("/camera/frame", get(get_camera_frame))
+        .route("/config/gemini-key", get(get_gemini_key))
         .route("/ws", get(ws_handler))
         // Order (outer → inner): host/origin guard → CORS → body limit → auth → rate limit → handler
         .route_layer(middleware::from_fn_with_state(
@@ -1066,7 +1097,9 @@ async fn main() -> anyhow::Result<()> {
         tx: tx.clone(),
         security: Arc::clone(&security),
         limiter: Arc::new(RateLimiter::new(RATE_LIMIT_PER_SEC, RATE_LIMIT_BURST)),
+        gemini_key: gemini_key_from_env(),
     };
+    let gemini_key_configured = state.gemini_key.is_some();
 
     // 40Hz kinematics + servo interpolation tick (25ms), 20Hz WebSocket telemetry broadcast
     let tick_robot = Arc::clone(&robot);
@@ -1095,7 +1128,7 @@ async fn main() -> anyhow::Result<()> {
 
     let addr: SocketAddr = format!("{}:{}", args.host, args.port).parse()?;
     info!(
-        "rosorin-bridge listening on http://{} (backend={}, watchdog={}ms, token={}, lidar={}, orígenes IP privadas={})",
+        "rosorin-bridge listening on http://{} (backend={}, watchdog={}ms, token={}, lidar={}, orígenes IP privadas={}, GEMINI_API_KEY={})",
         addr,
         robot.snapshot().backend,
         args.watchdog_ms,
@@ -1110,6 +1143,7 @@ async fn main() -> anyhow::Result<()> {
         } else {
             "no"
         },
+        if gemini_key_configured { "sí" } else { "no" },
     );
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -1155,11 +1189,59 @@ mod tests {
                 allow_private_origins: token.is_some(),
             }),
             limiter: Arc::new(RateLimiter::new(RATE_LIMIT_PER_SEC, RATE_LIMIT_BURST)),
+            gemini_key: None,
         }
     }
 
     fn test_app(token: Option<&str>) -> Router {
         build_router(test_state(token))
+    }
+
+    #[tokio::test]
+    async fn test_gemini_key_endpoint_requires_token_and_never_caches() {
+        let token = "stage-secret-2026-abcdef";
+        let mut state = test_state(Some(token));
+        state.gemini_key = Some(Arc::from("AIzaTestKey"));
+        let app = build_router(state);
+
+        let no_tok = req("GET", "/config/gemini-key")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(no_tok).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let ok = req("GET", "/config/gemini-key")
+            .header("x-bridge-token", token)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(ok).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+        assert_eq!(
+            body_json(resp).await,
+            serde_json::json!({ "configured": true, "api_key": "AIzaTestKey", "source": "GEMINI_API_KEY" })
+        );
+    }
+
+    #[tokio::test]
+    async fn test_gemini_key_endpoint_without_key_is_not_configured() {
+        let token = "stage-secret-2026-abcdef";
+        let app = test_app(Some(token));
+        let ok = req("GET", "/config/gemini-key")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(ok).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            body_json(resp).await,
+            serde_json::json!({ "configured": false })
+        );
     }
 
     fn req(method: &str, uri: &str) -> axum::http::request::Builder {

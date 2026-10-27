@@ -103,6 +103,7 @@ Un comando que no se escribe al hardware (por ejemplo `/rgb` con el backend `ser
 | `GET` | `/health` | — | `{"status":"ok"}` (sin token) | No | No |
 | `GET` | `/status` | — | `TelemetryState` | No | No |
 | `GET` | `/camera/frame` | — | `image/jpeg` o `image/svg+xml` | No | No |
+| `GET` | `/config/gemini-key` | — | `{"configured":true,"api_key":"…","source":"GEMINI_API_KEY"}` o `{"configured":false}` | No | No |
 | `GET` | `/ws` | Upgrade a WebSocket | `101 Switching Protocols` | — | Ops de movimiento |
 | `POST` | `/cmd_vel` | `CmdVelRequest` | `ActionResponse` | Sí | Sí |
 | `POST` | `/arm` | `ArmRequest` | `ActionResponse` | Sí | Sí |
@@ -247,6 +248,16 @@ Solo con `--backend mock`; en `serial` o `ros2` responde `403 forbidden`. `front
 ### `GET /camera/frame`
 
 Con `ros2`, devuelve el último JPEG de `/depth_cam/rgb0/image_raw` (el worker manda hasta 2 por segundo). Si no hay imagen, devuelve un SVG sintético con el estado del robot.
+
+### `GET /config/gemini-key`
+
+La API key de Gemini para la web, para que nunca viaje en una URL. El bridge la toma de su variable de entorno `GEMINI_API_KEY` al arrancar (los lanzadores la cargan de `web/.env`); nunca de un argumento y nunca la escribe en el log, que solo dice `GEMINI_API_KEY=sí|no`. Pide token como las demás rutas y responde con `Cache-Control: no-store`.
+
+```json
+{ "configured": true, "api_key": "AIza…", "source": "GEMINI_API_KEY" }
+```
+
+Sin key responde `200` con `{ "configured": false }`. Quien tenga el token puede leerla: ver [`SECURITY.md`](./SECURITY.md#la-api-key-de-gemini). Al worker de Python no se le pasa.
 
 ---
 

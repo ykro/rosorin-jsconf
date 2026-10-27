@@ -15,7 +15,7 @@ Para el ensayo con el robot físico antes de la charla sigue [`ENSAYO.md`](./ENS
 
 - **Node.js 22** ([`.nvmrc`](../.nvmrc); `web/package.json` exige `>= 22.6`) y `npm`.
 - **Rust con `cargo >= 1.87`**. En Linux o WSL instala antes `libudev-dev` y `pkg-config` (`sudo apt-get install -y libudev-dev pkg-config`), que pide el crate `serialport`. Si falta, `./run.sh` pregunta antes de instalarlo con rustup; en una terminal no interactiva aborta salvo con `--yes` o `ASSUME_YES=1`. Lo mismo hace con Node (vía fnm).
-- **API key de Gemini** de [Google AI Studio](https://aistudio.google.com/apikey). Lo más cómodo: copia [`web/.env.example`](../web/.env.example) a `web/.env` y llena `GEMINI_API_KEY` (no es `NEXT_PUBLIC_`, así que no entra al bundle). `run.sh` la pasa en el fragmento de la URL que imprime (`#token=…&gemini_key=…`) y la web ya no la pide. Si no la defines, pégala en el navegador (botón «Ingresar API Key» de la consola de cada demo, o panel «Gemini Live API Key» en `/demo`). En los dos casos se guarda en `localStorage` como `rosorin_gemini_api_key`.
+- **API key de Gemini** de [Google AI Studio](https://aistudio.google.com/apikey). Copia [`web/.env.example`](../web/.env.example) a `web/.env` en la máquina donde corre el bridge (el robot; tu laptop con `--mock`) y llena `GEMINI_API_KEY` (no es `NEXT_PUBLIC_`, así que no entra al bundle). Los lanzadores se la dan al bridge por entorno y la web se la pide al bridge con el token (`GET /config/gemini-key`): nunca va en una URL y el navegador no la guarda, la tiene solo en memoria. Si falta, la web lo avisa y deja pegarla a mano (botón «Ingresar API Key» de la consola de cada demo, o panel «Gemini Live API Key» en `/demo`); esa key dura solo mientras la página está abierta.
 - **En el robot:** Ubuntu 22.04 con ROS 2 Humble y el SDK de Hiwonder (lo usa `robot-bridge/scripts/ros2_worker.py`).
 
 ---
@@ -117,7 +117,7 @@ Sin token, el script se detiene y te sugiere `./traer-token.sh`. Con token, impr
 http://localhost:3000/?bridge=http://<IP_DEL_ROBOT>:9000#token=<token>
 ```
 
-Ábrela. El token va en el fragmento (`#token=`, y `&gemini_key=` si definiste `GEMINI_API_KEY`), que el navegador no manda al servidor de Next. La web guarda el token en `localStorage` (`ROSORIN_BRIDGE_TOKEN`) y la URL del bridge (`ROSORIN_BRIDGE_URL`), y quita el token de la barra de direcciones. Desde ahí lo manda como `x-bridge-token` en cada petición y como `?token=` al abrir `/ws`.
+Ábrela. El token va en el fragmento (`#token=`), que el navegador no manda al servidor de Next. La API key de Gemini no va en la URL: la web se la pide al bridge del robot. La web guarda el token en `localStorage` (`ROSORIN_BRIDGE_TOKEN`) y la URL del bridge (`ROSORIN_BRIDGE_URL`), y quita el token de la barra de direcciones. Desde ahí lo manda como `x-bridge-token` en cada petición y como `?token=` al abrir `/ws`.
 
 Al cerrar `run.sh` con Ctrl+C, el script manda `POST /stop` al bridge, también al del robot: la E-stop queda enclavada hasta que la liberes.
 

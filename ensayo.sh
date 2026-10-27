@@ -219,7 +219,7 @@ robot_build_web() {
     (cd "$web" && npm ci --no-audit --no-fund) || return 1
   fi
   echo "[ensayo] Compilando la web estática (npm run build, tarda unos minutos en el Jetson)..."
-  (cd "$web" && NEXT_PUBLIC_GEMINI_API_KEY= NEXT_PUBLIC_LITE_MODE= npm run build) || return 1
+  (cd "$web" && NEXT_PUBLIC_LITE_MODE= npm run build) || return 1
   printf '%s\n' "$want" > "$web/out/.rosorin-build"
 }
 
@@ -350,18 +350,29 @@ finish() {
   exit "$code"
 }
 
-# Fragmento con el token y, si la hay en un .env, la clave de Gemini (rosorin_gemini_key): la web los
-# guarda en localStorage y los borra de la barra. El fragmento nunca llega al servidor.
-# Deja el resultado en WEB_FRAG (no en $(...): GEMINI_FROM_ENV debe sobrevivir).
+# Fragmento con el token (la web lo guarda y lo borra de la barra; el fragmento nunca llega al
+# servidor). La API key de Gemini NUNCA va en la URL: la web se la pide al bridge.
 WEB_FRAG=""
 web_fragment() {
-  local frag="" key=""
-  [ -n "${BRIDGE_TOKEN:-}" ] && frag="token=$BRIDGE_TOKEN"
-  if declare -F rosorin_gemini_key >/dev/null; then key="$(rosorin_gemini_key "$ROOT_DIR")"; fi
-  if [ -n "$key" ]; then frag="${frag:+$frag&}gemini_key=$key"; GEMINI_FROM_ENV=true; fi
-  WEB_FRAG="${frag:+#$frag}"
+  WEB_FRAG="${BRIDGE_TOKEN:+#token=$BRIDGE_TOKEN}"
 }
-GEMINI_FROM_ENV=false
+
+# ¿El bridge tiene GEMINI_API_KEY (web/.env de donde corre el bridge)? Solo lee "configured": la
+# key no pasa por esta terminal. Devuelve 0 si la tiene.
+bridge_has_gemini_key() {
+  rosorin_curl_with_token -s -m 3 "http://$ROBOT_IP:$BRIDGE_PORT/config/gemini-key" 2>/dev/null |
+    python3 -c 'import json,sys
+try: sys.exit(0 if json.load(sys.stdin).get("configured") else 1)
+except Exception: sys.exit(1)'
+}
+
+gemini_key_notice() {
+  if bridge_has_gemini_key; then
+    echo "[ensayo] La web toma la API key de Gemini del bridge (GEMINI_API_KEY en web/.env)."
+  else
+    echo "[ensayo] AVISO: falta la API key de Gemini: el bridge no tiene GEMINI_API_KEY (web/.env). La web te la pedirá y solo la usa mientras la página está abierta."
+  fi
+}
 OPENED_AT=""
 
 # Página local (600) que redirige a la URL con el token: así no va en argv ni en la terminal.
@@ -495,7 +506,7 @@ run_laptop_setup() {
     open_chrome "$chrome" "$robot_web/?bridge=http://$ROBOT_IP:$BRIDGE_PORT$WEB_FRAG" "$robot_web"
     WEB_URL="$robot_web"
     echo "[ensayo] Web del robot abierta en Chrome ($robot_web, perfil $CHROME_PROFILE)."
-    [ "$GEMINI_FROM_ENV" = true ] || echo "[ensayo] Carga ahí tu API key de Gemini (queda guardada en ese perfil)."
+    gemini_key_notice
     return 0
   fi
 
@@ -535,7 +546,7 @@ run_laptop_setup() {
   open_web "http://localhost:$WEB_PORT/$token_url$WEB_FRAG"
   WEB_URL="http://localhost:$WEB_PORT"
   echo "[ensayo] Web abierta en el navegador ($WEB_URL)."
-  [ "$GEMINI_FROM_ENV" = true ] || echo "[ensayo] Carga ahí tu API key de Gemini."
+  gemini_key_notice
 }
 WEB_URL=""
 
@@ -935,7 +946,13 @@ if [ -n "$ROBOT_SSH" ]; then
 fi
 GH="$(curl -s -m 5 -o /dev/null -w '%{http_code}' https://api.github.com/repos/ykro/rosorin-jsconf)"
 if [ "$GH" = "200" ]; then ok "La red del lugar llega a la API de GitHub (Roaster)."; else warn "La API de GitHub respondió $GH: usa los presets del Roaster."; fi
-check_manual "La API key de Gemini está cargada en el navegador de la laptop"
+R="$(api GET /config/gemini-key)"
+if [ "$(code_of "$R")" = "200" ] && [ "$(jf "$(body_of "$R")" 'd.get("configured")')" = "True" ]; then
+  ok "El bridge tiene GEMINI_API_KEY: la web la toma de ahí (nunca por la URL ni en el navegador)."
+else
+  warn "El bridge no tiene GEMINI_API_KEY (web/.env del robot)."
+  check_manual "La API key de Gemini está ingresada en la web (solo dura mientras la página está abierta)"
+fi
 check_manual "Con el micrófono real, al interrumpir al robot calla y luego responde con audio"
 check_manual "Con la bocina y los servos sonando no hay falsas interrupciones"
 

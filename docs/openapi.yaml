@@ -118,6 +118,37 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /config/gemini-key:
+    get:
+      tags: [estado]
+      summary: Obtener la API key de Gemini para la web
+      operationId: getGeminiKey
+      description: >
+        La web pide aquí la API key de Gemini en vez de recibirla en una URL. El bridge la toma de su
+        variable de entorno `GEMINI_API_KEY` al arrancar (nunca de un argumento ni del log). Pide token
+        y responde con `Cache-Control: no-store`. Sin key responde `{"configured": false}`.
+      responses:
+        '200':
+          description: Si hay key, la key y su origen
+          headers:
+            Cache-Control:
+              description: Siempre `no-store`
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeminiKeyConfig'
+              examples:
+                configurada:
+                  value: { configured: true, api_key: 'AIza…', source: GEMINI_API_KEY }
+                sinKey:
+                  value: { configured: false }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /ws:
     get:
       tags: [estado]
@@ -601,6 +632,19 @@ components:
             status: rate_limited
             message: Demasiadas solicitudes de movimiento. Intenta de nuevo en un momento.
   schemas:
+    GeminiKeyConfig:
+      type: object
+      required: [configured]
+      properties:
+        configured:
+          type: boolean
+          description: true si el bridge arrancó con GEMINI_API_KEY
+        api_key:
+          type: string
+          description: La key (solo si configured es true)
+        source:
+          type: string
+          const: GEMINI_API_KEY
     CmdVelRequest:
       type: object
       properties:

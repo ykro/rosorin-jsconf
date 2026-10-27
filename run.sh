@@ -309,6 +309,8 @@ trap 'exit 130' INT TERM
 # 6. Compilar y levantar robot-bridge en :$BRIDGE_PORT (solo si no apuntamos a un --robot-ip remoto).
 #    BRIDGE_TOKEN va por entorno (no por argv) para que no aparezca en `ps`.
 if [ -z "$REMOTE_ROBOT_IP" ]; then
+  # GEMINI_API_KEY (entorno o web/.env) por entorno, como el token: la web se la pide al bridge.
+  rosorin_export_gemini_key "$ROOT_DIR"
   BRIDGE_ARGS=(--backend "$ROBOT_BACKEND" --serial-port "$SERIAL_DEV" --host "$BRIDGE_BIND_HOST" --port "$BRIDGE_PORT")
   if [ "$BACKEND_AUTODETECTED" = true ]; then
     BRIDGE_ARGS+=(--allow-mock-fallback)
@@ -382,25 +384,21 @@ if [ -z "$REMOTE_ROBOT_IP" ] && [ "$ROBOT_BACKEND" != "mock" ]; then
   export NEXT_PUBLIC_LITE_MODE="1"
 fi
 
-# El token y la API key de Gemini (GEMINI_API_KEY del entorno o de web/.env) viajan una sola vez
-# en el fragmento (#token=…&gemini_key=…): el navegador no lo manda al servidor de Next ni queda en
-# sus logs; la web los guarda en localStorage y los quita de la barra.
-# Formato: http://localhost:3000/#token=<t>&gemini_key=<k>  ·  con robot: http://localhost:3000/?bridge=http://IP:9000#token=<t>&gemini_key=<k>
+# El token viaja una sola vez en el fragmento (#token=): el navegador no lo manda al servidor de Next
+# ni queda en sus logs; la web lo guarda y lo quita de la barra. La API key de Gemini NUNCA va en la
+# URL: la web se la pide al bridge (GET /config/gemini-key) y la tiene solo en memoria.
+# Formato: http://localhost:3000/#token=<t>  ·  con robot: http://localhost:3000/?bridge=http://IP:9000#token=<t>
 WEB_PATH="/"
 if [ -n "$REMOTE_ROBOT_IP" ]; then
   WEB_PATH="/?bridge=${BRIDGE_PUBLIC_URL}"
 fi
-GEMINI_KEY="$(rosorin_gemini_key "$ROOT_DIR")"
-WEB_FRAGMENT_PARAMS=()
-[ -n "$BRIDGE_TOKEN" ] && WEB_FRAGMENT_PARAMS+=("token=${BRIDGE_TOKEN}")
-[ -n "$GEMINI_KEY" ] && WEB_FRAGMENT_PARAMS+=("gemini_key=${GEMINI_KEY}")
 WEB_FRAGMENT=""
-if [ ${#WEB_FRAGMENT_PARAMS[@]} -gt 0 ]; then
-  WEB_FRAGMENT="#$(IFS='&'; echo "${WEB_FRAGMENT_PARAMS[*]}")"
+if [ -n "$BRIDGE_TOKEN" ]; then
+  WEB_FRAGMENT="#token=${BRIDGE_TOKEN}"
 fi
 
 echo "================================================================"
-echo " Abre esta URL (incluye el token y la API key; no la proyectes):"
+echo " Abre esta URL (incluye el token del puente; no la proyectes):"
 echo "   http://localhost:${WEB_PORT}${WEB_PATH}${WEB_FRAGMENT}"
 echo " Hub Ligero (Sin 3D) : http://localhost:${WEB_PORT}/robot"
 echo " Bridge Hardware     : ${BRIDGE_PUBLIC_URL}"

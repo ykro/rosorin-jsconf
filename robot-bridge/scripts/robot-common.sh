@@ -9,6 +9,7 @@
 #   rosorin_stop_sensors                   apaga lo que levantó rosorin_start_sensors
 #   rosorin_curl_with_token <args curl>    curl con x-bridge-token por stdin (nunca en argv)
 #   rosorin_gemini_key <raíz-del-repo>     imprime la API key de Gemini (GEMINI_API_KEY) o nada
+#   rosorin_export_gemini_key <raíz>       la exporta para el bridge (o avisa que falta)
 # ==============================================================================
 
 ROSORIN_LOG_TAG="${ROSORIN_LOG_TAG:-[rosorin]}"
@@ -105,10 +106,10 @@ rosorin_curl_with_token() {
   printf 'x-bridge-token: %s\n' "${BRIDGE_TOKEN:-}" | curl -H @- "$@"
 }
 
-# API key de Gemini para el navegador: GEMINI_API_KEY del entorno, si no la de web/.env.local o
-# web/.env, y como último recurso NEXT_PUBLIC_GEMINI_API_KEY (desaconsejada: Next la incrusta en el
-# bundle público). Los lanzadores la pasan solo en el fragmento de la URL (#token=…&gemini_key=…),
-# que no llega al servidor; la web la guarda en localStorage y la quita de la barra.
+# API key de Gemini: GEMINI_API_KEY del entorno, si no la de web/.env.local o web/.env, y como
+# último recurso NEXT_PUBLIC_GEMINI_API_KEY (nombre viejo; la web ya no la lee). Nunca va en una URL:
+# los lanzadores se la dan al bridge por entorno (rosorin_export_gemini_key) y la web se la pide con
+# el token (GET /config/gemini-key) y la tiene solo en memoria.
 # Uso: GEMINI_KEY="$(rosorin_gemini_key "$ROOT_DIR")"
 rosorin_gemini_key() {
   local root="$1" file var value
@@ -135,4 +136,18 @@ rosorin_gemini_key() {
     printf '%s' "$NEXT_PUBLIC_GEMINI_API_KEY"
   fi
   return 0
+}
+
+# Exporta GEMINI_API_KEY para el bridge que se va a lanzar (entorno, no argv: no aparece en `ps`).
+# Sin key solo avisa: la web la pedirá a mano. Uso: rosorin_export_gemini_key "$ROOT_DIR"
+rosorin_export_gemini_key() {
+  local key
+  key="$(rosorin_gemini_key "$1")"
+  if [ -n "$key" ]; then
+    export GEMINI_API_KEY="$key"
+    echo "$ROSORIN_LOG_TAG API key de Gemini lista para la web (GEMINI_API_KEY → bridge, GET /config/gemini-key)."
+  else
+    unset GEMINI_API_KEY
+    echo "$ROSORIN_LOG_TAG AVISO: falta GEMINI_API_KEY (entorno o $1/web/.env): la web pedirá la key a mano."
+  fi
 }

@@ -35,7 +35,8 @@ mock.module('@google/genai', {
   },
 });
 
-process.env.NEXT_PUBLIC_GEMINI_API_KEY = 'test-key';
+const { setManualApiKey } = await import('../api-key.ts');
+setManualApiKey('test-key');
 const { EmbodiedGeminiLiveSession } = await import('../gemini-live.ts');
 
 const wait = (ms = 5) => new Promise((r) => setTimeout(r, ms));
