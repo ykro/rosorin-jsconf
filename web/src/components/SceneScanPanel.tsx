@@ -38,6 +38,9 @@ export function SceneScanPanel({ scene, telemetry, bridgeConnected, estopLatched
   const rows = scanResultRows(scan, scene);
   const disabled = starting || progress.running || (bridgeConnected && estopLatched);
   const mode = scanModeLabel(bridgeConnected, telemetry.lidar_source);
+  // Simulated stage (mock or twin-only): the twin already draws the props where they are; the robot
+  // only learns it with «Reconocer». Real robot: the twin only shows what the camera measured.
+  const simulated = Boolean(telemetry.sim_scene);
 
   const handleStart = async () => {
     setError(null);
@@ -76,9 +79,9 @@ export function SceneScanPanel({ scene, telemetry, bridgeConnected, estopLatched
           ? 'Solo se mueve el brazo, despacio. Para abortar: STOP o Escape.'
           : bridgeConnected && estopLatched
             ? 'STOP activo: libéralo para reconocer el entorno.'
-            : bridgeConnected
-              ? `Mide con la cámara 3D dónde están ${WHAT[scene]} (solo el brazo, sin ruedas).`
-              : `El gemelo barre el brazo y una cámara simulada busca ${WHAT[scene]}.`}
+            : simulated
+              ? `El gemelo muestra dónde están ${WHAT[scene]}, pero el robot aún no lo sabe: hasta Reconocer, los gestos van al lado fijo. Reconocer barre solo el brazo con una cámara simulada.`
+              : `Mide con la cámara 3D dónde están ${WHAT[scene]} (solo el brazo, sin ruedas). Hasta entonces el gemelo los muestra translúcidos, «sin reconocer».`}
       </p>
       {progress.detail && <p className="mt-1 text-xs font-bold text-[#B06000]">{progress.detail}</p>}
       {error && (

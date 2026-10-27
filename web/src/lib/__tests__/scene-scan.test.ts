@@ -59,19 +59,44 @@ const done: ScanEnvStatus = {
 };
 
 describe('propPlacements', () => {
-  it('uses the fixed layout without a finished scan', () => {
+  it('real robot: translucent «sin reconocer» ghosts at the fixed layout without a finished scan', () => {
     for (const scan of [undefined, idle, { ...done, state: 'running' as const }, { ...done, state: 'aborted' as const }]) {
       const p = propPlacements(scan);
       assert.deepEqual({ x: p.approve_tray.x, y: p.approve_tray.y }, DEFAULT_PROP_LAYOUT.approve_tray);
       assert.equal(p.approve_tray.measured, false);
+      assert.equal(p.approve_tray.solid, false);
+      assert.equal(p.approve_tray.notFound, false);
     }
   });
 
-  it('moves the measured props and keeps the others fixed', () => {
-    const p = propPlacements(done);
-    assert.deepEqual(p.approve_tray, { x: 0.22, y: -0.15, measured: true });
-    assert.equal(p.reject_tray.measured, true);
-    assert.deepEqual(p.cloud_run, { ...DEFAULT_PROP_LAYOUT.cloud_run, measured: false });
+  it('real robot: solid where the camera measured them; the scene\'s missing props say «no encontrado»', () => {
+    const scan = { ...done, detections: [det('approve_tray', 0.22, -0.15)] };
+    const p = propPlacements(scan);
+    assert.equal(p.approve_tray.x, 0.22);
+    assert.equal(p.approve_tray.y, -0.15);
+    assert.equal(p.approve_tray.measured && p.approve_tray.solid && p.approve_tray.detected, true);
+    assert.equal(p.reject_tray.solid, false);
+    assert.equal(p.reject_tray.notFound, true);
+    // Props of the other demo are not «no encontrado»: that scan did not look for them
+    assert.equal(p.cloud_run.notFound, false);
+    assert.deepEqual({ x: p.cloud_run.x, y: p.cloud_run.y }, DEFAULT_PROP_LAYOUT.cloud_run);
+  });
+
+  it('simulated stage: drawn solid where they really are from the start, and the scan never moves them', () => {
+    const sim = [
+      { id: 'approve_tray' as const, x_m: 0.22, y_m: -0.15 },
+      { id: 'reject_tray' as const, x_m: 0.17, y_m: 0.2 },
+    ];
+    const before = propPlacements(idle, sim);
+    assert.deepEqual([before.approve_tray.x, before.approve_tray.y, before.approve_tray.solid], [0.22, -0.15, true]);
+    assert.equal(before.approve_tray.detected, false);
+    // A detection slightly off the truth marks it found but does not move it
+    const after = propPlacements({ ...done, detections: [det('approve_tray', 0.23, -0.14)] }, sim);
+    assert.deepEqual([after.approve_tray.x, after.approve_tray.y], [0.22, -0.15]);
+    assert.equal(after.approve_tray.detected, true);
+    assert.equal(after.approve_tray.measured, false);
+    assert.equal(after.reject_tray.notFound, true);
+    assert.equal(after.reject_tray.solid, true);
   });
 
   it('places detections in the world frame of the scan pose', () => {

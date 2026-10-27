@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BRIDGE_AUTH_ERROR_EVENT,
   FALLBACK_TELEMETRY,
@@ -9,7 +9,7 @@ import {
   executedMessage,
 } from './robot-client';
 import { isBridgeEnabled, onBridgeConfigChange, resolveBridgeUrl } from './bridge-config';
-import type { BridgeUiState, RobotActionResult, ScanScene, TelemetryState } from './types';
+import type { BridgeUiState, RobotActionResult, ScanScene, SimSceneObject, TelemetryState } from './types';
 import { GESTURES, GESTURE_ALIASES } from './gesture-choreographies.generated';
 import {
   AIM_OBJECTS,
@@ -24,6 +24,17 @@ import {
   type CaptureDetection,
 } from './scene-scan-sim';
 import { describeAim } from './scene-scan';
+
+function sameScene(a: readonly SimSceneObject[] | null, b: readonly SimSceneObject[]): boolean {
+  return (
+    a !== null &&
+    a.length === b.length &&
+    a.every((o, i) => o.id === b[i].id && o.x_m === b[i].x_m && o.y_m === b[i].y_m)
+  );
+}
+
+/** How often the twin re-reads the mock's stage, in case `POST /simulate/scene` changed it. */
+const SIM_SCENE_REFRESH_MS = 10_000;
 
 function clampServoForHardware(id: number, pulse: number): number {
   const p = Math.round(pulse);
@@ -114,6 +125,12 @@ export function useRobotTelemetry() {
     telemetryRef.current = telemetry;
   }, [telemetry]);
 
+  // The mock bridge's stage (`GET /simulate/scene`): the twin draws the props where they really are
+  // from the start. Re-read when the bridge or a «Reconocer» changes state, and every 10 s.
+  const [mockScene, setMockScene] = useState<SimSceneObject[] | null>(null);
+  const backend = telemetry.backend;
+  const scanState = telemetry.scan_env?.state;
+
   if (!bridgeRef.current) {
     bridgeRef.current = new RobotBridgeClient();
   }
@@ -195,6 +212,29 @@ export function useRobotTelemetry() {
       client?.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    if (backend !== 'mock') {
+      setMockScene(null);
+      return;
+    }
+    if (!bridge.connected) return; // keep the last stage through a short disconnect
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const scene = await bridgeRef.current?.getSimScene();
+        if (!cancelled && scene) setMockScene((prev) => (sameScene(prev, scene) ? prev : scene));
+      } catch {
+        // Keep the last known stage; the next refresh retries.
+      }
+    };
+    void load();
+    const timer = setInterval(load, SIM_SCENE_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [bridge.connected, backend, scanState]);
 
   /**
    * Sends an action to the bridge when the robot is connected. With no robot the
@@ -513,7 +553,8 @@ export function useRobotTelemetry() {
   const resetScene = useCallback(async () => {
     for (const t of scanTimersRef.current) clearTimeout(t);
     scanTimersRef.current = [];
-    setTelemetry(FALLBACK_TELEMETRY);
+    // Keeps the backend so a real robot's twin never flashes the simulated stage on reset
+    setTelemetry((prev) => ({ ...FALLBACK_TELEMETRY, backend: prev.backend, timestamp_ms: Date.now() }));
     return sendToBridge('scene/reset', (c) => c.resetScene());
   }, [sendToBridge]);
 
@@ -564,8 +605,18 @@ export function useRobotTelemetry() {
     return result;
   }, [sendToBridge]);
 
+  // Ground truth for the twin, by the backend of the last telemetry (so a real robot that drops the
+  // link for a moment never shows the simulated stage): the twin-only simulation's stage before any
+  // bridge answered, the mock's stage with the mock bridge, nothing with the real robot (only
+  // «Reconocer» knows where things are).
+  const viewTelemetry = useMemo<TelemetryState>(() => {
+    const simScene: readonly SimSceneObject[] | null =
+      telemetry.backend === FALLBACK_TELEMETRY.backend ? DEFAULT_SIM_SCENE : telemetry.backend === 'mock' ? mockScene : null;
+    return { ...telemetry, sim_scene: simScene as SimSceneObject[] | null };
+  }, [telemetry, mockScene]);
+
   return {
-    telemetry,
+    telemetry: viewTelemetry,
     bridge,
     bridgeConnected: bridge.connected,
     bridgeRef,

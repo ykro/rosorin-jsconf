@@ -1,4 +1,4 @@
-import type { GestureAim, ScanEnvStatus, ScanPropId, ScanScene, SceneDetection } from './types';
+import type { GestureAim, ScanEnvStatus, ScanPropId, ScanScene, SceneDetection, SimSceneObject } from './types';
 
 /** Props each «Reconocer» scene looks for (same as `ScanScene::objects` in scan_env.rs). */
 export const SCAN_SCENE_PROPS: Record<ScanScene, ScanPropId[]> = {
@@ -30,9 +30,28 @@ export const DEFAULT_PROP_LAYOUT: Record<ScanPropId, { x: number; y: number }> =
 export interface PropPlacement {
   x: number;
   y: number;
-  /** True when it comes from a «Reconocer» measurement, false for the fixed layout. */
+  /** The position comes from a «Reconocer» measurement. */
   measured: boolean;
+  /**
+   * Drawn solid: the twin knows where the prop is (the simulated stage, or a measurement of the
+   * real robot). False = translucent «sin reconocer» ghost at the fixed layout.
+   */
+  solid: boolean;
+  /** The last finished «Reconocer» found it; `detection` has its bearing, distance and confidence. */
+  detected: boolean;
+  /** A finished «Reconocer» of this prop's scene did not find it. */
+  notFound: boolean;
+  detection: SceneDetection | null;
 }
+
+/** Scene each prop belongs to. */
+export const PROP_SCENE: Record<ScanPropId, ScanScene> = {
+  approve_tray: 'gatekeeper',
+  reject_tray: 'gatekeeper',
+  cloud_run: 'bughunter',
+  gemini_live: 'bughunter',
+  firestore: 'bughunter',
+};
 
 /** A detection (robot frame at scan time) in the odometry/world frame the twin draws in. */
 export function detectionToWorld(
@@ -46,20 +65,54 @@ export function detectionToWorld(
 }
 
 /**
- * Where the twin should draw each prop: the measured position after a finished scan that found it
- * (even if it is no longer fresh, the world position stays valid), otherwise the fixed layout.
+ * Where and how the twin draws each prop.
+ * - Simulated stage (`simScene`, mock bridge or twin-only): every prop sits where it really is from
+ *   the start, solid, and never moves when the scan finishes; «Reconocer» only marks what it found.
+ * - Real robot (no `simScene`): there is no ground truth. Before a scan the props are translucent
+ *   ghosts at the fixed layout; after it, the ones the camera found are drawn solid where it
+ *   measured them (a re-scan moves them), and the rest stay ghosts marked «no encontrado».
  */
-export function propPlacements(scan: ScanEnvStatus | undefined | null): Record<ScanPropId, PropPlacement> {
+export function propPlacements(
+  scan: ScanEnvStatus | undefined | null,
+  simScene?: readonly SimSceneObject[] | null
+): Record<ScanPropId, PropPlacement> {
+  const done = scan?.state === 'done';
+  const found = new Map<ScanPropId, SceneDetection>();
+  if (done) {
+    for (const d of scan.detections ?? []) {
+      if (d.id in DEFAULT_PROP_LAYOUT && Number.isFinite(d.x_m) && Number.isFinite(d.y_m)) found.set(d.id, d);
+    }
+  }
+  const truth = new Map<ScanPropId, SimSceneObject>();
+  for (const o of simScene ?? []) {
+    if (o.id in DEFAULT_PROP_LAYOUT && Number.isFinite(o.x_m) && Number.isFinite(o.y_m)) truth.set(o.id, o);
+  }
   const out = {} as Record<ScanPropId, PropPlacement>;
   for (const id of Object.keys(DEFAULT_PROP_LAYOUT) as ScanPropId[]) {
-    out[id] = { ...DEFAULT_PROP_LAYOUT[id], measured: false };
-  }
-  if (scan?.state !== 'done') return out;
-  for (const d of scan.detections ?? []) {
-    if (!(d.id in out) || !Number.isFinite(d.x_m) || !Number.isFinite(d.y_m)) continue;
-    out[d.id] = { ...detectionToWorld(d, scan.odom_at_scan), measured: true };
+    const detection = found.get(id) ?? null;
+    const notFound = done && scan.scene === PROP_SCENE[id] && !detection;
+    const real = truth.get(id);
+    if (simScene) {
+      out[id] = {
+        ...(real ? { x: real.x_m, y: real.y_m } : DEFAULT_PROP_LAYOUT[id]),
+        measured: false,
+        solid: Boolean(real),
+        detected: Boolean(detection),
+        notFound,
+        detection,
+      };
+    } else if (detection) {
+      out[id] = { ...detectionToWorld(detection, scan?.odom_at_scan ?? null), measured: true, solid: true, detected: true, notFound: false, detection };
+    } else {
+      out[id] = { ...DEFAULT_PROP_LAYOUT[id], measured: false, solid: false, detected: false, notFound, detection: null };
+    }
   }
   return out;
+}
+
+/** «34° der · 0.27 m · 87 %» for a detection. */
+export function detectionText(d: Pick<SceneDetection, 'bearing_deg' | 'distance_m' | 'confidence'>): string {
+  return `${formatBearing(d.bearing_deg)} · ${d.distance_m.toFixed(2)} m · ${Math.round(d.confidence * 100)} %`;
 }
 
 /** «31° izq» / «12° der» / «al frente». */
@@ -139,7 +192,7 @@ export function scanResultRows(scan: ScanEnvStatus | undefined | null, scene: Sc
       label: PROP_LABELS[id],
       found: Boolean(d),
       text: d
-        ? `${formatBearing(d.bearing_deg)} · ${d.distance_m.toFixed(2)} m · ${Math.round(d.confidence * 100)} %`
+        ? detectionText(d)
         : done
           ? 'no encontrado (usa el lado fijo)'
           : '—',

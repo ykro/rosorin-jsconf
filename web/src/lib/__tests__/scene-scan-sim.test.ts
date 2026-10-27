@@ -15,6 +15,7 @@ import {
   sweepPositions,
   sweepTimeline,
   type CaptureDetection,
+  inCameraCone,
 } from '../scene-scan-sim.ts';
 import { GESTURES } from '../gesture-choreographies.generated.ts';
 import type { ScanEnvStatus, ScanScene } from '../types.ts';
@@ -158,5 +159,28 @@ describe('scene-scan-sim: aiming like aim_for / joint1_for_point', () => {
       reject.slice(2).some((s) => s.velocity && s.velocity[0] < 0),
       backOff
     );
+  });
+});
+
+describe('inCameraCone', () => {
+  const origin = { x_m: 0, y_m: 0, yaw_rad: 0 };
+  it('sees what is where the arm points and not what is behind it or too far', () => {
+    assert.equal(inCameraCone(origin, 500, 0.3, 0).inside, true);
+    // joint1 = 280 points right: a prop on the left is outside, one on the right inside
+    assert.equal(inCameraCone(origin, 280, 0.17, 0.2).inside, false);
+    assert.equal(inCameraCone(origin, 280, 0.22, -0.15).inside, true);
+    assert.equal(inCameraCone(origin, 500, -0.3, 0).inside, false);
+    assert.equal(inCameraCone(origin, 500, 1.2, 0).inside, false);
+  });
+  it('agrees with simCapture', () => {
+    for (const j1 of sweepPositions()) {
+      const seen = simCapture('gatekeeper', DEFAULT_SIM_SCENE, origin, j1).map((d) => d.id).sort();
+      const cone = DEFAULT_SIM_SCENE.filter(
+        (o) => o.id.endsWith('_tray') && inCameraCone(origin, j1, o.x_m, o.y_m).inside
+      )
+        .map((o) => o.id)
+        .sort();
+      assert.deepEqual(seen, cone);
+    }
   });
 });

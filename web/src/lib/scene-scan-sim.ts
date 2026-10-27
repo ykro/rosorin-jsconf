@@ -127,6 +127,23 @@ export function joint1HeadingDeg(pulse: number): number {
 const isTray = (id: string) => id.endsWith('_tray');
 
 /**
+ * Whether the simulated camera, with the robot at `odom` and joint1 at `j1Pulse`, sees the world
+ * point (wx, wy): inside ±34° of where the arm points and 8-90 cm from the joint1 axis. `offDeg` is
+ * how far from the image center it falls; (x, y) is the point in base_link.
+ */
+export function inCameraCone(
+  odom: Pose2D,
+  j1Pulse: number,
+  wx: number,
+  wy: number
+): { inside: boolean; offDeg: number; x: number; y: number } {
+  const [x, y] = toRobot(odom, wx, wy);
+  const reach = Math.hypot(x - J1_AXIS_X_M, y);
+  const offDeg = wrapDeg(toDeg(Math.atan2(y, x - J1_AXIS_X_M)) - joint1HeadingDeg(j1Pulse));
+  return { inside: Math.abs(offDeg) <= MOCK_HALF_FOV_DEG && reach >= 0.08 && reach <= 0.9, offDeg, x, y };
+}
+
+/**
  * What the simulated camera sees with joint1 at `j1Pulse`: the props of `scene` inside its cone
  * (±34° of where the arm points, 8-90 cm from the joint1 axis), with a confidence that drops toward
  * the edge of the image.
@@ -137,15 +154,12 @@ export function simCapture(
   odom: Pose2D,
   j1Pulse: number
 ): CaptureDetection[] {
-  const heading = joint1HeadingDeg(j1Pulse);
   const wanted = SCAN_SCENE_PROPS[scene];
   const out: CaptureDetection[] = [];
   for (const o of sim) {
     if (!wanted.includes(o.id)) continue;
-    const [x, y] = toRobot(odom, o.x_m, o.y_m);
-    const reach = Math.hypot(x - J1_AXIS_X_M, y);
-    const off = wrapDeg(toDeg(Math.atan2(y, x - J1_AXIS_X_M)) - heading);
-    if (Math.abs(off) > MOCK_HALF_FOV_DEG || reach < 0.08 || reach > 0.9) continue;
+    const { inside, offDeg: off, x, y } = inCameraCone(odom, j1Pulse, o.x_m, o.y_m);
+    if (!inside) continue;
     out.push({
       id: o.id,
       x_m: x,

@@ -7,6 +7,7 @@ import type {
   RobotActionHandler,
   RobotActionResult,
   TelemetryState,
+  SimSceneObject,
 } from './types';
 import {
   getBridgeToken,
@@ -346,6 +347,12 @@ export class RobotBridgeClient {
 
   public async getSceneScan(): Promise<ScanEnvStatus | null> {
     return (await this.request('GET', '/scan_env')) as ScanEnvStatus | null;
+  }
+
+  /** Mock only: where the props really are on the simulated stage (`GET /simulate/scene`). */
+  public async getSimScene(): Promise<SimSceneObject[] | null> {
+    const data = await this.request('GET', '/simulate/scene');
+    return Array.isArray(data) ? (data as SimSceneObject[]) : null;
   }
 
   public async moveChassis(

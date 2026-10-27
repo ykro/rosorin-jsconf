@@ -49,6 +49,19 @@ export interface TelemetryState {
   lidar_source?: 'mock' | 'ros2' | 'none';
   /** «Reconocer» (`POST /scan_env`): sweep progress and measured props. Absent on older bridges. */
   scan_env?: ScanEnvStatus;
+  /**
+   * Where the props really are in a simulated stage (the mock bridge's `GET /simulate/scene`, or
+   * the twin-only simulation). Never sent by the bridge in telemetry and absent with the real
+   * robot, which has no ground truth: the twin then only knows what «Reconocer» measured.
+   */
+  sim_scene?: SimSceneObject[] | null;
+}
+
+/** A prop of a simulated stage, odometry/world frame (m, REP-103). */
+export interface SimSceneObject {
+  id: ScanPropId;
+  x_m: number;
+  y_m: number;
 }
 
 /** Stage of a «Reconocer» scan: Demo B (trays) or Demo C (totems). */

@@ -8,7 +8,9 @@ import type { TelemetryState } from '@/lib/types';
 import { isSectorUncovered, lidarAlert, lidarMarkers, LIDAR_SECTOR_ANGLE_RAD } from '@/lib/lidar';
 import type { LidarSectorName } from '@/lib/types';
 import { shouldIgnoreShortcut } from '@/lib/keyboard';
-import { propPlacements } from '@/lib/scene-scan';
+import { detectionText, PROP_SCENE, propPlacements } from '@/lib/scene-scan';
+import { inCameraCone } from '@/lib/scene-scan-sim';
+import type { ScanPropId } from '@/lib/types';
 import { ViewerErrorBoundary } from './ViewerErrorBoundary';
 
 export type SceneMode = 'sandbox' | 'roaster' | 'gatekeeper' | 'bughunter';
@@ -664,6 +666,67 @@ function Rosorin3DViewerScene({
       totemLabels[spec.id] = labelSprite;
     }
 
+    // «Reconocer» markers per prop: a floor ring when the scan found it and a small tag with what
+    // it measured («34° der · 0.27 m · 87 %»), «no encontrado», or «sin reconocer» for a ghost.
+    const createTagSprite = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 96;
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace; // canvas colors are sRGB: without this the tag looks washed out
+      labelTextures.push(tex);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+      sprite.scale.set(0.15, 0.028, 1);
+      sprite.visible = false;
+      let last = '';
+      const setText = (text: string, accentHex: string) => {
+        const key = `${text}|${accentHex}`;
+        if (key === last) return;
+        last = key;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.roundRect(6, 6, 500, 84, 18);
+        ctx.fill();
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = accentHex;
+        ctx.stroke();
+        ctx.fillStyle = accentHex;
+        ctx.font = 'bold 38px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, 256, 50);
+        tex.needsUpdate = true;
+      };
+      return { sprite, setText };
+    };
+    const propMeshes: Record<ScanPropId, THREE.Mesh> = {
+      approve_tray: approveTray,
+      reject_tray: rejectTray,
+      cloud_run: totemMeshes.cloud_run,
+      gemini_live: totemMeshes.gemini_live,
+      firestore: totemMeshes.firestore,
+    };
+    const propMarkers = {} as Record<ScanPropId, { ring: THREE.Mesh; tag: ReturnType<typeof createTagSprite>; tagZ: number }>;
+    for (const id of Object.keys(propMeshes) as ScanPropId[]) {
+      const tray = id.endsWith('_tray');
+      const ring = new THREE.Mesh(
+        tray ? new THREE.RingGeometry(0.112, 0.124, 56) : new THREE.RingGeometry(0.064, 0.074, 40),
+        new THREE.MeshBasicMaterial({ color: 0x1a73e8, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false })
+      );
+      ring.visible = false;
+      const tag = createTagSprite();
+      const group = PROP_SCENE[id] === 'gatekeeper' ? gatekeeperGroup : bughunterGroup;
+      group.add(ring);
+      group.add(tag.sprite);
+      propMarkers[id] = { ring, tag, tagZ: tray ? 0.075 : 0.215 };
+      // Ghost-capable: opacity is set per frame (solid 1, «sin reconocer» translucent)
+      for (const m of [propMeshes[id].material as THREE.MeshStandardMaterial]) m.transparent = true;
+    }
+    const propHighlight = {} as Record<ScanPropId, boolean>;
+
     // SOLID, OPAQUE, HIGH-CONTRAST INDUSTRIAL MATERIALS (Zero transparent/washed-out parts)
     const loader = new STLLoader();
 
@@ -865,18 +928,53 @@ function Rosorin3DViewerScene({
       lInJoint.pivot.setRotationFromAxisAngle(lInJoint.axis, -openAngle);
       lOutJoint.pivot.setRotationFromAxisAngle(lOutJoint.axis, openAngle);
 
-      // Trays and totems where «Reconocer» measured them (world frame), else the fixed layout.
-      scanCone.visible = st.scan_env?.state === 'running';
-      const placements = propPlacements(st.scan_env);
-      approveTray.position.set(placements.approve_tray.x, placements.approve_tray.y, TRAY_TOP_M / 2);
-      rejectTray.position.set(placements.reject_tray.x, placements.reject_tray.y, TRAY_TOP_M / 2);
-      for (const [id, mesh] of Object.entries(totemMeshes)) {
-        const p = placements[id as keyof typeof placements];
-        // A measured totem turns to face the robot's start; the fixed ones face forward.
-        const facing = p.measured ? Math.atan2(p.y, p.x) : 0;
-        mesh.position.set(p.x, p.y, 0.0725);
+      // Trays and totems. Simulated stage: where they really are, solid from the start, never moved
+      // by the scan. Real robot: translucent «sin reconocer» ghosts at the fixed layout until
+      // «Reconocer» measures them, then solid at the measured positions (scene-scan.ts).
+      const scanning = st.scan_env?.state === 'running';
+      scanCone.visible = scanning;
+      const placements = propPlacements(st.scan_env, st.sim_scene);
+      const odomPose = { x_m: st.odometry?.x_m || 0, y_m: st.odometry?.y_m || 0, yaw_rad: st.odometry?.yaw_rad || 0 };
+      for (const id of Object.keys(propMeshes) as ScanPropId[]) {
+        const p = placements[id];
+        const mesh = propMeshes[id];
+        const tray = id.endsWith('_tray');
+        // A totem that is not at the fixed layout turns to face the robot's start
+        const facing = !tray && (p.measured || st.sim_scene) ? Math.atan2(p.y, p.x) : 0;
+        mesh.position.set(p.x, p.y, tray ? TRAY_TOP_M / 2 : 0.0725);
         mesh.rotation.z = facing;
-        totemLabels[id]?.position.set(p.x - 0.01 * Math.cos(facing), p.y - 0.01 * Math.sin(facing), 0.172);
+        if (!tray) {
+          const label = totemLabels[id];
+          label?.position.set(p.x - 0.01 * Math.cos(facing), p.y - 0.01 * Math.sin(facing), 0.172);
+          if (label) (label.material as THREE.SpriteMaterial).opacity = p.solid ? 1 : 0.4;
+        }
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        mat.opacity = p.solid ? 1 : 0.28;
+        mat.depthWrite = p.solid;
+        // While sweeping a simulated stage, a prop lights up when the simulated camera sees it
+        propHighlight[id] =
+          scanning &&
+          Boolean(st.sim_scene) &&
+          st.scan_env?.scene === PROP_SCENE[id] &&
+          p.solid &&
+          inCameraCone(odomPose, p1, p.x, p.y).inside;
+        if (tray) {
+          mat.emissive.copy(mat.color);
+          mat.emissiveIntensity = propHighlight[id] ? 0.6 : 0;
+        }
+        const marker = propMarkers[id];
+        marker.ring.visible = p.detected;
+        marker.ring.position.set(p.x, p.y, 0.002);
+        const tag = marker.tag;
+        if (p.detected && p.detection) {
+          tag.setText(`✓ ${detectionText(p.detection)}`, '#1A73E8');
+        } else if (p.notFound) {
+          tag.setText('✗ no encontrado', '#B06000');
+        } else if (!p.solid) {
+          tag.setText('sin reconocer', '#80868B');
+        }
+        tag.sprite.visible = !scanning && (p.detected || p.notFound || !p.solid);
+        tag.sprite.position.set(p.x, p.y, marker.tagZ);
       }
 
       const heldState = st.held_object || 'deploy_key';
@@ -908,7 +1006,7 @@ function Rosorin3DViewerScene({
         const pointed = st.pointed_totem;
         for (const [id, mesh] of Object.entries(totemMeshes)) {
           const mat = mesh.material as THREE.MeshStandardMaterial;
-          if (pointed === id) {
+          if (pointed === id || propHighlight[id as ScanPropId]) {
             mat.emissive.copy(mat.color);
             mat.emissiveIntensity = 0.55;
             mesh.scale.set(1.12, 1.12, 1.08);
