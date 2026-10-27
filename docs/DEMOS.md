@@ -70,7 +70,7 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
 
 - **Objetivo:** como Bumblebee, el robot tiene la caja de voz dañada y **solo responde con fragmentos de canciones** mientras baila con el brazo y el chasis.
 - **Catálogo** ([`web/public/songs/catalog.json`](../web/public/songs/catalog.json)): 168 fragmentos con letra y metadatos emocionales, 95 en español y 73 en inglés, de 2.1 a 9.4 s.
-- **Sin MP3:** los clips no están en git ni en el sitio desplegado. Cuando un clip no carga, la web reproduce un barrido de radio, muestra «Clip no disponible en esta versión pública: se reproduce un barrido de radio.» y mantiene la letra en el dial. En local, coloca los `<id>.mp3` en `web/public/songs/clips/` para oír las canciones.
+- **MP3:** los clips no están en git; viven en `web/public/songs/clips/` de la laptop, de ahí los copian `ensayo.sh --laptop` y `demo.sh --laptop` al robot y `firebase deploy` los publica en el sitio. Si un clip no carga, la web reproduce un barrido de radio, muestra «Falta el MP3 de este clip (web/public/songs/clips): se reproduce un barrido de radio.» y mantiene la letra en el dial.
 - **Bailes** (`robot-bridge/src/gestures.rs`):
   - `bumblebee_hype`: fiesta
   - `bumblebee_groove`: ritmo funk con desplazamiento lateral

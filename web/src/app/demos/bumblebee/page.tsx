@@ -41,7 +41,7 @@ const DANCE_PRESETS = [
 ];
 
 const CLIP_UNAVAILABLE_NOTICE: Record<ClipUnavailableReason, string> = {
-  missing: 'Clip no disponible en esta versión pública: se reproduce un barrido de radio.',
+  missing: 'Falta el MP3 de este clip (web/public/songs/clips): se reproduce un barrido de radio.',
   blocked: 'El navegador bloqueó el audio: toca la página una vez y vuelve a intentarlo.',
 };
 

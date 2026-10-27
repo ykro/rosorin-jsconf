@@ -40,7 +40,7 @@ El CI (`.github/workflows/ci.yml`) corre en cada push y PR todo lo anterior meno
 
 ## Reglas
 
-- **No versiones MP3.** Los clips de `web/public/songs/clips/` tienen derechos de autor; `.gitignore` y `firebase.json` los excluyen. No los agregues a git ni los saques del `hosting.ignore`.
+- **No versiones MP3.** Los clips de `web/public/songs/clips/` tienen derechos de autor: `.gitignore` los deja fuera de git. No los agregues a git. El hosting sí los publica (decisión del autor, 2026-10-27): `firebase deploy` los sube desde `web/out`, que los copia de `web/public/songs/clips/` de la laptop.
 - **Nada secreto en `NEXT_PUBLIC_*`.** Esas variables se incrustan en el bundle público. La API key de Gemini va en `localStorage` y el token del bridge llega por `#token=` (o `?token=`) o el panel del robot. En scripts, pásale el token a `curl` por stdin (`rosorin_curl_with_token`), nunca en argumentos.
 - **No relajes la seguridad del bridge sin pedido explícito:** token fuera de loopback, `Host`/`Origin` (IPs privadas solo con token o fuera de loopback), rate limit, E-stop enclavada (también al apagar), *heartbeat* del worker, LiDAR que falla cerrado, campo `blocked` y límites de `protocol.rs`.
 - **Bridge y worker van juntos.** Un cambio en el protocolo entre `backend.rs` y `ros2_worker.py` (por ejemplo el *heartbeat*) obliga a actualizar los dos; documenta en el mismo cambio que en el robot hay que correr `make build-robot`.

@@ -9,7 +9,7 @@ rosorin-jsconf/
 ├── demo.sh                   # Charla: ensayo.sh --demo (--robot / --laptop sin la guía; --laptop-server)
 ├── Makefile                  # up, robot, bridge, web, reset, release, test, lint, build-robot, calibrar-sombra
 ├── .nvmrc                    # Node 22
-├── firebase.json             # Hosting de jsconfmx26.web.app (CSP, sin songs/clips/)
+├── firebase.json             # Hosting de jsconfmx26.web.app (CSP; incluye songs/clips/ desde la laptop)
 ├── LICENSE                   # MIT
 ├── NOTICE                    # Atribución de las mallas de Hiwonder y nota sobre los clips
 ├── AGENTS.md · CONTRIBUTING.md
