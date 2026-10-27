@@ -2,13 +2,11 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  bridgeHost,
   getBridgeToken,
   getStoredBridgeUrl,
   isBridgeEnabled,
   isPublicSite,
   onBridgeConfigChange,
-  resolveBridgeUrl,
   setBridgeEnabled,
   setBridgeToken,
   setStoredBridgeUrl,
@@ -109,12 +107,18 @@ interface BridgeSettingsPanelProps {
   onClose: () => void;
 }
 
-/** Bridge URL, shared token and on/off switch (stored only in this browser). */
+/** What the page is talking to, never its host or IP (it changes with every network). */
+export function bridgeRoleLabel(bridge?: BridgeUiState): string {
+  if (!bridge?.enabled) return 'Simulador 3D';
+  if (!bridge.connected) return 'Sin bridge';
+  return bridge.lidarSource === 'mock' ? 'Mock' : 'Robot';
+}
+
+/** Bridge URL (this page load only), shared token and on/off switch. */
 export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: BridgeSettingsPanelProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [publicSite, setPublicSite] = useState(false);
-  const [currentUrl, setCurrentUrl] = useState('');
   const [urlDraft, setUrlDraft] = useState('');
   const [tokenDraft, setTokenDraft] = useState('');
   const [hasToken, setHasToken] = useState(false);
@@ -124,7 +128,6 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
     const sync = () => {
       setEnabled(isBridgeEnabled());
       setPublicSite(isPublicSite());
-      setCurrentUrl(resolveBridgeUrl());
       setUrlDraft(getStoredBridgeUrl());
       setHasToken(Boolean(getBridgeToken()));
     };
@@ -167,8 +170,8 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
     try {
       const tokenCleared = setStoredBridgeUrl(urlDraft.trim() || null);
       setNotice(
-        `${urlDraft.trim() ? 'URL guardada.' : 'URL restablecida.'}${
-          tokenCleared ? ' Cambiaste de host: se borró el token (pega el del nuevo bridge).' : ''
+        `${urlDraft.trim() ? 'URL aplicada a esta página.' : 'URL por defecto.'}${
+          tokenCleared ? ' Cambiaste de bridge: se borró el token (pega el del nuevo bridge).' : ''
         }`
       );
     } catch (err) {
@@ -214,8 +217,8 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
         {statusText}
       </p>
       <p className="mt-1 truncate text-[11px] text-[#5F6368]">
-        Host del bridge: <span className="font-mono font-bold text-[#202124]">{bridgeHost(currentUrl) || currentUrl}</span>
-        {hasToken ? ' · el token solo se envía a este host' : ''}
+        Bridge: <span className="font-bold text-[#202124]">{bridgeRoleLabel(bridge)}</span>
+        {hasToken ? ' · el token solo se envía a este bridge' : ''}
       </p>
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -243,7 +246,7 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
 
       <form onSubmit={saveUrl} className="mt-3 flex flex-col gap-1.5">
         <label htmlFor="bridge-url-input" className="text-xs font-bold">
-          URL del bridge (localhost o LAN)
+          URL del bridge (localhost o red local; solo para esta página)
         </label>
         <div className="flex gap-2">
           <input
@@ -251,7 +254,7 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
             type="url"
             value={urlDraft}
             onChange={(e) => setUrlDraft(e.target.value)}
-            placeholder="http://192.168.1.50:9000"
+            placeholder="http://<IP>:9000"
             className="flex-1 rounded-lg border border-[#DADCE0] bg-white px-2.5 py-1.5 font-mono text-xs focus:border-[#1A73E8] focus:outline-none"
           />
           <button type="submit" className="rounded-lg bg-[#202124] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#3C4043]">
@@ -293,7 +296,7 @@ export function BridgeSettingsPanel({ bridge, onEmergencyStop, onClose }: Bridge
         <p className="text-[11px] text-[#5F6368]">
           También puedes abrir cualquier página con <code className="font-mono">#token=…</code> (se guarda y se quita de la
           barra; <code className="font-mono">?token=…</code> también funciona) o{' '}
-          <code className="font-mono">#token=reset</code> para borrarlo. Si cambias a otro host, el token se borra.
+          <code className="font-mono">#token=reset</code> para borrarlo. Si cambias a otro bridge, el token se borra.
         </p>
       </form>
 

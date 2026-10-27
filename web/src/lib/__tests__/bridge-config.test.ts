@@ -89,15 +89,71 @@ describe('bridge-config: ?bridge= never carries the old token to another host (R
   });
 
   it('the settings panel clears the token when the URL moves to another host', async () => {
-    const { store } = installWindow('http://localhost:3000/', {
-      [TOKEN]: 'old',
-      [URL_KEY]: 'http://192.168.1.10:9000',
-    });
+    const { store } = installWindow('http://localhost:3000/', { [TOKEN]: 'old' });
     const cfg = await loadConfig();
-    assert.equal(cfg.setStoredBridgeUrl('http://192.168.1.10:9000/'), false, 'same host');
+    assert.equal(cfg.setStoredBridgeUrl('http://localhost:9000/'), false, 'same host');
     assert.equal(store.get(TOKEN), 'old');
     assert.equal(cfg.setStoredBridgeUrl('http://10.0.0.5:9000'), true);
     assert.equal(store.has(TOKEN), false);
+  });
+});
+
+describe('bridge-config: the bridge URL is never persisted (the IP changes with the network)', () => {
+  const ENV = 'NEXT_PUBLIC_BRIDGE_URL';
+  let saved: string | undefined;
+  beforeEach(() => {
+    saved = process.env[ENV];
+    delete process.env[ENV];
+  });
+  const restore = () => {
+    if (saved === undefined) delete process.env[ENV];
+    else process.env[ENV] = saved;
+  };
+
+  it('purges a URL an older version stored and ignores it', async () => {
+    const { store } = installWindow('http://localhost:3000/', { [URL_KEY]: 'http://192.168.0.8:9000' });
+    const cfg = await loadConfig();
+    assert.equal(cfg.resolveBridgeUrl(), 'http://localhost:9000');
+    assert.equal(store.has(URL_KEY), false);
+    restore();
+  });
+
+  it('?bridge= is used for this page load only and stripped from the address bar', async () => {
+    const { store, replaced } = installWindow('http://localhost:3000/demos/gatekeeper?bridge=http://10.1.2.3:9000');
+    const cfg = await loadConfig();
+    assert.equal(cfg.resolveBridgeUrl(), 'http://10.1.2.3:9000');
+    assert.equal(store.has(URL_KEY), false);
+    assert.deepEqual(replaced, ['/demos/gatekeeper']);
+    restore();
+  });
+
+  it('a page served from a LAN host talks to that host (the robot serving the web)', async () => {
+    process.env[ENV] = 'http://localhost:9000';
+    installWindow('http://10.1.2.3:3000/demos/bughunter');
+    const cfg = await loadConfig();
+    assert.equal(cfg.resolveBridgeUrl(), 'http://10.1.2.3:9000', 'the page host wins over the build default');
+    restore();
+  });
+
+  it('on localhost it uses NEXT_PUBLIC_BRIDGE_URL, else localhost:9000', async () => {
+    process.env[ENV] = 'http://10.9.9.9:9000/';
+    installWindow('http://localhost:3000/');
+    let cfg = await loadConfig();
+    assert.equal(cfg.resolveBridgeUrl(), 'http://10.9.9.9:9000');
+    delete process.env[ENV];
+    installWindow('http://localhost:3000/');
+    cfg = await loadConfig();
+    assert.equal(cfg.resolveBridgeUrl(), 'http://localhost:9000');
+    restore();
+  });
+
+  it('the settings panel keeps the URL in memory only', async () => {
+    const { store } = installWindow('http://localhost:3000/');
+    const cfg = await loadConfig();
+    cfg.setStoredBridgeUrl('http://10.0.0.5:9000');
+    assert.equal(cfg.resolveBridgeUrl(), 'http://10.0.0.5:9000');
+    assert.equal(store.has(URL_KEY), false);
+    restore();
   });
 });
 

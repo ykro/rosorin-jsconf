@@ -13,7 +13,7 @@ El robot se mueve de verdad, así que `robot-bridge` aplica estas reglas. El con
 
 - Llega en el fragmento de la URL, `#token=<t>`, que es lo que imprime `run.sh` y lo que abre el kiosco (`/face#token=<t>`). El fragmento no llega al servidor de Next ni a sus logs. `?token=<t>` sigue funcionando.
 - La web lo guarda en `localStorage` como `ROSORIN_BRIDGE_TOKEN` y lo quita de la barra de direcciones. `#token=reset` (o `?token=reset`) lo borra. También se puede pegar en el panel que abre la píldora del robot en la barra superior.
-- Si cambias el bridge a otro host (con `?bridge=` o desde el panel), la web borra el token guardado para no mandarlo a un host para el que no se emitió, salvo que la misma URL traiga uno nuevo. El panel muestra el host del bridge y avisa cuando borró el token.
+- Si cambias el bridge a otro host (con `?bridge=` o desde el panel), la web borra el token guardado para no mandarlo a un host para el que no se emitió, salvo que la misma URL traiga uno nuevo. La URL del bridge nunca se guarda en el navegador (vale solo para esa carga de página; ver [`WEB.md`](./WEB.md)). El panel no muestra el host ni la IP: dice «Robot», «Mock» o «Sin bridge», y avisa cuando borró el token.
 - **Nunca va en una variable `NEXT_PUBLIC_*`**, porque esas terminan en el bundle público.
 
 ### La API key de Gemini

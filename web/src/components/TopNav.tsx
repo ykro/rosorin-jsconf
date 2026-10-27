@@ -126,9 +126,11 @@ export function TopNav({ robot, liteMode: propLite }: TopNavProps) {
       : bridge.connected
         ? bridge.estopLatched
           ? 'STOP activo'
-          : 'Robot conectado'
+          : bridge.lidarSource === 'mock'
+            ? 'Mock conectado'
+            : 'Robot conectado'
         : bridge.enabled
-          ? 'Robot sin conexión'
+          ? 'Sin bridge'
           : 'Simulador 3D';
 
   const pillTone = bridge?.connected && !bridge.estopLatched

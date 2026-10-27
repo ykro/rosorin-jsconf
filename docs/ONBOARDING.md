@@ -123,9 +123,9 @@ Al cerrar `run.sh` con Ctrl+C, el script manda `POST /stop` al bridge, también 
 
 Otras formas de pasar el token o el bridge:
 
-- Pulsa la píldora del robot en la barra superior: abre un panel con el host del bridge, su URL, el token, «Conectar al robot» y **STOP**.
-- `?bridge=http://<IP>:9000` en cualquier ruta cambia el bridge (solo acepta `localhost` o IPs de la red local). Si el host cambia, la web borra el token guardado, salvo que la misma URL traiga uno nuevo.
-- `?token=<token>` también funciona, pero `#token=` es preferible. `?bridge=reset` y `#token=reset` borran lo guardado.
+- Pulsa la píldora del robot en la barra superior: abre un panel que dice con qué habla la página («Robot», «Mock» o «Sin bridge»), la URL del bridge (solo para esa página), el token, «Conectar al robot» y **STOP**.
+- `?bridge=http://<IP>:9000` en cualquier ruta cambia el bridge para esa carga de página (solo acepta `localhost` o la red local; no se guarda). Si el host cambia, la web borra el token guardado, salvo que la misma URL traiga uno nuevo.
+- `?token=<token>` también funciona, pero `#token=` es preferible. `#token=reset` borra el token guardado y `?bridge=reset` vuelve al bridge por defecto.
 
 Nunca pongas el token en una variable `NEXT_PUBLIC_*`: se incrusta en el bundle.
 
@@ -162,7 +162,7 @@ Antes de subir al escenario, corre `./ensayo.sh --robot` en el robot (actualiza,
 | `--serial` | `./run.sh --serial` | Fuerza el backend serial directo al STM32 (`/dev/rrc`, 1 Mbps). No tiene LiDAR: velocidad lineal máxima 0.15 m/s. Si falla, el bridge sale con error. |
 | `--ros2` | `./run.sh --ros2` | Fuerza el backend ROS 2 (`ros2_worker.py`). Si falla, el bridge sale con error. |
 | `--bridge-only` | `./run.sh --bridge-only` | Solo el bridge, sin la web. Escucha en `0.0.0.0` con token. |
-| `--robot-ip <IP>` / `--ip <IP>` | `./run.sh --robot-ip 10.0.0.42` | Solo la web en tu laptop, contra el bridge de `<IP>:9000`. Exige token. |
+| `--robot-ip <IP>` / `--ip <IP>` | `./run.sh --robot-ip <IP>` | Solo la web en tu laptop, contra el bridge de `<IP>:9000`. Exige token. |
 | `--port <W:B>` / `-p` | `./run.sh --port 3001:9001` | Puertos de web y bridge. Con un solo número decide por el valor (menor a 6000 es la web). |
 | `--web-port <P>` | `./run.sh --web-port 3001` | Puerto de la web (3000 por defecto). |
 | `--bridge-port <P>` | `./run.sh --bridge-port 9001` | Puerto del bridge (9000 por defecto). |

@@ -2,7 +2,11 @@
  * Browser-side configuration of the Rust robot bridge (URL, shared token and
  * whether this page should talk to it at all).
  *
- * - `?bridge=<url>` stores a LAN/localhost bridge URL (`?bridge=reset` clears it).
+ * - The bridge URL is never stored in the browser (the robot's IP changes with every network).
+ *   Resolution, per page load: `?bridge=<url>` (localhost/LAN only; kept in memory for this load
+ *   and stripped from the address bar, `?bridge=reset` drops it) → if the page itself is served
+ *   from a LAN host (the robot serving the web), that host on port 9000 → NEXT_PUBLIC_BRIDGE_URL
+ *   → http://localhost:9000. A URL stored by an older version is purged on load.
  *   Switching to a different host clears the stored token (it must never be sent
  *   to a host it was not issued for) unless the same URL brings a new token.
  * - `#token=<t>` (preferred: the fragment never reaches the server, the CDN logs
@@ -69,6 +73,22 @@ export function isAllowedBridgeUrl(raw: string): boolean {
 }
 
 let urlParamsConsumed = false;
+/** `?bridge=` or the settings panel: this page load only, never persisted. */
+let bridgeUrlOverride: string | null = null;
+
+/** Older versions persisted the bridge URL; a stale robot IP would win over the real bridge. */
+function purgeLegacyBridgeUrl() {
+  safeSet(BRIDGE_URL_STORAGE_KEY, null);
+  try {
+    window.sessionStorage?.removeItem(BRIDGE_URL_STORAGE_KEY);
+  } catch {
+    // sessionStorage may be unavailable; nothing was stored there by this version.
+  }
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+}
 
 /** `host` (hostname:port) of a bridge URL, or '' if it does not parse. */
 export function bridgeHost(raw: string): string {
@@ -80,37 +100,39 @@ export function bridgeHost(raw: string): string {
 }
 
 /** The URL the bridge client would use, without consuming URL parameters. */
-function effectiveBridgeUrl(stored: string | null): string {
-  if (stored && isAllowedBridgeUrl(stored)) return stored.replace(/\/+$/, '');
-  if (process.env.NEXT_PUBLIC_BRIDGE_URL) return process.env.NEXT_PUBLIC_BRIDGE_URL.replace(/\/+$/, '');
+function effectiveBridgeUrl(override: string | null): string {
+  if (override && isAllowedBridgeUrl(override)) return override.replace(/\/+$/, '');
   const host = typeof window !== 'undefined' ? window.location.hostname || 'localhost' : 'localhost';
-  if (isPrivateHost(host) && !host.startsWith('[')) return `http://${host}:9000`;
+  // Page served by the robot (or any LAN host): its bridge is on the same host.
+  if (isPrivateHost(host) && !isLoopbackHost(host)) return `http://${host}:9000`;
+  if (process.env.NEXT_PUBLIC_BRIDGE_URL) return process.env.NEXT_PUBLIC_BRIDGE_URL.replace(/\/+$/, '');
   return 'http://localhost:9000';
 }
 
 /**
- * Stores a new bridge URL (null: back to the default). If the bridge host changes,
- * the stored token is cleared so it is not sent to the new host, unless
+ * Sets the bridge URL for this page load (null: back to the default). If the bridge host
+ * changes, the stored token is cleared so it is not sent to the new host, unless
  * `keepToken` says a fresh token for it is being stored at the same time.
  * Returns true when a token was cleared.
  */
 function storeBridgeUrl(next: string | null, keepToken: boolean): boolean {
-  const before = bridgeHost(effectiveBridgeUrl(safeGet(BRIDGE_URL_STORAGE_KEY)));
-  safeSet(BRIDGE_URL_STORAGE_KEY, next);
+  const before = bridgeHost(effectiveBridgeUrl(bridgeUrlOverride));
+  bridgeUrlOverride = next;
   const after = bridgeHost(effectiveBridgeUrl(next));
   if (keepToken || before === after || !safeGet(BRIDGE_TOKEN_STORAGE_KEY)) return false;
   safeSet(BRIDGE_TOKEN_STORAGE_KEY, null);
-  console.info(`[bridge-config] El bridge cambió de ${before} a ${after}: se borró el token guardado.`);
+  console.info('[bridge-config] Cambió el bridge: se borró el token guardado.');
   return true;
 }
 
 /**
- * Reads `?bridge=`, `#token=` and `?token=` once per page load and strips the
- * token from the address bar.
+ * Reads `?bridge=`, `#token=` and `?token=` once per page load and strips them
+ * from the address bar.
  */
 export function consumeBridgeParamsFromUrl() {
   if (typeof window === 'undefined' || urlParamsConsumed) return;
   urlParamsConsumed = true;
+  purgeLegacyBridgeUrl();
   let url: URL;
   try {
     url = new URL(window.location.href);
@@ -145,7 +167,15 @@ export function consumeBridgeParamsFromUrl() {
       storeBridgeUrl(bridge, token !== null);
       changed = true;
     } else {
-      console.warn('[bridge-config] ?bridge= ignorado: solo se aceptan URLs de localhost o de la LAN.');
+      console.warn('[bridge-config] ?bridge= ignorado: solo se aceptan URLs de localhost o de la red local.');
+    }
+  }
+  if (bridge !== null) {
+    url.searchParams.delete('bridge');
+    try {
+      window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      // The address bar keeps it; it is only used for this page load anyway.
     }
   }
 
@@ -176,19 +206,19 @@ export function setBridgeToken(token: string | null) {
   notifyChange();
 }
 
+/** The bridge URL set for this page load (`?bridge=` or the panel), or '' for the default. */
 export function getStoredBridgeUrl(): string {
   consumeBridgeParamsFromUrl();
-  const stored = safeGet(BRIDGE_URL_STORAGE_KEY);
-  return stored && isAllowedBridgeUrl(stored) ? stored : '';
+  return bridgeUrlOverride && isAllowedBridgeUrl(bridgeUrlOverride) ? bridgeUrlOverride : '';
 }
 
 /**
- * Saves the bridge URL from the settings panel. Returns true when the stored
- * token was cleared because the bridge host changed.
+ * Sets the bridge URL from the settings panel, for this page load only (never persisted).
+ * Returns true when the stored token was cleared because the bridge host changed.
  */
 export function setStoredBridgeUrl(url: string | null): boolean {
   if (url && !isAllowedBridgeUrl(url)) {
-    throw new Error('Solo se aceptan URLs de localhost o de la red local (192.168.x.x, 10.x.x.x, 172.16-31.x.x).');
+    throw new Error('Solo se aceptan URLs de localhost o de la red local.');
   }
   consumeBridgeParamsFromUrl();
   const tokenCleared = storeBridgeUrl(url || null, false);

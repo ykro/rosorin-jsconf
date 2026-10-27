@@ -212,7 +212,7 @@ export class RobotBridgeClient {
     const delay = this.reconnectDelayMs;
     this.reconnectDelayMs = Math.min(WS_RECONNECT_MAX_MS, delay * 2);
     if (delay === WS_RECONNECT_MIN_MS) {
-      console.info(`[bridge] Sin conexión con ${this.baseUrl}; reintentando con backoff (máx. ${WS_RECONNECT_MAX_MS / 1000} s).`);
+      console.info(`[bridge] Sin conexión con el bridge; reintentando con backoff (máx. ${WS_RECONNECT_MAX_MS / 1000} s).`);
     }
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -277,7 +277,7 @@ export class RobotBridgeClient {
         timedOut ? 'timeout' : 'network',
         timedOut
           ? `El bridge no respondió en ${BRIDGE_TIMEOUT_MS} ms (${path}).`
-          : `No se pudo contactar al bridge en ${this.baseUrl} (${path}).`
+          : `No se pudo contactar al bridge (${path}).`
       );
     }
     if (!res.ok) {

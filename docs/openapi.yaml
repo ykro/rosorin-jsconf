@@ -49,8 +49,8 @@ servers:
     description: Bridge en el robot (--backend ros2 | serial, 0.0.0.0 con token)
     variables:
       robot_ip:
-        default: 192.168.1.20
-        description: IP del Jetson Orin Nano en la red local
+        default: ROBOT_IP
+        description: IP del Jetson Orin Nano en la red local (cambia con cada red; la imprime ./ensayo.sh --robot)
 security:
   - bridgeToken: []
   - bearerToken: []

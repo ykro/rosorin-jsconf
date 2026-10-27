@@ -19,10 +19,10 @@ En orden:
 
    ```
    ================================================================
-    Wi-Fi conectada : DunderMifflin (wlan0)
-    IP del robot    : 192.168.0.8
-    Web             : http://192.168.0.8:3000 (la abre la laptop en Chrome)
-    En la laptop    : ./ensayo.sh --laptop --ip 192.168.0.8
+    Wi-Fi conectada : <red> (wlan0)
+    IP del robot    : <IP>
+    Web             : http://<IP>:3000 (la abre la laptop en Chrome)
+    En la laptop    : ./ensayo.sh --laptop --ip <IP>
    ================================================================
    ```
 
@@ -146,7 +146,7 @@ Busca en la bitácora y anota para la charla:
 | Un sector marca `0.0` sin nada enfrente | Si no está en `uncovered`, es un sector ciego: menos del 25 % de sus rayos son utilizables. Limpia o destapa la ventana del LiDAR. Si sigue igual con el escenario despejado, tu driver quizá reporta el espacio vacío como `0` o `NaN` en vez de `+inf`: `make calibrar-sombra` lo avisa al contar los rayos. Como último recurso, `LIDAR_MIN_VALID_FRACTION=0 make robot` apaga la revisión, a conciencia: un LiDAR tapado ya no bloquearía el chasis. |
 | Un movimiento de la sección 5 sale con `blocked` | `braked`: hay algo a menos de 0.28 m en esa dirección (o el brazo). `lidar_stale` o `worker_dead`: ver las filas de arriba. |
 | El robot se mueve en otro sentido del que dice la pregunta (sección 5) | No sigas con las demos. El código asume el cableado de fábrica: motores 3 y 4 (lado derecho) montados invertidos (`mecanum_ik` en `protocol.rs` y `ros2_worker.py`). Revisa el orden y la polaridad de los motores. |
-| El STOP de la web no enclava la E-stop | Revisa que la URL de la web tenga el bridge del robot y el token (la píldora de la barra superior muestra el host). Vuelve a correr `./ensayo.sh --laptop --ip <IP>`: reabre la web con el token. Con `--laptop-server`, la URL con el token también está en el `web.log` del directorio temporal que imprime el script (no la proyectes). |
+| El STOP de la web no enclava la E-stop | Revisa que la URL de la web tenga el bridge del robot y el token (la píldora de la barra superior dice si habla con el robot, con el mock o con ningún bridge). Vuelve a correr `./ensayo.sh --laptop --ip <IP>`: reabre la web con el token. Con `--laptop-server`, la URL con el token también está en el `web.log` del directorio temporal que imprime el script (no la proyectes). |
 | La web del robot no abre o Chrome no da el micrófono | En el robot, `./ensayo.sh --robot` sin `--laptop-server` debe decir «Levanto el bridge (make robot) con la web en :3000». La primera vez compila unos minutos; si no hay Node en el robot, sigue sin web. Chrome solo concede el micrófono a `http://<IP>:3000` con el perfil propio del script (`~/.cache/rosorin-chrome`): si abriste la URL a mano en tu Chrome normal, ciérrala y vuelve a correr `./ensayo.sh --laptop`. Si nada de eso funciona, usa `--laptop-server` en los dos lados. |
 | Faltan MP3 | Coloca los `<id>.mp3` en `web/public/songs/clips/` de la laptop (no van en git). `./ensayo.sh --laptop` y `./demo.sh --laptop` los copian al robot. |
 

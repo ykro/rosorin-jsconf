@@ -4,7 +4,7 @@
 
 Las 4 demos combinan un contexto (un repo, un PR, un incidente o una frase), una conversación con **Gemini Live** (audio de 16 kHz de entrada y 24 kHz de salida) y movimiento en el **Hiwonder ROSOrin Pro** o en su gemelo 3D.
 
-Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y la herramienta le responde al modelo con `target: "simulator"`. Las conversaciones de voz necesitan tu API key de Gemini.
+Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y la herramienta le responde al modelo con `target: "simulator"`. Las conversaciones de voz necesitan tu API key de Gemini: sin ella, la zona de interacción de cada demo muestra solo la caja para ingresarla (ver [`WEB.md`](./WEB.md)).
 
 ---
 
@@ -90,7 +90,7 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
 - **Interrumpir (barge-in).** Habla encima de la canción: si tu voz supera claramente el eco medido durante ese clip durante unos 280 ms, la web corta la canción, abre el micrófono y le manda a Gemini tu voz, incluidos los ~340 ms previos. También puedes tocar el dial, pulsar **Interrumpir** o la tecla **Espacio** (cuando no estás escribiendo): corta la canción y abre el micrófono al instante; si la conversación no estaba abierta y hay API key, la abre.
 - **Flujo:**
   1. Pulsa **📻 Iniciar Conversación Musical** (necesita API key) y háblale, o toca una frase rápida («¡Hola Bumblebee! ¿Cómo estás hoy?», «El deploy en viernes salió perfecto a la primera.», «Se cayó producción y nadie sabe por qué.») o escribe en el cuadro de texto. Con API key, cada frase es un turno de la **misma** conversación en vivo: si no estaba abierta, la abre (con micrófono, si el navegador lo permite) y sigue abierta después de la respuesta, hasta **⏹ Detener Conversación Musical**. Si Gemini no responde con `play_radio_sequence`, el buscador local elige el clip y la conversación sigue abierta. Sin micrófono (contexto no seguro o permiso denegado), la conversación sigue por texto.
-  2. Sin API key funciona solo por texto: las frases rápidas y el cuadro de texto usan el buscador local de canciones, sin conversación en vivo, y la página lo dice bajo las frases rápidas.
+  2. Sin API key la tarjeta muestra solo la caja para ingresarla: el botón, el dial, el cuadro de texto y las frases rápidas aparecen al llegar la key. Las coreografías físicas siguen disponibles.
   3. El robot sintoniza, muestra la letra en el dial y en `/face`, y baila. El historial «Secuencias Musicales Sintonizadas» guarda cada turno.
 
 ---
