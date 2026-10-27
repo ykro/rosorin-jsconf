@@ -1,6 +1,7 @@
 mod backend;
 mod gestures;
 mod protocol;
+mod scan_env;
 
 use axum::{
     extract::{
@@ -14,12 +15,14 @@ use axum::{
     Json, Router,
 };
 use backend::{
-    BackendConfig, BlockReason, MotionError, RobotController, TelemetryState, ESTOP_MESSAGE,
+    BackendConfig, BlockReason, MotionError, RobotController, ScanStartError, TelemetryState,
+    ESTOP_MESSAGE,
 };
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use gestures::{get_gesture, is_known_gesture};
 use protocol::{is_valid_servo_id, ServoTarget};
+use scan_env::{is_known_object, AimInfo, ScanEnvStatus, ScanScene, SimObject};
 use serde::{Deserialize, Serialize};
 use std::{
     net::{IpAddr, SocketAddr},
@@ -191,6 +194,23 @@ struct GestureRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct ScanEnvRequest {
+    scene: ScanScene,
+}
+
+#[derive(Debug, Deserialize)]
+struct SimSceneRequest {
+    /// Restore the default simulated stage before applying `objects`.
+    #[serde(default)]
+    reset: bool,
+    #[serde(default)]
+    objects: Vec<SimObject>,
+}
+
+/// |x|, |y| of a simulated prop (m, odometry frame).
+const SIM_SCENE_MAX_M: f32 = 1.5;
+
+#[derive(Debug, Deserialize)]
 struct RgbRequest {
     r: u8,
     g: u8,
@@ -252,6 +272,10 @@ struct ActionResponse {
     /// `null` when the command went through as asked; otherwise why the robot did not (fully)
     /// move: `worker_dead`, `lidar_stale` or `braked`. The HTTP status stays 200.
     blocked: Option<BlockReason>,
+    /// Prop gestures only (`gatekeeper_approve/reject`, `point_*`): which target the arm aimed at,
+    /// the «Reconocer» measurement (`source: "measured"`) or the fixed side (`"default"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aim: Option<AimInfo>,
     telemetry: TelemetryState,
 }
 
@@ -533,6 +557,7 @@ fn ok_response(state: &AppState, action: String, blocked: Option<BlockReason>) -
         status: "ok",
         action,
         blocked,
+        aim: None,
         telemetry: state.robot.snapshot(),
     }))
 }
@@ -620,15 +645,104 @@ async fn post_gesture(State(state): State<AppState>, Json(req): Json<GestureRequ
         return Err(json_error(StatusCode::NOT_FOUND, "not_found", "Gesto desconocido").into());
     }
     let seq = get_gesture(&req.name);
-    let blocked = state
+    let out = state
         .robot
         .run_gesture(&req.name, req.mood)
         .map_err(motion_error_response)?;
-    ok_response(
-        &state,
-        format!("gesture({}) - {}", seq.name, seq.description),
-        blocked,
-    )
+    let action = match &out.aim {
+        Some(aim) => format!("gesture({}) - {} [{}]", seq.name, seq.description, aim.describe()),
+        None => format!("gesture({}) - {}", seq.name, seq.description),
+    };
+    Ok(Json(ActionResponse {
+        status: "ok",
+        action,
+        blocked: out.blocked,
+        aim: out.aim,
+        telemetry: state.robot.snapshot(),
+    }))
+}
+
+/// `POST /scan_env`: starts «Reconocer» (arm-only sweep with the depth camera). 409 while one runs,
+/// 423 with the E-stop latched, 503 without a working driver or camera.
+async fn post_scan_env(State(state): State<AppState>, Json(req): Json<ScanEnvRequest>) -> ApiResult {
+    match state.robot.start_scan_env(req.scene) {
+        Ok(()) => ok_response(
+            &state,
+            format!(
+                "scan_env({}, {} pasos, solo el brazo)",
+                req.scene.as_str(),
+                scan_env::SCAN_STEPS
+            ),
+            None,
+        ),
+        Err(ScanStartError::EstopLatched) => Err(motion_error_response(MotionError::EstopLatched)),
+        Err(ScanStartError::AlreadyRunning) => Err(json_error(
+            StatusCode::CONFLICT,
+            "scan_running",
+            "Ya hay un reconocimiento en curso. Espera a que termine o pulsa STOP.",
+        )
+        .into()),
+        Err(ScanStartError::WorkerDead) => Err(json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "worker_dead",
+            BlockReason::WorkerDead.message(),
+        )
+        .into()),
+        Err(ScanStartError::NoCamera) => Err(json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no_camera",
+            "Este backend no tiene cámara: «Reconocer» necesita ros2 (o mock).",
+        )
+        .into()),
+    }
+}
+
+async fn get_scan_env(State(state): State<AppState>) -> Json<ScanEnvStatus> {
+    Json(state.robot.snapshot().scan_env)
+}
+
+fn mock_only(state: &AppState, path: &str) -> Result<(), ApiError> {
+    if state.robot.is_mock() {
+        Ok(())
+    } else {
+        Err(json_error(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            &format!("{path} solo existe en modo mock"),
+        )
+        .into())
+    }
+}
+
+async fn get_simulate_scene(State(state): State<AppState>) -> Result<Json<Vec<SimObject>>, ApiError> {
+    mock_only(&state, "/simulate/scene")?;
+    Ok(Json(state.robot.sim_scene()))
+}
+
+async fn post_simulate_scene(
+    State(state): State<AppState>,
+    Json(req): Json<SimSceneRequest>,
+) -> ApiResult {
+    mock_only(&state, "/simulate/scene")?;
+    let valid = req.objects.len() <= 8
+        && req.objects.iter().all(|o| {
+            is_known_object(&o.id)
+                && o.x_m.is_finite()
+                && o.y_m.is_finite()
+                && o.x_m.abs() <= SIM_SCENE_MAX_M
+                && o.y_m.abs() <= SIM_SCENE_MAX_M
+        });
+    if !valid {
+        return Err(bad_request(
+            "objects: hasta 8, id approve_tray, reject_tray, cloud_run, gemini_live o firestore, |x_m|,|y_m| ≤ 1.5",
+        ));
+    }
+    let scene = state.robot.set_sim_scene(req.reset, &req.objects);
+    let summary: Vec<String> = scene
+        .iter()
+        .map(|o| format!("{}=({:.2},{:.2})", o.id, o.x_m, o.y_m))
+        .collect();
+    ok_response(&state, format!("simulate_scene({})", summary.join(", ")), None)
 }
 
 async fn post_rgb(State(state): State<AppState>, Json(req): Json<RgbRequest>) -> ApiResult {
@@ -832,7 +946,7 @@ fn execute_ws_command(state: &AppState, cmd: WsClientCommand) -> Option<String> 
             if !is_known_gesture(&name) {
                 return Some(ws_error_event(op, "not_found", "Gesto desconocido"));
             }
-            robot.run_gesture(&name, mood)
+            robot.run_gesture(&name, mood).map(|out| out.blocked)
         }
         WsClientCommand::Arm {
             duration_ms,
@@ -970,6 +1084,11 @@ fn build_router(state: AppState) -> Router {
         .route("/stop", post(post_stop))
         .route("/estop/release", post(post_estop_release))
         .route("/simulate/lidar", post(post_simulate_lidar))
+        .route("/scan_env", get(get_scan_env).post(post_scan_env))
+        .route(
+            "/simulate/scene",
+            get(get_simulate_scene).post(post_simulate_scene),
+        )
         .route("/camera/frame", get(get_camera_frame))
         .route("/config/gemini-key", get(get_gemini_key))
         .route("/ws", get(ws_handler))
@@ -1696,6 +1815,7 @@ mod tests {
             ("/gesture", r#"{"name":"chef_kiss"}"#),
             ("/scene/reset", "{}"),
             ("/buzzer", "{}"),
+            ("/scan_env", r#"{"scene":"gatekeeper"}"#),
         ];
         for (path, body) in moving {
             let resp = app.clone().oneshot(post_json(path, body)).await.unwrap();
@@ -1773,6 +1893,134 @@ mod tests {
         );
         let release = req("POST", "/estop/release").body(Body::empty()).unwrap();
         assert_eq!(app.oneshot(release).await.unwrap().status(), StatusCode::OK);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_scan_env_routes() {
+        let token = "stage-secret-2026-abcdef";
+        let state = test_state(Some(token));
+        let app = build_router(state.clone());
+        let authed = |method: &str, uri: &str, body: &str| {
+            req(method, uri)
+                .header("x-bridge-token", token)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        };
+        // Token like every other route
+        let no_tok = req("GET", "/scan_env").body(Body::empty()).unwrap();
+        assert_eq!(
+            app.clone().oneshot(no_tok).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let resp = app.clone().oneshot(authed("GET", "/scan_env", "")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let idle = body_json(resp).await;
+        assert_eq!(idle["state"], "idle");
+        assert_eq!(idle["fresh"], false);
+        assert_eq!(idle["stale_reason"], "no_scan");
+        assert!(!idle.as_object().unwrap().contains_key("moved"), "internal flag");
+
+        // Unknown scene: rejected by the JSON extractor
+        let bad = app
+            .clone()
+            .oneshot(authed("POST", "/scan_env", r#"{"scene":"kitchen"}"#))
+            .await
+            .unwrap();
+        assert!(bad.status().is_client_error());
+
+        // Simulated stage (mock only): validated
+        let resp = app
+            .clone()
+            .oneshot(authed("POST", "/simulate/scene", r#"{"objects":[{"id":"lamp","x_m":0.2,"y_m":0.1}]}"#))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let resp = app
+            .clone()
+            .oneshot(authed("POST", "/simulate/scene", r#"{"objects":[{"id":"approve_tray","x_m":9.0,"y_m":0.1}]}"#))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let resp = app
+            .clone()
+            .oneshot(authed("POST", "/simulate/scene", r#"{"reset":true,"objects":[{"id":"approve_tray","x_m":0.2,"y_m":-0.2}]}"#))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(body_json(resp).await["action"].as_str().unwrap().contains("approve_tray=(0.20,-0.20)"));
+        let resp = app.clone().oneshot(authed("GET", "/simulate/scene", "")).await.unwrap();
+        let sim = body_json(resp).await;
+        assert!(sim.as_array().unwrap().iter().any(|o| o["id"] == "approve_tray" && o["y_m"] == -0.2));
+
+        // Start: 200 with the running state in telemetry, then 409 while it runs
+        let resp = app
+            .clone()
+            .oneshot(authed("POST", "/scan_env", r#"{"scene":"gatekeeper"}"#))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp).await;
+        assert_eq!(json["telemetry"]["scan_env"]["state"], "running");
+        assert_eq!(json["telemetry"]["scan_env"]["scene"], "gatekeeper");
+        let resp = app
+            .clone()
+            .oneshot(authed("POST", "/scan_env", r#"{"scene":"bughunter"}"#))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+        assert_eq!(body_json(resp).await["status"], "scan_running");
+
+        // STOP aborts it (the tick is not running here: the servos stay put, it just stops)
+        let stop = authed("POST", "/stop", "");
+        assert_eq!(app.clone().oneshot(stop).await.unwrap().status(), StatusCode::OK);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let resp = app.clone().oneshot(authed("GET", "/scan_env", "")).await.unwrap();
+        let st = body_json(resp).await;
+        assert_eq!(st["state"], "aborted");
+        assert_eq!(st["reason"], "estop");
+        let resp = app
+            .clone()
+            .oneshot(authed("POST", "/scan_env", r#"{"scene":"gatekeeper"}"#))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::LOCKED);
+        let release = authed("POST", "/estop/release", "");
+        assert_eq!(app.clone().oneshot(release).await.unwrap().status(), StatusCode::OK);
+
+        // Prop gestures say which target they used; other gestures carry no `aim`
+        let resp = app
+            .clone()
+            .oneshot(authed("POST", "/gesture", r#"{"name":"point_firestore"}"#))
+            .await
+            .unwrap();
+        let json = body_json(resp).await;
+        assert_eq!(json["aim"]["source"], "default");
+        assert_eq!(json["aim"]["object"], "firestore");
+        assert_eq!(json["aim"]["joint1"], 390);
+        assert_eq!(json["aim"]["reason"], "aborted");
+        assert!(json["action"].as_str().unwrap().contains("objetivo fijo"));
+        let resp = app
+            .oneshot(authed("POST", "/gesture", r#"{"name":"chef_kiss"}"#))
+            .await
+            .unwrap();
+        assert!(!body_json(resp).await.as_object().unwrap().contains_key("aim"));
+    }
+
+    #[tokio::test]
+    async fn test_simulate_scene_is_mock_only() {
+        let (robot, _rx) = backend::RobotController::new_with_test_driver(
+            backend::LidarSource::Ros2,
+            600,
+        );
+        let mut state = test_state(None);
+        state.robot = robot;
+        let app = build_router(state);
+        let resp = app
+            .oneshot(post_json("/simulate/scene", r#"{"reset":true}"#))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 
     #[test]

@@ -96,6 +96,36 @@ pub fn is_known_gesture(name: &str) -> bool {
     )
 }
 
+/// Gestures that aim at a stage prop: (prop id of «Reconocer», fixed joint1 used without a scan).
+/// `canonical` is the gesture's canonical name (`GestureSequence::name`).
+pub fn aim_object(canonical: &str) -> Option<(&'static str, u16)> {
+    match canonical {
+        "gatekeeper_approve" => Some(("approve_tray", 700)),
+        "gatekeeper_reject" => Some(("reject_tray", 280)),
+        "point_cloud_run" => Some(("cloud_run", 610)),
+        "point_gemini_live" => Some(("gemini_live", 500)),
+        "point_firestore" => Some(("firestore", 390)),
+        _ => None,
+    }
+}
+
+/// Aims a prop gesture at a measured joint1 (from «Reconocer»): every aiming step turns joint1 there
+/// and no longer strafes or advances, because the measured bearing is only valid from where the robot
+/// is now (the arm does all the aiming). Only `gatekeeper_reject`'s final back-off is kept (reversing
+/// away from the tray). Its first two steps (the refusal shake) stay as written.
+pub fn aim_gesture(mut seq: GestureSequence, joint1: u16) -> GestureSequence {
+    let first_aimed = if seq.name == "gatekeeper_reject" { 2 } else { 0 };
+    for step in seq.steps.iter_mut().skip(first_aimed) {
+        for servo in step.servos.iter_mut().filter(|s| s.id == 1) {
+            servo.position = joint1;
+        }
+        if let Some((vx, _, _)) = step.velocity {
+            step.velocity = Some(if vx < 0.0 { (vx, 0.0, 0.0) } else { (0.0, 0.0, 0.0) });
+        }
+    }
+    seq
+}
+
 /// Returns the built-in expressive choreography for a named gesture on the ROSOrin Pro.
 pub fn get_gesture(name: &str) -> GestureSequence {
     let key = name.trim().to_lowercase();
@@ -687,5 +717,57 @@ mod tests {
         assert_eq!(fs.name, "point_firestore");
         assert_eq!(fs.rgb, (180, 83, 9));
         assert_eq!(fs.steps[0].velocity, Some((0.0, -0.22, 0.0)));
+    }
+
+    fn joint1s(seq: &GestureSequence) -> Vec<u16> {
+        seq.steps
+            .iter()
+            .map(|s| s.servos.iter().find(|t| t.id == 1).unwrap().position)
+            .collect()
+    }
+
+    #[test]
+    fn test_aim_objects_match_the_fixed_sides() {
+        for (gesture, object) in [
+            ("gatekeeper_approve", "approve_tray"),
+            ("gatekeeper_reject", "reject_tray"),
+            ("point_cloud_run", "cloud_run"),
+            ("point_gemini_live", "gemini_live"),
+            ("point_firestore", "firestore"),
+        ] {
+            let (id, default_j1) = aim_object(gesture).unwrap();
+            assert_eq!(id, object);
+            // The default is the joint1 the written gesture uses on its last (aiming) step
+            assert_eq!(*joint1s(&get_gesture(gesture)).last().unwrap(), default_j1, "{gesture}");
+        }
+        assert_eq!(aim_object("chef_kiss"), None);
+    }
+
+    #[test]
+    fn test_aim_gesture_turns_joint1_and_drops_the_approach() {
+        let approve = aim_gesture(get_gesture("gatekeeper_approve"), 320);
+        assert_eq!(joint1s(&approve), vec![320, 320]);
+        assert!(approve
+            .steps
+            .iter()
+            .all(|s| s.velocity.is_none_or(|v| v == (0.0, 0.0, 0.0))));
+        // Gripper and the other joints are untouched
+        let mut expected = get_gesture("gatekeeper_approve").steps[1].servos.clone();
+        expected[0].position = 320;
+        assert_eq!(approve.steps[1].servos, expected);
+
+        let reject = aim_gesture(get_gesture("gatekeeper_reject"), 690);
+        assert_eq!(joint1s(&reject), vec![360, 640, 690, 690]);
+        assert_eq!(reject.steps[2].velocity, Some((0.0, 0.0, 0.0)));
+        assert_eq!(reject.steps[3].velocity, Some((-0.12, 0.0, 0.0)), "keeps backing away");
+
+        for name in ["point_cloud_run", "point_gemini_live", "point_firestore"] {
+            let aimed = aim_gesture(get_gesture(name), 455);
+            assert!(joint1s(&aimed).iter().all(|&j| j == 455));
+            assert!(
+                aimed.steps.iter().all(|s| s.velocity == Some((0.0, 0.0, 0.0))),
+                "{name}"
+            );
+        }
     }
 }

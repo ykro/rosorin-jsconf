@@ -22,3 +22,5 @@ anyhow = "1.0"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+# Paused clock for the «Reconocer» sweep tests (same crate, only a feature)
+tokio = { version = "1.40", features = ["full", "test-util"] }

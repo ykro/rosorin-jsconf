@@ -1,7 +1,11 @@
-use crate::gestures::{get_gesture, GestureSequence, GestureStep};
+use crate::gestures::{aim_gesture, aim_object, get_gesture, GestureSequence, GestureStep};
 use crate::protocol::{
     clamp_servo_pulse, clamp_velocity, encode_bus_servos, encode_buzzer, encode_motor_rps,
     is_valid_servo_id, mecanum_ik, ServoTarget,
+};
+use crate::scan_env::{
+    self, aggregate, aim_for, default_sim_scene, mock_capture, sweep_positions, AbortReason,
+    AimInfo, CaptureDetection, Pose2D, ScanEnvStatus, ScanScene, ScanState, SimObject,
 };
 use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
@@ -10,7 +14,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc, Arc, Mutex, MutexGuard,
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -140,6 +144,9 @@ pub struct TelemetryState {
     pub lidar_stale: bool,
     /// Where `lidar` comes from: `mock`, `ros2` or `none` (serial backend, values are not real).
     pub lidar_source: String,
+    /// «Reconocer» (`POST /scan_env`): sweep progress and the props it measured.
+    #[serde(default)]
+    pub scan_env: ScanEnvStatus,
 }
 
 impl Default for TelemetryState {
@@ -188,6 +195,7 @@ impl Default for TelemetryState {
             estop_latched: false,
             lidar_stale: false,
             lidar_source: LidarSource::Mock.as_str().into(),
+            scan_env: ScanEnvStatus::default(),
         }
     }
 }
@@ -197,6 +205,14 @@ pub fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+fn pose_of(o: &OdometryState) -> Pose2D {
+    Pose2D {
+        x_m: o.x_m,
+        y_m: o.y_m,
+        yaw_rad: o.yaw_rad,
+    }
 }
 
 /// Locks a mutex, recovering the data if a previous holder panicked
@@ -335,6 +351,13 @@ pub enum DriverCmd {
     /// `ros2` heartbeat: the worker echoes `{"event":"pong","seq":N}` from its command thread.
     Ping {
         seq: u64,
+    },
+    /// «Reconocer»: one camera capture with the arm at `servos` (joints 1-4). The worker queues it
+    /// and answers `{"event":"scan_env_result","id":N,...}` from its vision thread.
+    ScanCapture {
+        id: u64,
+        scene: ScanScene,
+        servos: BTreeMap<u8, u16>,
     },
     /// Wakes the writer to pick up the pending velocity slot (never written).
     Wake,
@@ -609,6 +632,46 @@ pub struct RobotController {
     worker_child: Mutex<Option<Child>>,
     mock: bool,
     pub watchdog_timeout: Duration,
+    /// Worker `scan_env_result` replies by capture id (filled by the reader thread).
+    scan_inbox: ScanInbox,
+    next_capture_id: AtomicU64,
+    /// Mock only: the simulated stage the mock camera sees (`POST /simulate/scene`).
+    sim_scene: Mutex<Vec<SimObject>>,
+}
+
+/// One worker reply to a `scan_env_capture`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CaptureReply {
+    pub detections: Vec<CaptureDetection>,
+    pub error: Option<String>,
+}
+
+/// Replies waiting to be picked up by the sweep, by capture id (bounded).
+pub type ScanInbox = Arc<Mutex<BTreeMap<u64, CaptureReply>>>;
+const SCAN_INBOX_MAX: usize = 8;
+
+/// Why `POST /scan_env` could not start a sweep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanStartError {
+    EstopLatched,
+    AlreadyRunning,
+    WorkerDead,
+    /// The `serial` backend has no camera.
+    NoCamera,
+}
+
+/// Result of starting a gesture: why its chassis part is blocked (if it is) and, for the prop
+/// gestures, which target the arm aims at.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GestureOutcome {
+    pub blocked: Option<BlockReason>,
+    pub aim: Option<AimInfo>,
+}
+
+/// A sweep step that could not run, or a capture that returned nothing usable.
+enum ScanStepError {
+    Abort(AbortReason),
+    Capture(String),
 }
 
 fn default_servo_speeds() -> BTreeMap<u8, f32> {
@@ -629,6 +692,7 @@ struct ControllerParts {
     worker_alive: Arc<AtomicBool>,
     worker_child: Option<Child>,
     watchdog_ms: u64,
+    scan_inbox: ScanInbox,
 }
 
 impl Drop for RobotController {
@@ -703,6 +767,7 @@ impl RobotController {
             worker_alive: Arc::new(AtomicBool::new(true)),
             worker_child: None,
             watchdog_ms,
+            scan_inbox: Arc::new(Mutex::new(BTreeMap::new())),
         })
     }
 
@@ -745,6 +810,9 @@ impl RobotController {
             worker_child: Mutex::new(p.worker_child),
             mock,
             watchdog_timeout: Duration::from_millis(p.watchdog_ms),
+            scan_inbox: p.scan_inbox,
+            next_capture_id: AtomicU64::new(1),
+            sim_scene: Mutex::new(default_sim_scene()),
         })
     }
 
@@ -790,6 +858,7 @@ impl RobotController {
                 // Not written, so it does not count for `connected`.
                 DriverCmd::Rgb { .. }
                 | DriverCmd::Ping { .. }
+                | DriverCmd::ScanCapture { .. }
                 | DriverCmd::Wake
                 | DriverCmd::Flush(_) => return Ok(false),
             };
@@ -807,6 +876,7 @@ impl RobotController {
             worker_alive: Arc::new(AtomicBool::new(true)),
             worker_child: None,
             watchdog_ms: cfg.watchdog_ms,
+            scan_inbox: Arc::new(Mutex::new(BTreeMap::new())),
         }))
     }
 
@@ -840,6 +910,7 @@ impl RobotController {
         let last_scan_at = Arc::new(Mutex::new(None));
         let worker_alive = Arc::new(AtomicBool::new(true));
         let health = DriverHealth::new(true);
+        let scan_inbox: ScanInbox = Arc::new(Mutex::new(BTreeMap::new()));
 
         let (first_tx, first_rx) = mpsc::sync_channel::<Option<String>>(1);
         {
@@ -848,6 +919,7 @@ impl RobotController {
             let last_scan = Arc::clone(&last_scan_at);
             let alive = Arc::clone(&worker_alive);
             let health = Arc::clone(&health);
+            let inbox = Arc::clone(&scan_inbox);
             std::thread::Builder::new()
                 .name("ros2-worker-reader".into())
                 .spawn(move || {
@@ -856,7 +928,7 @@ impl RobotController {
                     match reader.read_line(&mut first) {
                         Ok(n) if n > 0 => {
                             let _ = first_tx.send(Some(first.clone()));
-                            handle_worker_line(first.trim(), &state, &jpeg, &last_scan, &health);
+                            handle_worker_line(first.trim(), &state, &jpeg, &last_scan, &health, &inbox);
                         }
                         _ => {
                             let _ = first_tx.send(None);
@@ -867,7 +939,7 @@ impl RobotController {
                     for line in reader.lines() {
                         match line {
                             Ok(line) => {
-                                handle_worker_line(line.trim(), &state, &jpeg, &last_scan, &health)
+                                handle_worker_line(line.trim(), &state, &jpeg, &last_scan, &health, &inbox)
                             }
                             Err(e) => {
                                 warn!("ros2_worker stdout read error: {}", e);
@@ -938,6 +1010,12 @@ impl RobotController {
                     serde_json::json!({ "op": "rgb", "r": r, "g": g, "b": b })
                 }
                 DriverCmd::Ping { seq } => serde_json::json!({ "op": "ping", "seq": seq }),
+                DriverCmd::ScanCapture { id, scene, servos } => serde_json::json!({
+                    "op": "scan_env_capture",
+                    "id": id,
+                    "scene": scene,
+                    "servos": servos,
+                }),
                 DriverCmd::Wake | DriverCmd::Flush(_) => return Ok(false),
             };
             writeln!(stdin, "{}", json)?;
@@ -955,6 +1033,7 @@ impl RobotController {
             worker_alive,
             worker_child: Some(child),
             watchdog_ms: cfg.watchdog_ms,
+            scan_inbox,
         }))
     }
 
@@ -1204,6 +1283,8 @@ impl RobotController {
         }
         self.set_rgb(home.rgb.0, home.rgb.1, home.rgb.2);
         let mut st = lock(&self.state);
+        let before = pose_of(&st.odometry);
+        st.scan_env.on_odometry_reset(&before);
         st.odometry = OdometryState {
             x_m: 0.0,
             y_m: 0.0,
@@ -1387,12 +1468,27 @@ impl RobotController {
         self: &Arc<Self>,
         name: &str,
         mood_override: Option<String>,
-    ) -> Result<Option<BlockReason>, MotionError> {
-        let seq = get_gesture(name);
-        let (my_epoch, blocked) = {
+    ) -> Result<GestureOutcome, MotionError> {
+        let mut seq = get_gesture(name);
+        let (my_epoch, blocked, aim) = {
             let mut gate = lock(&self.gate);
             gate.check()?;
             let my_epoch = self.cancel_gesture_locked(&mut gate);
+            // Prop gestures aim at the «Reconocer» measurement when there is a fresh one.
+            let aim = aim_object(&seq.name).map(|(object, default_j1)| {
+                let mut st = lock(&self.state);
+                let odom = pose_of(&st.odometry);
+                match aim_for(&mut st.scan_env, object, &odom, now_ms()) {
+                    Ok(target) => {
+                        seq = aim_gesture(seq.clone(), target.joint1);
+                        AimInfo::measured(object, &target)
+                    }
+                    Err(reason) => AimInfo::default_side(object, default_j1, reason),
+                }
+            });
+            if let Some(aim) = &aim {
+                info!("Gesto {}: {}", seq.name, aim.describe());
+            }
             let blocked = self.gesture_block_reason(&seq, Instant::now());
             {
                 let mut st = lock(&self.state);
@@ -1457,12 +1553,23 @@ impl RobotController {
                     }
                     _ => {}
                 }
+                if let Some(a) = aim.as_ref().filter(|a| a.source == "measured") {
+                    if let (Some(b), Some(d)) = (a.bearing_deg, a.distance_m) {
+                        st.hud_subtext = format!(
+                            "{} medido · {:.0}° {} · {:.2} m",
+                            scan_env::object_label(&a.object),
+                            b.abs(),
+                            if b >= 0.0 { "izq" } else { "der" },
+                            d
+                        );
+                    }
+                }
             }
             self.set_rgb(seq.rgb.0, seq.rgb.1, seq.rgb.2);
             if let Some((freq, on_ms, off_ms, rep)) = seq.buzzer {
                 self.send_buzzer(freq, on_ms, off_ms, rep);
             }
-            (my_epoch, blocked)
+            (my_epoch, blocked, aim)
         };
 
         let ctrl = Arc::clone(self);
@@ -1487,7 +1594,7 @@ impl RobotController {
                 ctrl.apply_velocity_locked(&mut gate, 0.0, 0.0, 0.0, None, false);
             }
         });
-        Ok(blocked)
+        Ok(GestureOutcome { blocked, aim })
     }
 
     /// One gesture step, atomically checked against the latch and the gesture epoch
@@ -1531,6 +1638,241 @@ impl RobotController {
 
     fn gesture_is_current(&self, epoch: u64) -> bool {
         lock(&self.gate).is_current(epoch)
+    }
+
+    /// `POST /scan_env`: starts the «Reconocer» sweep (arm only, see `scan_env.rs`). It owns the arm
+    /// through a new command epoch, so STOP, any other motion command or a dead worker aborts it.
+    /// The previous measurement is discarded.
+    pub fn start_scan_env(self: &Arc<Self>, scene: ScanScene) -> Result<(), ScanStartError> {
+        let epoch = {
+            let mut gate = lock(&self.gate);
+            if gate.check().is_err() {
+                return Err(ScanStartError::EstopLatched);
+            }
+            if !self.mock && self.lidar_source != LidarSource::Ros2 {
+                return Err(ScanStartError::NoCamera);
+            }
+            if lock(&self.state).scan_env.state == ScanState::Running {
+                return Err(ScanStartError::AlreadyRunning);
+            }
+            if !self.driver_ok(Instant::now()) {
+                return Err(ScanStartError::WorkerDead);
+            }
+            let epoch = self.cancel_gesture_locked(&mut gate);
+            self.mark_user_command_locked(&mut gate);
+            let mut st = lock(&self.state);
+            st.scan_env = ScanEnvStatus::running(scene, now_ms());
+            st.active_gesture = "scan_env".into();
+            st.pointed_totem = None;
+            st.hud_headline = "RECONOCIENDO ENTORNO".into();
+            st.hud_subtext = format!("Cámara 3D · barrido del brazo en {} pasos", scan_env::SCAN_STEPS);
+            epoch
+        };
+        lock(&self.scan_inbox).clear();
+        info!(
+            "Reconocer ({}): barrido del brazo en {} pasos, sin mover las ruedas",
+            scene.as_str(),
+            scan_env::SCAN_STEPS
+        );
+        let ctrl = Arc::clone(self);
+        tokio::spawn(async move { ctrl.run_scan(epoch, scene).await });
+        Ok(())
+    }
+
+    async fn run_scan(self: Arc<Self>, epoch: u64, scene: ScanScene) {
+        let positions = sweep_positions();
+        let mut captures: Vec<Vec<CaptureDetection>> = Vec::new();
+        let result: Result<(), AbortReason> = async {
+            self.scan_arm(epoch, scan_env::SURVEY_MOVE_MS, positions[0], &scan_env::SURVEY_POSE)?;
+            self.scan_wait(epoch, scan_env::SURVEY_MOVE_MS as u64 + scan_env::SETTLE_MS)
+                .await?;
+            for (i, &j1) in positions.iter().enumerate() {
+                if i > 0 {
+                    self.scan_arm(epoch, scan_env::STEP_MOVE_MS, j1, &scan_env::SURVEY_POSE)?;
+                    self.scan_wait(epoch, scan_env::STEP_MOVE_MS as u64 + scan_env::SETTLE_MS)
+                        .await?;
+                }
+                lock(&self.state).scan_env.step = i as u32 + 1;
+                match self.scan_capture(epoch, scene).await {
+                    Ok(found) => captures.push(found),
+                    Err(ScanStepError::Abort(r)) => return Err(r),
+                    Err(ScanStepError::Capture(e)) => {
+                        warn!("Reconocer: paso {} sin captura útil ({})", i + 1, e);
+                        let mut st = lock(&self.state);
+                        st.scan_env.failed_captures += 1;
+                        st.scan_env.last_error = Some(e);
+                    }
+                }
+            }
+            self.scan_arm(epoch, scan_env::HOME_MOVE_MS, 500, &scan_env::HOME_POSE)?;
+            self.scan_wait(epoch, scan_env::HOME_MOVE_MS as u64).await?;
+            Ok(())
+        }
+        .await;
+
+        let detections = aggregate(scene, &captures);
+        let gate = lock(&self.gate);
+        let result = result.and_then(|()| {
+            if gate.is_current(epoch) {
+                Ok(())
+            } else {
+                Err(Self::scan_abort_reason(&gate))
+            }
+        });
+        let mut st = lock(&self.state);
+        let now = now_ms();
+        st.scan_env.finished_at_ms = Some(now);
+        match result {
+            Ok(()) => {
+                info!(
+                    "Reconocer ({}): {} objeto(s) encontrados{}",
+                    scene.as_str(),
+                    detections.len(),
+                    detections
+                        .iter()
+                        .map(|d| format!(
+                            " · {} {:.0}° {:.2} m ({:.0} %)",
+                            d.id,
+                            d.bearing_deg,
+                            d.distance_m,
+                            d.confidence * 100.0
+                        ))
+                        .collect::<String>()
+                );
+                st.scan_env.state = ScanState::Done;
+                st.scan_env.detections = detections;
+                st.scan_env.odom_at_scan = Some(pose_of(&st.odometry));
+                st.scan_env.moved = false;
+                if st.active_gesture == "scan_env" {
+                    st.active_gesture = "home".into();
+                }
+                st.hud_headline = "ENTORNO RECONOCIDO".into();
+                st.hud_subtext = format!("{} objeto(s) medidos", st.scan_env.detections.len());
+            }
+            Err(reason) => {
+                warn!("Reconocer ({}) abortado: {:?}", scene.as_str(), reason);
+                st.scan_env.state = ScanState::Aborted;
+                st.scan_env.reason = Some(reason);
+                st.scan_env.detections.clear();
+            }
+        }
+        let odom = pose_of(&st.odometry);
+        st.scan_env.refresh(&odom, now);
+    }
+
+    fn scan_abort_reason(gate: &MotionGate) -> AbortReason {
+        if gate.estop_latched {
+            AbortReason::Estop
+        } else {
+            AbortReason::Interrupted
+        }
+    }
+
+    /// One arm move of the sweep, atomically checked against the latch, the epoch and the driver.
+    /// Only servos 1-4 are sent (the wrist roll and the gripper keep what they hold).
+    fn scan_arm(
+        &self,
+        epoch: u64,
+        duration_ms: u16,
+        joint1: u16,
+        pose: &[(u8, u16)],
+    ) -> Result<(), AbortReason> {
+        let mut gate = lock(&self.gate);
+        if !gate.is_current(epoch) {
+            return Err(Self::scan_abort_reason(&gate));
+        }
+        if !self.driver_ok(Instant::now()) {
+            return Err(AbortReason::WorkerDead);
+        }
+        let mut targets = vec![ServoTarget {
+            id: 1,
+            position: joint1,
+        }];
+        targets.extend(pose.iter().map(|&(id, position)| ServoTarget { id, position }));
+        self.mark_user_command_locked(&mut gate);
+        self.apply_arm_locked(duration_ms, &targets);
+        Ok(())
+    }
+
+    /// Sleeps `ms` in 25 ms slices, aborting as soon as the sweep is no longer current.
+    async fn scan_wait(&self, epoch: u64, ms: u64) -> Result<(), AbortReason> {
+        let mut remaining = ms;
+        while remaining > 0 {
+            let slice = remaining.min(25);
+            tokio::time::sleep(Duration::from_millis(slice)).await;
+            remaining -= slice;
+            self.scan_check(epoch)?;
+        }
+        Ok(())
+    }
+
+    fn scan_check(&self, epoch: u64) -> Result<(), AbortReason> {
+        let gate = lock(&self.gate);
+        if !gate.is_current(epoch) {
+            return Err(Self::scan_abort_reason(&gate));
+        }
+        if !self.driver_ok(Instant::now()) {
+            return Err(AbortReason::WorkerDead);
+        }
+        Ok(())
+    }
+
+    /// One capture at the current arm pose: the mock camera on the simulated stage, or the worker.
+    async fn scan_capture(
+        &self,
+        epoch: u64,
+        scene: ScanScene,
+    ) -> Result<Vec<CaptureDetection>, ScanStepError> {
+        let (servos, odom) = {
+            let st = lock(&self.state);
+            let servos: BTreeMap<u8, u16> = (1..=4)
+                .filter_map(|id| st.servos.get(&id).map(|&p| (id, p)))
+                .collect();
+            (servos, pose_of(&st.odometry))
+        };
+        if self.mock {
+            let j1 = servos.get(&1).copied().unwrap_or(500);
+            return Ok(mock_capture(scene, &lock(&self.sim_scene), &odom, j1));
+        }
+        let id = self.next_capture_id.fetch_add(1, Ordering::Relaxed);
+        self.send_driver(DriverCmd::ScanCapture { id, scene, servos });
+        let deadline = Instant::now() + scan_env::CAPTURE_TIMEOUT;
+        loop {
+            if let Some(reply) = lock(&self.scan_inbox).remove(&id) {
+                return match reply.error {
+                    None => Ok(reply.detections),
+                    Some(e) => Err(ScanStepError::Capture(e)),
+                };
+            }
+            if Instant::now() >= deadline {
+                return Err(ScanStepError::Capture("timeout".into()));
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            self.scan_check(epoch).map_err(ScanStepError::Abort)?;
+        }
+    }
+
+    /// Mock only: the simulated stage (`GET`/`POST /simulate/scene`).
+    pub fn sim_scene(&self) -> Vec<SimObject> {
+        lock(&self.sim_scene).clone()
+    }
+
+    /// Mock only: moves the listed props of the simulated stage (`reset` first restores the default).
+    pub fn set_sim_scene(&self, reset: bool, objects: &[SimObject]) -> Vec<SimObject> {
+        let mut sim = lock(&self.sim_scene);
+        if reset {
+            *sim = default_sim_scene();
+        }
+        for o in objects {
+            match sim.iter_mut().find(|s| s.id == o.id) {
+                Some(s) => {
+                    s.x_m = o.x_m;
+                    s.y_m = o.y_m;
+                }
+                None => sim.push(o.clone()),
+            }
+        }
+        sim.clone()
     }
 
     /// Periodic 40Hz physics + servo interpolation + LiDAR reflex + watchdog + resend tick.
@@ -1662,6 +2004,9 @@ impl RobotController {
 
         st.last_command_ms_ago = last_command_ms_ago;
         st.timestamp_ms = now_ms();
+        let odom = pose_of(&st.odometry);
+        let now = st.timestamp_ms;
+        st.scan_env.refresh(&odom, now);
     }
 
     pub fn snapshot(&self) -> TelemetryState {
@@ -1764,6 +2109,11 @@ impl RobotController {
                     g: *g,
                     b: *b,
                 },
+                DriverCmd::ScanCapture { id, scene, servos } => DriverCmd::ScanCapture {
+                    id: *id,
+                    scene: *scene,
+                    servos: servos.clone(),
+                },
                 DriverCmd::Wake | DriverCmd::Flush(_) => return Ok(false),
             };
             let _ = tx.send(copy);
@@ -1783,6 +2133,7 @@ impl RobotController {
             worker_alive: Arc::new(AtomicBool::new(true)),
             worker_child: None,
             watchdog_ms,
+            scan_inbox: Arc::new(Mutex::new(BTreeMap::new())),
         });
         (ctrl, rx)
     }
@@ -1828,6 +2179,7 @@ impl RobotController {
             &self.latest_jpeg,
             &self.last_scan_at,
             &self.health,
+            &self.scan_inbox,
         );
     }
 }
@@ -1838,6 +2190,7 @@ fn handle_worker_line(
     jpeg: &Arc<Mutex<Option<Vec<u8>>>>,
     last_scan: &Arc<Mutex<Option<Instant>>>,
     health: &DriverHealth,
+    scan_inbox: &ScanInbox,
 ) {
     use base64::Engine as _;
     if !line.starts_with('{') {
@@ -1885,6 +2238,33 @@ fn handle_worker_line(
                 st.lidar.obstacle_alert = st.lidar.min_m() < LIDAR_ALERT_M;
             }
             *lock(last_scan) = Some(Instant::now());
+        }
+        Some("scan_env_result") => {
+            let Some(id) = v.get("id").and_then(|n| n.as_u64()) else {
+                return;
+            };
+            let ok = v.get("ok").and_then(|b| b.as_bool()).unwrap_or(false);
+            let detections: Vec<CaptureDetection> = v
+                .get("detections")
+                .and_then(|d| serde_json::from_value(d.clone()).ok())
+                .unwrap_or_default();
+            let error = if ok {
+                None
+            } else {
+                Some(
+                    v.get("error")
+                        .and_then(|e| e.as_str())
+                        .unwrap_or("vision_error")
+                        .chars()
+                        .take(64)
+                        .collect(),
+                )
+            };
+            let mut inbox = lock(scan_inbox);
+            inbox.insert(id, CaptureReply { detections, error });
+            while inbox.len() > SCAN_INBOX_MAX {
+                inbox.pop_first();
+            }
         }
         Some("backend") => {}
         _ => {
@@ -2455,6 +2835,7 @@ mod tests {
             worker_alive: Arc::new(AtomicBool::new(true)),
             worker_child: None,
             watchdog_ms: 600,
+            scan_inbox: Arc::new(Mutex::new(BTreeMap::new())),
         });
         ctrl.set_rgb(1, 1, 1); // the writer blocks on this one
         std::thread::sleep(Duration::from_millis(50));
@@ -2556,22 +2937,22 @@ mod tests {
             let (ctrl, _rx) = RobotController::new_with_test_driver(LidarSource::Ros2, 600);
             // No scan: a gesture with chassis motion is blocked, an arm-only one is not
             assert_eq!(
-                ctrl.run_gesture("victory_spin", None).unwrap(),
+                ctrl.run_gesture("victory_spin", None).unwrap().blocked,
                 Some(BlockReason::LidarStale)
             );
-            assert_eq!(ctrl.run_gesture("gatekeeper_hold", None).unwrap(), None);
+            assert_eq!(ctrl.run_gesture("gatekeeper_hold", None).unwrap().blocked, None);
             // Obstacle close: the spin would be capped by the reflex
             ctrl.feed_worker_line(
                 r#"{"event":"lidar","front_m":0.2,"left_m":1.2,"right_m":1.1,"back_m":2.0}"#,
             );
             assert_eq!(
-                ctrl.run_gesture("victory_spin", None).unwrap(),
+                ctrl.run_gesture("victory_spin", None).unwrap().blocked,
                 Some(BlockReason::Braked)
             );
             // Worker gone: everything is blocked
             mark_worker_dead(&ctrl.state, &ctrl.worker_alive);
             assert_eq!(
-                ctrl.run_gesture("gatekeeper_hold", None).unwrap(),
+                ctrl.run_gesture("gatekeeper_hold", None).unwrap().blocked,
                 Some(BlockReason::WorkerDead)
             );
         });
@@ -2738,5 +3119,265 @@ mod tests {
         let svg = ctrl.get_camera_svg();
         assert!(!svg.contains("<script>"));
         assert!(svg.contains("&lt;script&gt;"));
+    }
+
+    // ---- «Reconocer» (scan_env) ------------------------------------------------------------
+
+    /// Runs the 40 Hz tick on the (paused) tokio clock, like main() does.
+    fn spawn_ticker(ctrl: &Arc<RobotController>) -> tokio::task::JoinHandle<()> {
+        let ctrl = Arc::clone(ctrl);
+        tokio::spawn(async move {
+            loop {
+                ctrl.tick(0.025);
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+    }
+
+    async fn wait_scan_state(ctrl: &RobotController, want: ScanState) -> ScanEnvStatus {
+        for _ in 0..2_000 {
+            let st = ctrl.snapshot().scan_env;
+            if st.state == want {
+                return st;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("scan never reached {:?}: {:?}", want, ctrl.snapshot().scan_env);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_scan_env_mock_sweep_measures_the_scene_and_gestures_aim_there() {
+        let ctrl = mock();
+        let ticker = spawn_ticker(&ctrl);
+        // Without a scan the prop gestures use their fixed side and say so
+        let out = ctrl.run_gesture("gatekeeper_approve", None).unwrap();
+        let aim = out.aim.expect("prop gesture reports its aim");
+        assert_eq!((aim.source, aim.joint1, aim.reason), ("default", 700, Some("no_scan")));
+        tokio::time::sleep(Duration::from_millis(10)).await; // first step runs on the gesture task
+        assert_eq!(ctrl.snapshot().target_servos.get(&1), Some(&700));
+        assert!(ctrl.run_gesture("chef_kiss", None).unwrap().aim.is_none());
+
+        ctrl.reset_scene().unwrap();
+        let gripper_before = ctrl.snapshot().target_servos[&10];
+        ctrl.start_scan_env(ScanScene::Gatekeeper).unwrap();
+        let running = ctrl.snapshot();
+        assert_eq!(running.scan_env.state, ScanState::Running);
+        assert_eq!(running.scan_env.steps, scan_env::SCAN_STEPS as u32);
+        assert!(!running.scan_env.fresh);
+        assert_eq!(
+            ctrl.start_scan_env(ScanScene::Gatekeeper),
+            Err(ScanStartError::AlreadyRunning)
+        );
+
+        // Mid-sweep: survey pose, joint1 within the sweep, gripper untouched, wheels still
+        let mut max_step = 0;
+        let mut j1_seen = Vec::new();
+        while ctrl.snapshot().scan_env.state == ScanState::Running {
+            let snap = ctrl.snapshot();
+            max_step = max_step.max(snap.scan_env.step);
+            j1_seen.push(snap.servos[&1]);
+            assert_eq!(snap.target_servos[&10], gripper_before);
+            assert_eq!((snap.odometry.vx, snap.odometry.vy, snap.odometry.wz), (0.0, 0.0, 0.0));
+            assert!(snap.target_servos[&1] >= scan_env::SCAN_J1_MIN);
+            assert!(snap.target_servos[&1] <= scan_env::SCAN_J1_MAX.max(500));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert_eq!(max_step, scan_env::SCAN_STEPS as u32);
+        assert!(j1_seen.iter().any(|&j| j <= 300) && j1_seen.iter().any(|&j| j >= 700));
+
+        let done = ctrl.snapshot();
+        assert_eq!(done.scan_env.state, ScanState::Done);
+        assert!(done.scan_env.fresh, "{:?}", done.scan_env.stale_reason);
+        assert_eq!(done.target_servos[&1], 500, "home at the end");
+        assert_eq!(done.target_servos[&2], 430);
+        let approve = done.scan_env.detections.iter().find(|d| d.id == "approve_tray").unwrap();
+        let reject = done.scan_env.detections.iter().find(|d| d.id == "reject_tray").unwrap();
+        // The default mock stage swaps the trays: APROBADO is on the RIGHT
+        assert!(approve.bearing_deg < 0.0 && reject.bearing_deg > 0.0);
+        assert!((approve.x_m - 0.22).abs() < 0.01 && (approve.y_m + 0.15).abs() < 0.01);
+
+        let out = ctrl.run_gesture("gatekeeper_approve", None).unwrap();
+        let aim = out.aim.unwrap();
+        assert_eq!(aim.source, "measured");
+        assert_eq!(aim.joint1, approve.joint1_target);
+        assert!(aim.joint1 < 400, "aims right: {}", aim.joint1);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(ctrl.snapshot().target_servos[&1], aim.joint1);
+        // Arm only: the approach strafe is gone
+        assert_eq!(ctrl.snapshot().odometry.vy, 0.0);
+        assert!(ctrl.snapshot().hud_subtext.contains("medido"));
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(ctrl.snapshot().servos[&1], aim.joint1);
+
+        // The reject gesture backs away ~9 cm at the end: still aimed, corrected by odometry
+        let out = ctrl.run_gesture("gatekeeper_reject", None).unwrap();
+        assert_eq!(out.aim.unwrap().source, "measured");
+        tokio::time::sleep(Duration::from_millis(3000)).await;
+        let snap = ctrl.snapshot();
+        assert!(snap.odometry.x_m < -0.05, "{}", snap.odometry.x_m);
+        assert!(snap.scan_env.fresh);
+        let after = ctrl.run_gesture("gatekeeper_approve", None).unwrap().aim.unwrap();
+        assert_eq!(after.source, "measured");
+        assert!(after.distance_m.unwrap() > aim.distance_m.unwrap(), "farther after backing off");
+        // Driving away (> 15 cm) makes it stale, for good
+        ctrl.set_velocity_with_duration(-0.2, 0.0, 0.0, Some(1500)).unwrap();
+        tokio::time::sleep(Duration::from_millis(1600)).await;
+        let snap = ctrl.snapshot();
+        assert!(!snap.scan_env.fresh);
+        assert_eq!(snap.scan_env.stale_reason.as_deref(), Some("moved"));
+        let aim = ctrl.run_gesture("gatekeeper_approve", None).unwrap().aim.unwrap();
+        assert_eq!((aim.source, aim.reason), ("default", Some("moved")));
+        ticker.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_scan_env_stop_aborts_and_freezes_the_arm() {
+        let ctrl = mock();
+        let ticker = spawn_ticker(&ctrl);
+        ctrl.start_scan_env(ScanScene::Bughunter).unwrap();
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert_eq!(ctrl.snapshot().scan_env.state, ScanState::Running);
+        ctrl.stop_all();
+        let st = wait_scan_state(&ctrl, ScanState::Aborted).await;
+        assert_eq!(st.reason, Some(AbortReason::Estop));
+        assert!(st.detections.is_empty());
+        let frozen = ctrl.snapshot().target_servos;
+        tokio::time::sleep(Duration::from_millis(3000)).await;
+        assert_eq!(ctrl.snapshot().target_servos, frozen, "no home move after STOP");
+        assert_eq!(
+            ctrl.start_scan_env(ScanScene::Bughunter),
+            Err(ScanStartError::EstopLatched)
+        );
+        let aim = ctrl.snapshot().scan_env;
+        assert_eq!(aim.stale_reason.as_deref(), Some("aborted"));
+        ctrl.release_estop();
+        assert!(ctrl.start_scan_env(ScanScene::Bughunter).is_ok());
+        ticker.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_scan_env_other_motion_interrupts_it() {
+        let ctrl = mock();
+        let ticker = spawn_ticker(&ctrl);
+        ctrl.start_scan_env(ScanScene::Gatekeeper).unwrap();
+        tokio::time::sleep(Duration::from_millis(3000)).await;
+        ctrl.run_gesture("wave_hello", None).unwrap();
+        let st = wait_scan_state(&ctrl, ScanState::Aborted).await;
+        assert_eq!(st.reason, Some(AbortReason::Interrupted));
+        assert_eq!(ctrl.snapshot().active_gesture, "wave_hello");
+        // cmd_vel interrupts too
+        ctrl.start_scan_env(ScanScene::Gatekeeper).unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        ctrl.set_velocity_with_duration(0.0, 0.0, 0.1, Some(200)).unwrap();
+        assert_eq!(
+            wait_scan_state(&ctrl, ScanState::Aborted).await.reason,
+            Some(AbortReason::Interrupted)
+        );
+        ticker.abort();
+    }
+
+    #[test]
+    fn test_scan_env_needs_a_camera_and_a_live_driver() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let (serial, _rx) = RobotController::new_with_test_driver(LidarSource::None, 600);
+            assert_eq!(
+                serial.start_scan_env(ScanScene::Gatekeeper),
+                Err(ScanStartError::NoCamera)
+            );
+            let (ros2, _rx) = RobotController::new_with_test_driver(LidarSource::Ros2, 600);
+            mark_worker_dead(&ros2.state, &ros2.worker_alive);
+            assert_eq!(
+                ros2.start_scan_env(ScanScene::Gatekeeper),
+                Err(ScanStartError::WorkerDead)
+            );
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_scan_env_ros2_asks_the_worker_and_uses_its_replies() {
+        let (ctrl, rx) = RobotController::new_with_test_driver(LidarSource::Ros2, 600);
+        let lidar = r#"{"event":"lidar","front_m":1.5,"left_m":1.2,"right_m":1.1,"back_m":0.0,"uncovered":["back"]}"#;
+        ctrl.feed_worker_line(lidar);
+        let stop = Arc::new(AtomicBool::new(false));
+        // Fake worker: answers each capture; the green tray is visible only looking left
+        let worker = {
+            let ctrl = Arc::clone(&ctrl);
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                let mut requests = Vec::new();
+                while !stop.load(Ordering::SeqCst) {
+                    ctrl.feed_worker_line(lidar);
+                    ctrl.tick(0.025);
+                    while let Ok(cmd) = rx.try_recv() {
+                        if let DriverCmd::ScanCapture { id, scene, servos } = cmd {
+                            requests.push((scene, servos.clone()));
+                            let line = if id == 3 {
+                                format!(r#"{{"event":"scan_env_result","id":{id},"ok":false,"error":"no_rgb_frame"}}"#)
+                            } else if servos[&1] >= 600 {
+                                format!(r#"{{"event":"scan_env_result","id":{id},"ok":true,"detections":[{{"id":"approve_tray","x_m":0.17,"y_m":0.2,"z_m":-0.025,"confidence":0.9,"method":"plane","lidar_confirmed":null}}]}}"#)
+                            } else {
+                                format!(r#"{{"event":"scan_env_result","id":{id},"ok":true,"detections":[]}}"#)
+                            };
+                            ctrl.feed_worker_line(&line);
+                        }
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                requests
+            })
+        };
+        ctrl.start_scan_env(ScanScene::Gatekeeper).unwrap();
+        // Real time here (the worker is another thread): ~15 s sweep
+        let st = tokio::time::timeout(Duration::from_secs(40), wait_scan_state(&ctrl, ScanState::Done))
+            .await
+            .expect("sweep finishes");
+        stop.store(true, Ordering::SeqCst);
+        let requests = worker.join().unwrap();
+        assert_eq!(requests.len(), scan_env::SCAN_STEPS);
+        assert!(requests.iter().all(|(scene, servos)| *scene == ScanScene::Gatekeeper
+            && servos.keys().copied().collect::<Vec<_>>() == vec![1, 2, 3, 4]
+            && servos[&2] == 520));
+        assert_eq!(st.failed_captures, 1);
+        assert_eq!(st.last_error.as_deref(), Some("no_rgb_frame"));
+        assert_eq!(st.detections.len(), 1);
+        assert_eq!(st.detections[0].id, "approve_tray");
+        assert!(st.detections[0].joint1_target > 700);
+    }
+
+    #[test]
+    fn test_scan_env_result_lines_fill_the_bounded_inbox() {
+        let (ctrl, _rx) = RobotController::new_with_test_driver(LidarSource::Ros2, 600);
+        for id in 0..20 {
+            ctrl.feed_worker_line(&format!(
+                r#"{{"event":"scan_env_result","id":{id},"ok":true,"detections":[{{"id":"firestore","x_m":0.3,"y_m":0.0,"confidence":0.7}}]}}"#
+            ));
+        }
+        ctrl.feed_worker_line(r#"{"event":"scan_env_result","ok":true}"#); // no id: ignored
+        let inbox = lock(&ctrl.scan_inbox);
+        assert_eq!(inbox.len(), SCAN_INBOX_MAX);
+        let last = inbox.get(&19).unwrap();
+        assert_eq!(last.error, None);
+        assert_eq!(last.detections[0].id, "firestore");
+        assert_eq!(last.detections[0].method, "");
+    }
+
+    #[test]
+    fn test_sim_scene_updates_and_resets() {
+        let ctrl = mock();
+        let moved = ctrl.set_sim_scene(
+            false,
+            &[SimObject {
+                id: "firestore".into(),
+                x_m: 0.5,
+                y_m: -0.3,
+            }],
+        );
+        assert_eq!(moved.len(), default_sim_scene().len());
+        assert!(moved.iter().any(|o| o.id == "firestore" && o.x_m == 0.5));
+        assert_eq!(ctrl.set_sim_scene(true, &[]), default_sim_scene());
     }
 }
