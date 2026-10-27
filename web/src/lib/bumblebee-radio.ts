@@ -14,6 +14,7 @@ import { getEffectiveApiKey, loadApiKeyFromBridge } from './api-key';
 import { LiveConnection, type LiveStatus } from './live-connection';
 import { MicCapture } from './mic-capture';
 import { sanitizeTranscriptChunk } from './transcript-filter';
+import { EchoGate, isLyricEcho } from './bumblebee-echo';
 import { cleanIdList, cleanToolText, pickEnum } from './tool-args';
 import { toolErrorHint } from './tool-policy';
 import { matchSongsForPrompt, type MatchState, type SongClip, type SongMatch } from './song-matcher';
@@ -51,6 +52,8 @@ export interface BumblebeeCallbacks {
    * Called with null once a clip plays or playback is cut.
    */
   onClipUnavailable: (clip: SongClip | null, reason?: ClipUnavailableReason) => void;
+  /** The user interrupted a clip: by talking over it (`voice`) or with the dial / Space (`manual`). */
+  onBargeIn?: (source: 'voice' | 'manual') => void;
 }
 
 export const BUMBLEBEE_DANCES = [
@@ -105,6 +108,10 @@ export const BUMBLEBEE_TOOLS: FunctionDeclaration[] = [
 ];
 
 const IDLE_FREQUENCY = '104.7 FM';
+/** Real-audio frames (~43 ms each) kept while the mic gate is closed: ~340 ms of pre-roll. */
+const PRE_ROLL_FRAMES = 8;
+/** Transcriptions matching a lyric this long after the clip ended are still the mic hearing it. */
+const LYRIC_ECHO_WINDOW_MS = 4000;
 const TAB_HIDDEN_WARNING =
   'La radio se detuvo al cambiar de pestaña para que el robot no responda mientras presentas. Pulsa de nuevo para reanudarla.';
 const NO_KEY_WARNING =
@@ -154,6 +161,22 @@ export class BumblebeeRadioSession {
   private toolSequence: { seq: number; ids: string[]; started: boolean } | null = null;
   /** Start in progress, shared so two quick taps do not open two sessions or two mics. */
   private starting: Promise<boolean> | null = null;
+  /**
+   * Half-duplex mic gate: while a clip plays (and a short tail after) the laptop mic is not
+   * streamed, so Gemini never hears the song as user speech; a local detector still catches the
+   * user talking over it (barge-in).
+   */
+  private readonly echoGate = new EchoGate();
+  /** Real audio captured while the gate is closed, sent on a barge-in so the first words count. */
+  private preRoll: string[] = [];
+  /**
+   * The user typed, said (transcription or sustained mic energy) something since the last
+   * answered turn. A tool call without it is the model answering its own song: ignored.
+   */
+  private userTurnPending = false;
+  /** Lyrics of the clips playing now or a moment ago (until `lyricsUntil`). */
+  private recentLyrics: string[] = [];
+  private lyricsUntil = 0;
 
   constructor(
     bridge: RobotActionHandler | undefined | null,
@@ -266,9 +289,14 @@ export class BumblebeeRadioSession {
     });
   }
 
-  /** "Cortar": stops the clip, resolves the pending clip promise and leaves the dial idle. */
-  public stopCurrentPlayback() {
+  /**
+   * "Cortar": stops the clip, resolves the pending clip promise and leaves the dial idle.
+   * `reopenMic` (an interruption) reopens the mic at once instead of after the echo tail.
+   */
+  public stopCurrentPlayback(reopenMic = false) {
     this.playSeq += 1;
+    this.echoGate.endPlayback(Date.now(), reopenMic);
+    if (this.lyricsUntil === Infinity) this.lyricsUntil = Date.now() + LYRIC_ECHO_WINDOW_MS;
     if (this.clipTimer) {
       clearTimeout(this.clipTimer);
       this.clipTimer = null;
@@ -388,6 +416,9 @@ export class BumblebeeRadioSession {
     const seq = ++this.playSeq;
     this.isPlayingRadio = true;
     this.motionSuppressUntil = Date.now() + 1200;
+    this.echoGate.startPlayback(Date.now());
+    this.recentLyrics = clips.map((c) => c.lyrics).filter(Boolean);
+    this.lyricsUntil = Infinity;
 
     const chosenGesture = gestureName || clips[0].gesture || 'bumblebee_hype';
     const freq = `${(88.1 + ((clips[0].id.length * 3.7) % 19.6)).toFixed(1)} FM`;
@@ -433,7 +464,8 @@ export class BumblebeeRadioSession {
         });
 
         await this.playOneClip(clip, seq);
-        this.motionSuppressUntil = Date.now() + 500;
+        // Servo noise after the dance step; not after a cut (that would mute the user who interrupted)
+        if (seq === this.playSeq) this.motionSuppressUntil = Date.now() + 500;
       }
 
       resolveFirst({ ok: false, target: 'simulator', message: 'La secuencia se cortó antes de bailar.' });
@@ -441,6 +473,8 @@ export class BumblebeeRadioSession {
 
       this.currentAudioEl = null;
       this.isPlayingRadio = false;
+      this.echoGate.endPlayback(Date.now());
+      this.lyricsUntil = Date.now() + LYRIC_ECHO_WINDOW_MS;
       this.callbacks.onPlaybackStatus('idle');
       this.callbacks.onNowPlaying(null, IDLE_FREQUENCY, 'Sintonizador listo — sigue hablándole');
       void this.hudClient.updateHud({
@@ -472,6 +506,7 @@ export class BumblebeeRadioSession {
     const clean = userText.trim();
     if (!clean) return;
     this.unlockAudioContext();
+    this.userTurnPending = false; // answered locally
     this.callbacks.onUserTranscript(clean);
     const matched = this.matchSongsForPrompt(clean);
     await this.playClipSequence(matched.clips, matched.gesture, matched.caption, clean);
@@ -499,11 +534,12 @@ export class BumblebeeRadioSession {
       }
     }
     // A new turn interrupts the song that is playing, like a spoken barge-in.
-    if (this.isPlayingRadio) this.stopCurrentPlayback();
+    if (this.isPlayingRadio) this.stopCurrentPlayback(true);
     if (this.silenceDebounceTimer) clearTimeout(this.silenceDebounceTimer);
     this.silenceDebounceTimer = null;
     this.currentUserTurnText = clean;
     this.toolHandledCurrentTurn = false;
+    this.userTurnPending = true;
     this.callbacks.onUserTranscript(clean);
     const sent = this.live.sendClientContent({
       turns: [{ role: 'user', parts: [{ text: clean }] }],
@@ -587,8 +623,14 @@ ${sections.join('\n')}`;
     const inText = msg.serverContent?.inputTranscription?.text;
     if (inText && !this.isPlayingRadio) {
       const validPiece = sanitizeTranscriptChunk(inText);
-      if (validPiece) {
-        this.currentUserTurnText = `${this.currentUserTurnText}${validPiece}`.replace(/\s+/g, ' ').trim();
+      const candidate = `${this.currentUserTurnText}${validPiece}`.replace(/\s+/g, ' ').trim();
+      if (validPiece && this.isHearingTheSong(candidate)) {
+        // The mic picked up the lyric that is (or was just) playing: not the user.
+        console.info('[bumblebee] Transcripción descartada: es la letra de la canción.', candidate);
+        this.currentUserTurnText = '';
+      } else if (validPiece) {
+        this.userTurnPending = true;
+        this.currentUserTurnText = candidate;
         if (this.currentUserTurnText.length >= 2) {
           this.callbacks.onUserTranscript(this.currentUserTurnText);
         }
@@ -659,8 +701,11 @@ ${sections.join('\n')}`;
     });
     if (!calls.length) return;
     if (this.silenceDebounceTimer) clearTimeout(this.silenceDebounceTimer);
-    const alreadyHandled = this.toolHandledCurrentTurn || this.isPlayingRadio;
+    // Without a user turn since the last answer, the model is answering its own song.
+    const noUserTurn = !this.userTurnPending;
+    const alreadyHandled = this.toolHandledCurrentTurn || this.isPlayingRadio || noUserTurn;
     this.toolHandledCurrentTurn = true;
+    this.userTurnPending = false;
     const userSpoken = this.currentUserTurnText || 'Conversación por micrófono';
     this.currentUserTurnText = '';
 
@@ -672,7 +717,9 @@ ${sections.join('\n')}`;
       } else if (alreadyHandled) {
         response = {
           status: 'ok',
-          message: 'This turn was already answered with a clip chosen locally; nothing else was played.',
+          message: noUserTurn
+            ? 'Ignored: the user has not said anything since your last song (that audio was your own clip). Wait for the user.'
+            : 'This turn was already answered with a clip chosen locally; nothing else was played.',
         };
       } else {
         const args = fc.args ?? {};
@@ -782,15 +829,71 @@ ${sections.join('\n')}`;
     this.callbacks.onMicLevelChange(normalizedLevel);
     if (!this.live.isOpen) return;
 
-    const isMuted =
-      this.isPlayingRadio || Date.now() < this.motionSuppressUntil || normalizedLevel < 0.09;
-    const pcm16 = isMuted
-      ? new Int16Array(Math.round((frame.samples.length * 16000) / sampleRate))
-      : downsampleFloat32ToInt16_16kHz(frame.samples, sampleRate);
+    const now = Date.now();
+    const frameMs = (frame.samples.length / sampleRate) * 1000;
+    const gate = this.echoGate.onFrame(frame.rms, frameMs, now);
+    if (gate.userSpeech) this.userTurnPending = true;
+    const silence = () =>
+      int16ToBase64(new Int16Array(Math.round((frame.samples.length * 16000) / sampleRate)));
 
-    this.live.sendRealtimeInput({
-      audio: { mimeType: 'audio/pcm;rate=16000', data: int16ToBase64(pcm16) },
-    });
+    if (!gate.send) {
+      // Gate closed (clip playing or its tail): Gemini gets silence, the real audio waits as pre-roll.
+      this.preRoll.push(int16ToBase64(downsampleFloat32ToInt16_16kHz(frame.samples, sampleRate)));
+      if (this.preRoll.length > PRE_ROLL_FRAMES) this.preRoll.shift();
+      this.sendAudio(silence());
+      return;
+    }
+    if (gate.bargeIn) {
+      this.onVoiceBargeIn();
+      for (const chunk of this.preRoll) this.sendAudio(chunk);
+    }
+    this.preRoll = [];
+
+    const isMuted = now < this.motionSuppressUntil || normalizedLevel < 0.09;
+    this.sendAudio(isMuted ? silence() : int16ToBase64(downsampleFloat32ToInt16_16kHz(frame.samples, sampleRate)));
+  }
+
+  private sendAudio(data: string) {
+    this.live.sendRealtimeInput({ audio: { mimeType: 'audio/pcm;rate=16000', data } });
+  }
+
+  private isHearingTheSong(text: string): boolean {
+    return Date.now() < this.lyricsUntil && isLyricEcho(text, this.recentLyrics);
+  }
+
+  /** The user talked over the clip: cut it, reopen the mic and let the server VAD take the turn. */
+  private onVoiceBargeIn() {
+    console.info('[bumblebee] Barge-in por voz: corto la canción y abro el micrófono.');
+    this.motionSuppressUntil = 0;
+    this.toolSequence = null;
+    this.userTurnPending = true;
+    this.stopCurrentPlayback(true);
+    this.callbacks.onBargeIn?.('voice');
+  }
+
+  /**
+   * Manual barge-in (tapping the dial or Space): cuts the clip and opens the mic right away,
+   * starting the conversation if it was not open.
+   */
+  public async interrupt(): Promise<void> {
+    this.unlockAudioContext();
+    this.motionSuppressUntil = 0;
+    const wasPlaying = this.isPlayingRadio;
+    if (wasPlaying) {
+      this.toolSequence = null;
+      this.stopCurrentPlayback(true);
+    } else {
+      this.echoGate.endPlayback(Date.now(), true);
+    }
+    if (wasPlaying) this.callbacks.onBargeIn?.('manual');
+    if (!getEffectiveApiKey()) await loadApiKeyFromBridge();
+    if (!getEffectiveApiKey()) return; // no key: cutting the song is all an interruption can do
+    if (!this.conversationActive || !this.live.isOpen) {
+      this.starting ??= this.startRadioConversation().finally(() => {
+        this.starting = null;
+      });
+      await this.starting;
+    }
   }
 
   private endConversation() {

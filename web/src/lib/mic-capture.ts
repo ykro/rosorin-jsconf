@@ -47,6 +47,14 @@ export class MicCapture {
       console.warn('[mic] getUserMedia rechazado:', err);
       return 'denied';
     }
+    const settings = stream.getAudioTracks()[0]?.getSettings?.();
+    if (settings) {
+      // The browser may ignore a constraint: log what it actually applied (echo cancellation matters
+      // most, the speakers play the robot's songs next to this mic).
+      console.info(
+        `[mic] echoCancellation=${settings.echoCancellation} noiseSuppression=${settings.noiseSuppression} autoGainControl=${settings.autoGainControl}`
+      );
+    }
     if (token !== this.startToken || this.stream) {
       // stop() was called (or another start won) while waiting for permission.
       stream.getTracks().forEach((t) => t.stop());

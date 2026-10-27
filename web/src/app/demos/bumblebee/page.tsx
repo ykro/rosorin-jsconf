@@ -8,6 +8,7 @@ import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { useLiteMode } from '@/lib/use-lite-mode';
 import type { LiveStatus } from '@/lib/live-connection';
 import { API_KEY_UPDATED_EVENT, getEffectiveApiKey } from '@/lib/api-key';
+import { shouldIgnoreShortcut } from '@/lib/keyboard';
 import {
   BUMBLEBEE_DANCE_LABELS,
   BumblebeeRadioSession,
@@ -124,6 +125,12 @@ export default function BumblebeeDemoPage() {
         },
         onMicLevelChange: (lvl) => setMicLevel(lvl),
         onMicWarning: (warn) => setMicWarning(warn),
+        onBargeIn: (source) =>
+          setRadioCaption(
+            source === 'voice'
+              ? 'Te escuché: corté la canción, sigue hablando.'
+              : 'Canción interrumpida: micrófono abierto, háblale.'
+          ),
       },
       catalog
     );
@@ -147,6 +154,19 @@ export default function BumblebeeDemoPage() {
     refresh();
     window.addEventListener(API_KEY_UPDATED_EVENT, refresh);
     return () => window.removeEventListener(API_KEY_UPDATED_EVENT, refresh);
+  }, []);
+
+  // Manual barge-in: Space (when not typing or on a button) cuts the song and opens the mic.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || e.repeat || shouldIgnoreShortcut(e)) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('button, a, [role="button"]')) return; // Space activates that control
+      e.preventDefault();
+      void sessionRef.current?.interrupt();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   const handleToggleConversation = async () => {
@@ -209,20 +229,31 @@ export default function BumblebeeDemoPage() {
             <button
               type="button"
               onClick={() => {
-                sessionRef.current?.stopCurrentPlayback();
                 setClipUnavailable(null);
+                void sessionRef.current?.interrupt();
               }}
-              className="rounded-xl border-2 border-[#202124] bg-[#202124] px-4 py-3.5 text-xs font-bold text-white hover:bg-[#3C4043]"
+              title="Corta la canción y abre el micrófono (Espacio)"
+              className="flex items-center gap-1.5 rounded-xl border-2 border-[#202124] bg-[#202124] px-4 py-3.5 text-xs font-bold text-white hover:bg-[#3C4043]"
             >
-              Cortar
+              Interrumpir <kbd className="rounded bg-white/20 px-1 font-mono text-[10px] font-bold">Espacio</kbd>
             </button>
           )}
         </div>
 
         {/* FM Tuner Display */}
         <div
-          className="mt-3.5 rounded-xl border border-[#202124] bg-[#111318] p-4 text-white"
-          aria-label="Dial de la radio"
+          role="button"
+          tabIndex={0}
+          onClick={() => void sessionRef.current?.interrupt()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              void sessionRef.current?.interrupt();
+            }
+          }}
+          title="Toca el dial (o pulsa Espacio) para interrumpir la canción y hablarle"
+          className="mt-3.5 cursor-pointer rounded-xl border border-[#202124] bg-[#111318] p-4 text-white"
+          aria-label="Dial de la radio: tócalo para interrumpir la canción y abrir el micrófono"
         >
           <div className="flex items-center justify-between border-b border-white/10 pb-2">
             <div className="flex items-center gap-2">

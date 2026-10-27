@@ -101,6 +101,8 @@ describe('BumblebeeRadioSession: toolCallCancellation (R6)', () => {
     const { session, calls, playback } = makeSession();
     assert.equal(await session.startRadioConversation(), true);
     const sock = sockets[0];
+    // The user spoke (a tool call with no user turn would be ignored as Bumblebee answering itself)
+    sock.cb.onmessage({ serverContent: { inputTranscription: { text: 'hola robot' } } });
     sock.cb.onmessage(playCall('t1'));
     sock.cb.onmessage({ toolCallCancellation: { ids: ['t1'] } }); // barge-in while tuning
     await wait();
