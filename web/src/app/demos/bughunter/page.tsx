@@ -4,6 +4,8 @@ import React, { useCallback, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { TopNav } from '@/components/TopNav';
 import { GeminiLiveConsole } from '@/components/GeminiLiveConsole';
+import { SceneScanPanel } from '@/components/SceneScanPanel';
+import { formatBearing } from '@/lib/scene-scan';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { useEmbodiedLiveSession } from '@/lib/use-embodied-live-session';
 import { useLiteMode } from '@/lib/use-lite-mode';
@@ -58,7 +60,7 @@ const FOLLOW_UP_QUESTIONS = [
 
 export default function BugHunterDemoPage() {
   const robot = useRobotTelemetry();
-  const { telemetry, jogServo, moveChassis, simulateLidar, triggerGesture, resetScene } = robot;
+  const { telemetry, jogServo, moveChassis, simulateLidar, triggerGesture, resetScene, startSceneScan } = robot;
   const isLite = useLiteMode();
   const [incidentInput, setIncidentInput] = useState(PRESET_INCIDENT_LINKS[0].url);
   const [hunting, setHunting] = useState(false);
@@ -85,6 +87,11 @@ export default function BugHunterDemoPage() {
   };
 
   const activeTotemInfo = identifiedTotem ? TOTEM_DETAILS[identifiedTotem] : null;
+  const scan = telemetry.scan_env;
+  const measuredTotem =
+    identifiedTotem && scan?.state === 'done' && scan.fresh
+      ? scan.detections.find((d) => d.id === identifiedTotem)
+      : undefined;
 
   const controlsColumn = (
     <div className="flex flex-col gap-5">
@@ -155,11 +162,20 @@ export default function BugHunterDemoPage() {
               className="rounded-lg px-3 py-1.5 text-xs font-bold text-white"
               style={{ backgroundColor: activeTotemInfo.color }}
             >
-              {activeTotemInfo.position}
+              {measuredTotem ? `Medido · ${formatBearing(measuredTotem.bearing_deg)}` : activeTotemInfo.position}
             </span>
           </div>
         )}
       </div>
+
+      {/* «Reconocer»: where the totems really are (the arm points there) */}
+      <SceneScanPanel
+        scene="bughunter"
+        telemetry={telemetry}
+        bridgeConnected={robot.bridge.connected}
+        estopLatched={robot.bridge.estopLatched}
+        onStart={startSceneScan}
+      />
 
       {/* 2. Gemini Live Voice & Follow-up Conversation */}
       <GeminiLiveConsole

@@ -47,6 +47,58 @@ export interface TelemetryState {
   /** No recent LiDAR scan: the bridge blocks the chassis. */
   lidar_stale?: boolean;
   lidar_source?: 'mock' | 'ros2' | 'none';
+  /** «Reconocer» (`POST /scan_env`): sweep progress and measured props. Absent on older bridges. */
+  scan_env?: ScanEnvStatus;
+}
+
+/** Stage of a «Reconocer» scan: Demo B (trays) or Demo C (totems). */
+export type ScanScene = 'gatekeeper' | 'bughunter';
+
+export type ScanPropId = 'approve_tray' | 'reject_tray' | 'cloud_run' | 'gemini_live' | 'firestore';
+
+/** A prop measured by «Reconocer», in the robot frame at scan time (`odom_at_scan`). */
+export interface SceneDetection {
+  id: ScanPropId;
+  label: string;
+  x_m: number;
+  y_m: number;
+  z_m: number;
+  /** REP-103: 0 = front, + = left. */
+  bearing_deg: number;
+  distance_m: number;
+  confidence: number;
+  views: number;
+  method: 'plane' | 'depth' | 'mock' | string;
+  lidar_confirmed: boolean | null;
+  joint1_target: number;
+}
+
+/** `GET /scan_env` and `telemetry.scan_env`. */
+export interface ScanEnvStatus {
+  state: 'idle' | 'running' | 'done' | 'aborted';
+  scene: ScanScene | null;
+  step: number;
+  steps: number;
+  started_at_ms: number | null;
+  finished_at_ms: number | null;
+  reason: 'estop' | 'interrupted' | 'worker_dead' | null;
+  failed_captures: number;
+  last_error: string | null;
+  detections: SceneDetection[];
+  odom_at_scan: { x_m: number; y_m: number; yaw_rad: number } | null;
+  fresh: boolean;
+  stale_reason: string | null;
+}
+
+/** `aim` of a prop gesture's `/gesture` response: measured target or the fixed side. */
+export interface GestureAim {
+  source: 'measured' | 'default';
+  object: ScanPropId;
+  joint1: number;
+  bearing_deg: number | null;
+  distance_m: number | null;
+  confidence: number | null;
+  reason: string | null;
 }
 
 export type BridgeErrorCode =
@@ -59,6 +111,9 @@ export type BridgeErrorCode =
   | 'rate_limited'
   | 'invalid_request'
   | 'not_found'
+  // POST /scan_env: a sweep is already running (409) / the bridge cannot scan (503)
+  | 'scan_running'
+  | 'unavailable'
   | 'http'
   // Movement refused by the bridge safety layer (HTTP 200 with `blocked`): the robot did not move.
   | MotionBlockReason

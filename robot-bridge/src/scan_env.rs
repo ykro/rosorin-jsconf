@@ -501,8 +501,9 @@ pub struct SimObject {
 }
 
 /// The mock's stage. On purpose NOT the fixed layout of the gestures and the twin (APROBADO left,
-/// RECHAZADO right; Cloud Run left, Gemini Live center, Firestore right): the trays are swapped and
-/// turned toward the front, and the totems shuffled, so «Reconocer» visibly changes where the twin
+/// RECHAZADO right; Cloud Run left, Gemini Live center, Firestore right): the trays are swapped
+/// (APROBADO right, RECHAZADO left) and the totems shuffled (Gemini Live left, Firestore near the
+/// center, Cloud Run right), so «Reconocer» visibly changes where the twin
 /// draws them and where the gestures aim. `POST /simulate/scene` changes it.
 pub fn default_sim_scene() -> Vec<SimObject> {
     let obj = |id: &str, x_m: f32, y_m: f32| SimObject {

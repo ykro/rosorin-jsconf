@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { TopNav } from '@/components/TopNav';
 import { GeminiLiveConsole } from '@/components/GeminiLiveConsole';
+import { SceneScanPanel } from '@/components/SceneScanPanel';
 import { useRobotTelemetry } from '@/lib/use-robot-telemetry';
 import { useEmbodiedLiveSession } from '@/lib/use-embodied-live-session';
 import { useLiteMode } from '@/lib/use-lite-mode';
@@ -37,7 +38,7 @@ const FOLLOW_UP_QUESTIONS = [
 
 export default function GatekeeperDemoPage() {
   const robot = useRobotTelemetry();
-  const { telemetry, jogServo, moveChassis, simulateLidar, triggerGesture, resetScene } = robot;
+  const { telemetry, jogServo, moveChassis, simulateLidar, triggerGesture, resetScene, startSceneScan } = robot;
   const isLite = useLiteMode();
   const [prUrlInput, setPrUrlInput] = useState(PRESET_PR_LINKS[0].url);
   const [evaluating, setEvaluating] = useState(false);
@@ -134,6 +135,15 @@ export default function GatekeeperDemoPage() {
           ))}
         </div>
       </div>
+
+      {/* «Reconocer»: where the trays really are (the gestures aim there) */}
+      <SceneScanPanel
+        scene="gatekeeper"
+        telemetry={telemetry}
+        bridgeConnected={robot.bridge.connected}
+        estopLatched={robot.bridge.estopLatched}
+        onStart={startSceneScan}
+      />
 
       {/* 2. Gemini Live Voice & Follow-up Conversation */}
       <GeminiLiveConsole

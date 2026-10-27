@@ -74,7 +74,7 @@ export const EMBODIED_TOOLS: FunctionDeclaration[] = [
   {
     name: 'release_deploy_key',
     description:
-      'Rotates the 6-DOF arm to the APPROVED green tray or REJECTED red tray and opens Gripper Servo ID 10 (pulse 680 -> 220) to physically drop the Production Deploy Key.',
+      'Rotates the 6-DOF arm to the APPROVED green tray or REJECTED red tray and opens Gripper Servo ID 10 (pulse 680 -> 220) to physically drop the Production Deploy Key. If the stage was scanned with «Reconocer» (depth camera, arm-only sweep), the arm aims at the measured tray position; otherwise at the fixed side (green left, red right). The result message says which.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -94,7 +94,7 @@ export const EMBODIED_TOOLS: FunctionDeclaration[] = [
   {
     name: 'point_at_service_totem',
     description:
-      'Strafes the Mecanum chassis laterally and points the 6-DOF arm directly at one of the three physical architecture totems on the table.',
+      'Points the 6-DOF arm at one of the three physical architecture totems on the table. If the stage was scanned with «Reconocer» (depth camera, arm-only sweep), the arm turns to the measured totem position without moving the wheels; otherwise the chassis strafes toward the fixed side (Cloud Run left, Gemini Live center, Firestore right). The result message says which.',
     parameters: {
       type: Type.OBJECT,
       properties: {

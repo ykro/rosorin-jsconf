@@ -1,6 +1,9 @@
 import type {
   BridgeErrorCode,
+  GestureAim,
   MotionBlockReason,
+  ScanEnvStatus,
+  ScanScene,
   RobotActionHandler,
   RobotActionResult,
   TelemetryState,
@@ -11,6 +14,7 @@ import {
   resolveBridgeUrl,
 } from './bridge-config';
 import { clampChassisVelocity, clampArmDurationMs, clampChassisDurationMs } from './tool-args';
+import { aimFromResponse, describeAim } from './scene-scan';
 
 export { resolveBridgeUrl } from './bridge-config';
 
@@ -81,6 +85,11 @@ export function motionBlockError(blocked: unknown, path: string): BridgeError | 
     return new BridgeError(reason as MotionBlockReason, MOTION_BLOCK_MESSAGES[reason as MotionBlockReason], 200);
   }
   return new BridgeError('blocked', `El bridge bloqueó ${path} (${reason.slice(0, 40)}): el robot no se movió.`, 200);
+}
+
+export interface GestureResponse {
+  telemetry: TelemetryState | null;
+  aim: GestureAim | null;
 }
 
 export interface BridgeLinkState {
@@ -245,13 +254,19 @@ export class RobotBridgeClient {
   }
 
   private async postJson(path: string, body?: unknown): Promise<TelemetryState | null> {
+    const data = await this.request('POST', path, body);
+    return (data as { telemetry?: TelemetryState } | null)?.telemetry ?? null;
+  }
+
+  /** Sends a request and returns the parsed JSON body (null if empty); throws BridgeError. */
+  private async request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
     if (!isBridgeEnabled()) {
       throw new BridgeError('disabled', 'Bridge desactivado en esta página (solo simulador 3D).');
     }
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'POST',
+        method,
         headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
         body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(BRIDGE_TIMEOUT_MS),
@@ -296,6 +311,10 @@ export class RobotBridgeClient {
           throw new BridgeError('invalid_request', `Parámetros inválidos en ${path}${detail ? `: ${detail}` : ''} (400).`, 400);
         case 404:
           throw new BridgeError('not_found', `El bridge no reconoce ${path} o su parámetro${detail ? `: ${detail}` : ''} (404).`, 404);
+        case 409:
+          throw new BridgeError('scan_running', detail || 'Ya hay un reconocimiento en curso (409).', 409);
+        case 503:
+          throw new BridgeError('unavailable', detail || `El bridge no puede atender ${path} ahora (503).`, 503);
         default:
           throw new BridgeError('http', `El bridge respondió HTTP ${res.status} en ${path}${detail ? `: ${detail}` : ''}.`, res.status);
       }
@@ -308,11 +327,25 @@ export class RobotBridgeClient {
     }
     const blocked = motionBlockError(data?.blocked, path);
     if (blocked) throw blocked;
-    return data?.telemetry ?? null;
+    return data;
   }
 
-  public async triggerGesture(name: string, mood?: string): Promise<TelemetryState | null> {
-    return this.postJson('/gesture', { name, mood });
+  /** Runs a gesture; `aim` says, for the prop gestures, whether it aimed at a «Reconocer» measurement. */
+  public async triggerGesture(name: string, mood?: string): Promise<GestureResponse> {
+    const data = await this.request('POST', '/gesture', { name, mood });
+    return {
+      telemetry: (data as { telemetry?: TelemetryState } | null)?.telemetry ?? null,
+      aim: aimFromResponse(data),
+    };
+  }
+
+  /** «Reconocer»: starts the arm-only sweep with the depth camera (`POST /scan_env`). */
+  public async startSceneScan(scene: ScanScene): Promise<TelemetryState | null> {
+    return this.postJson('/scan_env', { scene });
+  }
+
+  public async getSceneScan(): Promise<ScanEnvStatus | null> {
+    return (await this.request('GET', '/scan_env')) as ScanEnvStatus | null;
   }
 
   public async moveChassis(
@@ -370,6 +403,12 @@ export class RobotBridgeClient {
   }
 }
 
+/** «Ejecutado en el robot.» plus, for a prop gesture, which target it aimed at. */
+export function executedMessage(out: unknown): string {
+  const aim = (out as Partial<GestureResponse> | null)?.aim;
+  return aim ? `Ejecutado en el robot. ${describeAim(aim)}` : 'Ejecutado en el robot.';
+}
+
 /** Adapts a bare client into the RobotActionHandler contract used by Gemini sessions. */
 export function createBridgeActionHandler(client: RobotBridgeClient): RobotActionHandler {
   const run = async (fn: () => Promise<unknown>): Promise<RobotActionResult> => {
@@ -377,8 +416,7 @@ export function createBridgeActionHandler(client: RobotBridgeClient): RobotActio
       return { ok: true, target: 'simulator', message: 'Sin robot conectado: acción solo en el simulador.' };
     }
     try {
-      await fn();
-      return { ok: true, target: 'robot', message: 'Ejecutado en el robot.' };
+      return { ok: true, target: 'robot', message: executedMessage(await fn()) };
     } catch (err) {
       const { code, message } = describeBridgeError(err);
       return { ok: false, target: 'robot', code, message };

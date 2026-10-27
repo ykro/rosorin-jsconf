@@ -8,6 +8,7 @@ import type { TelemetryState } from '@/lib/types';
 import { isSectorUncovered, lidarAlert, lidarMarkers, LIDAR_SECTOR_ANGLE_RAD } from '@/lib/lidar';
 import type { LidarSectorName } from '@/lib/types';
 import { shouldIgnoreShortcut } from '@/lib/keyboard';
+import { propPlacements } from '@/lib/scene-scan';
 import { ViewerErrorBoundary } from './ViewerErrorBoundary';
 
 export type SceneMode = 'sandbox' | 'roaster' | 'gatekeeper' | 'bughunter';
@@ -447,6 +448,22 @@ function Rosorin3DViewerScene({
       [0, 0, 0],
       [0, 0, 1]
     );
+    // «Reconocer»: the camera's field of view (camera_link looks along +x), shown while it sweeps.
+    const SCAN_CONE_LENGTH_M = 0.32;
+    const scanCone = new THREE.Mesh(
+      new THREE.ConeGeometry(SCAN_CONE_LENGTH_M * Math.tan((37.6 * Math.PI) / 180), SCAN_CONE_LENGTH_M, 4, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0x1a73e8,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.14,
+        depthWrite: false,
+      })
+    );
+    scanCone.rotation.set(Math.PI / 4, 0, Math.PI / 2); // apex at the camera, base along +x
+    scanCone.position.set(SCAN_CONE_LENGTH_M / 2, 0, 0);
+    scanCone.visible = false;
+    camJoint.pivot.add(scanCone);
 
     const joint5 = createUrdfJoint(
       joint4.pivot,
@@ -626,6 +643,7 @@ function Rosorin3DViewerScene({
       { id: 'firestore', label: 'FIRESTORE', y: -0.22, color: 0xff5500, hex: '#FF5500' },
     ];
     const totemMeshes: Record<string, THREE.Mesh> = {};
+    const totemLabels: Record<string, THREE.Sprite> = {};
     for (const spec of totemSpecs) {
       const m = new THREE.Mesh(
         new THREE.BoxGeometry(0.028, 0.095, 0.145),
@@ -643,6 +661,7 @@ function Rosorin3DViewerScene({
       const labelSprite = createTotemLabelSprite(spec.label, spec.hex);
       labelSprite.position.set(0.33, spec.y, 0.172);
       bughunterGroup.add(labelSprite);
+      totemLabels[spec.id] = labelSprite;
     }
 
     // SOLID, OPAQUE, HIGH-CONTRAST INDUSTRIAL MATERIALS (Zero transparent/washed-out parts)
@@ -845,6 +864,20 @@ function Rosorin3DViewerScene({
       lJoint.pivot.setRotationFromAxisAngle(lJoint.axis, openAngle);
       lInJoint.pivot.setRotationFromAxisAngle(lInJoint.axis, -openAngle);
       lOutJoint.pivot.setRotationFromAxisAngle(lOutJoint.axis, openAngle);
+
+      // Trays and totems where «Reconocer» measured them (world frame), else the fixed layout.
+      scanCone.visible = st.scan_env?.state === 'running';
+      const placements = propPlacements(st.scan_env);
+      approveTray.position.set(placements.approve_tray.x, placements.approve_tray.y, TRAY_TOP_M / 2);
+      rejectTray.position.set(placements.reject_tray.x, placements.reject_tray.y, TRAY_TOP_M / 2);
+      for (const [id, mesh] of Object.entries(totemMeshes)) {
+        const p = placements[id as keyof typeof placements];
+        // A measured totem turns to face the robot's start; the fixed ones face forward.
+        const facing = p.measured ? Math.atan2(p.y, p.x) : 0;
+        mesh.position.set(p.x, p.y, 0.0725);
+        mesh.rotation.z = facing;
+        totemLabels[id]?.position.set(p.x - 0.01 * Math.cos(facing), p.y - 0.01 * Math.sin(facing), 0.172);
+      }
 
       const heldState = st.held_object || 'deploy_key';
       if (sceneMode === 'gatekeeper') {

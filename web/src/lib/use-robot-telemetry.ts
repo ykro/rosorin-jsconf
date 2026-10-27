@@ -6,9 +6,10 @@ import {
   FALLBACK_TELEMETRY,
   RobotBridgeClient,
   describeBridgeError,
+  executedMessage,
 } from './robot-client';
 import { isBridgeEnabled, onBridgeConfigChange, resolveBridgeUrl } from './bridge-config';
-import type { BridgeUiState, RobotActionResult, TelemetryState } from './types';
+import type { BridgeUiState, RobotActionResult, ScanScene, TelemetryState } from './types';
 import { GESTURES, GESTURE_ALIASES } from './gesture-choreographies.generated';
 
 function clampServoForHardware(id: number, pulse: number): number {
@@ -190,8 +191,7 @@ export function useRobotTelemetry() {
       }
       if (!client || !connectedRef.current) return SIMULATOR_ONLY;
       try {
-        await fn(client);
-        return { ok: true, target: 'robot', message: 'Ejecutado en el robot.' };
+        return { ok: true, target: 'robot', message: executedMessage(await fn(client)) };
       } catch (err) {
         const { code, message } = describeBridgeError(err);
         console.warn(`[robot] ${label} falló (${code}): ${message}`);
@@ -283,6 +283,11 @@ export function useRobotTelemetry() {
         clearTimeout(t);
       }
       choreoTimersRef.current = [];
+      if (connectedRef.current) {
+        // The bridge drives the twin through telemetry (and may aim the prop gestures at a
+        // «Reconocer» measurement): playing the fixed local choreography too would make it twitch.
+        return sendToBridge(`gesture ${gesture}`, (c) => c.triggerGesture(gesture, mood));
+      }
 
       // Same multi-step choreography as the bridge (generated from gestures.rs), so the
       // browser-only twin performs the whole gesture instead of jumping to one pose.
@@ -330,6 +335,25 @@ export function useRobotTelemetry() {
       }, delayMs);
       choreoTimersRef.current.push(stopTimer);
       return sendToBridge(`gesture ${gesture}`, (c) => c.triggerGesture(gesture, mood));
+    },
+    [sendToBridge]
+  );
+
+  /**
+   * «Reconocer»: asks the bridge (real or mock) to sweep the arm and measure where the props are.
+   * Needs the bridge: the browser-only twin has no camera to simulate.
+   */
+  const startSceneScan = useCallback(
+    async (scene: ScanScene): Promise<RobotActionResult> => {
+      if (!connectedRef.current && !authErrorRef.current) {
+        return {
+          ok: false,
+          target: 'simulator',
+          code: 'disabled',
+          message: 'Reconocer necesita el bridge (el robot o ./run.sh --mock): el gemelo solo no tiene cámara.',
+        };
+      }
+      return sendToBridge(`scan_env ${scene}`, (c) => c.startSceneScan(scene));
     },
     [sendToBridge]
   );
@@ -396,6 +420,7 @@ export function useRobotTelemetry() {
     moveChassis,
     simulateLidar,
     triggerGesture,
+    startSceneScan,
     resetScene,
     emergencyStop,
     releaseEstop,
