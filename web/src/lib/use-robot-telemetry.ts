@@ -11,6 +11,19 @@ import {
 import { isBridgeEnabled, onBridgeConfigChange, resolveBridgeUrl } from './bridge-config';
 import type { BridgeUiState, RobotActionResult, ScanScene, TelemetryState } from './types';
 import { GESTURES, GESTURE_ALIASES } from './gesture-choreographies.generated';
+import {
+  AIM_OBJECTS,
+  DEFAULT_SIM_SCENE,
+  aggregate,
+  aimFor,
+  aimSteps,
+  refreshScan,
+  runningScan,
+  simCapture,
+  sweepTimeline,
+  type CaptureDetection,
+} from './scene-scan-sim';
+import { describeAim } from './scene-scan';
 
 function clampServoForHardware(id: number, pulse: number): number {
   const p = Math.round(pulse);
@@ -93,6 +106,13 @@ export function useRobotTelemetry() {
   const authErrorRef = useRef(false);
   const lastFrameAtRef = useRef(0);
   const choreoTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  // «Reconocer» simulated in the twin (no bridge): pending sweep timers and the latest local state.
+  const scanTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const telemetryRef = useRef<TelemetryState>(FALLBACK_TELEMETRY);
+
+  useEffect(() => {
+    telemetryRef.current = telemetry;
+  }, [telemetry]);
 
   if (!bridgeRef.current) {
     bridgeRef.current = new RobotBridgeClient();
@@ -162,11 +182,14 @@ export function useRobotTelemetry() {
     }, 500);
 
     const choreoTimers = choreoTimersRef;
+    const scanTimers = scanTimersRef;
     return () => {
       clearInterval(watchdog);
       // Pending steps of a local choreography must not update state after unmount.
       for (const t of choreoTimers.current) clearTimeout(t);
       choreoTimers.current = [];
+      for (const t of scanTimers.current) clearTimeout(t);
+      scanTimers.current = [];
       unsubscribe();
       window.removeEventListener(BRIDGE_AUTH_ERROR_EVENT, onAuthError);
       client?.disconnect();
@@ -204,8 +227,36 @@ export function useRobotTelemetry() {
     []
   );
 
+  /**
+   * Aborts a «Reconocer» simulated in the twin, like the bridge does: STOP (`estop`) or any other
+   * motion command (`interrupted`) freezes the arm where it is and discards the views.
+   */
+  const abortLocalScan = useCallback((reason: 'estop' | 'interrupted') => {
+    if (scanTimersRef.current.length === 0) return;
+    for (const t of scanTimersRef.current) clearTimeout(t);
+    scanTimersRef.current = [];
+    setTelemetry((prev) =>
+      prev.scan_env?.state === 'running'
+        ? {
+            ...prev,
+            active_gesture: prev.active_gesture === 'scan_env' ? 'home' : prev.active_gesture,
+            scan_env: {
+              ...prev.scan_env,
+              state: 'aborted',
+              reason,
+              detections: [],
+              finished_at_ms: Date.now(),
+              fresh: false,
+              stale_reason: 'aborted',
+            },
+          }
+        : prev
+    );
+  }, []);
+
   const jogServo = useCallback(
     async (id: number, delta: number) => {
+      abortLocalScan('interrupted');
       setTelemetry((prev) => {
         const cur = prev.servos[String(id)] ?? 500;
         const next = clampServoForHardware(id, cur + delta);
@@ -217,12 +268,13 @@ export function useRobotTelemetry() {
       });
       return sendToBridge(`jog servo ${id}`, (c) => c.jogServo(id, delta));
     },
-    [sendToBridge]
+    [sendToBridge, abortLocalScan]
   );
 
   const setServoPulse = useCallback(
     async (id: number, pulse: number, duration_ms = 250) => {
       const clamped = clampServoForHardware(id, pulse);
+      abortLocalScan('interrupted');
       setTelemetry((prev) => ({
         ...prev,
         servos: { ...prev.servos, [String(id)]: clamped },
@@ -230,7 +282,7 @@ export function useRobotTelemetry() {
       }));
       return sendToBridge(`servo ${id}`, (c) => c.setArm([{ id, position: clamped }], duration_ms));
     },
-    [sendToBridge]
+    [sendToBridge, abortLocalScan]
   );
 
   const moveChassis = useCallback(
@@ -239,6 +291,7 @@ export function useRobotTelemetry() {
         return sendToBridge('cmd_vel', (c) => c.moveChassis(vx, vy, wz, durationMs));
       }
       const dt = durationMs / 1000;
+      abortLocalScan('interrupted');
       setTelemetry((prev) => {
         const blockedForward = prev.lidar.front_m < 0.28 && vx > 0;
         const safeVx = blockedForward ? 0 : vx;
@@ -247,15 +300,18 @@ export function useRobotTelemetry() {
           prev.odometry.x_m + (safeVx * Math.cos(yaw_rad) - vy * Math.sin(yaw_rad)) * dt;
         const y_m =
           prev.odometry.y_m + (safeVx * Math.sin(yaw_rad) + vy * Math.cos(yaw_rad)) * dt;
+        const odometry = { x_m, y_m, yaw_rad, vx: safeVx, vy, wz };
         return {
           ...prev,
           active_gesture: blockedForward ? 'lidar_safety_stop' : prev.active_gesture,
-          odometry: { x_m, y_m, yaw_rad, vx: safeVx, vy, wz },
+          odometry,
+          // Moving the chassis away from where «Reconocer» measured makes the scan stale (sticky)
+          ...(prev.scan_env ? { scan_env: refreshScan(prev.scan_env, odometry, Date.now()) } : {}),
         };
       });
       return SIMULATOR_ONLY;
     },
-    [sendToBridge]
+    [sendToBridge, abortLocalScan]
   );
 
   const simulateLidar = useCallback(
@@ -291,12 +347,45 @@ export function useRobotTelemetry() {
 
       // Same multi-step choreography as the bridge (generated from gestures.rs), so the
       // browser-only twin performs the whole gesture instead of jumping to one pose.
+      abortLocalScan('interrupted');
       const canonical = GESTURE_ALIASES[gesture.trim().toLowerCase()] ?? 'home';
       const choreo = GESTURES[canonical];
       const scene = LOCAL_GESTURE_SCENE[canonical] ?? {};
+      // Prop gestures aim joint1 at a fresh simulated «Reconocer», exactly like the bridge (aim_for /
+      // aim_gesture); without one they keep the fixed side.
+      let steps = choreo.steps;
+      let aimNote = '';
+      const aimDef = AIM_OBJECTS[canonical];
+      if (aimDef) {
+        const [object, defaultJ1] = aimDef;
+        const now = telemetryRef.current;
+        const aim = now.scan_env ? aimFor(now.scan_env, object, now.odometry, Date.now()) : null;
+        if (aim?.ok) {
+          steps = aimSteps(canonical, choreo.steps, aim.joint1);
+          aimNote = describeAim({
+            source: 'measured',
+            object,
+            joint1: aim.joint1,
+            bearing_deg: Math.round((Math.atan2(aim.y_m, aim.x_m) * 1800) / Math.PI) / 10,
+            distance_m: Math.round(Math.hypot(aim.x_m, aim.y_m) * 1000) / 1000,
+            confidence: aim.confidence,
+            reason: null,
+          });
+        } else {
+          aimNote = describeAim({
+            source: 'default',
+            object,
+            joint1: defaultJ1,
+            bearing_deg: null,
+            distance_m: null,
+            confidence: null,
+            reason: aim && !aim.ok ? aim.reason : 'no_scan',
+          });
+        }
+      }
       let delayMs = 0;
       let velocity: [number, number, number] = [0, 0, 0];
-      choreo.steps.forEach((step, index) => {
+      steps.forEach((step, index) => {
         if (step.velocity) velocity = step.velocity;
         const held = velocity;
         const timer = setTimeout(() => {
@@ -307,10 +396,12 @@ export function useRobotTelemetry() {
             });
             const blockedForward = prev.lidar.front_m < 0.28 && held[0] > 0;
             const applied: [number, number, number] = blockedForward ? [0, held[1], held[2]] : held;
+            const odometry = integrateOdometry(prev.odometry, applied, step.durationMs / 1000);
             return {
               ...prev,
               servos,
-              odometry: integrateOdometry(prev.odometry, applied, step.durationMs / 1000),
+              odometry,
+              ...(prev.scan_env ? { scan_env: refreshScan(prev.scan_env, odometry, Date.now()) } : {}),
               rgb: choreo.rgb,
               active_gesture: canonical,
               mood,
@@ -334,31 +425,94 @@ export function useRobotTelemetry() {
         setTelemetry((prev) => ({ ...prev, odometry: { ...prev.odometry, vx: 0, vy: 0, wz: 0 } }));
       }, delayMs);
       choreoTimersRef.current.push(stopTimer);
-      return sendToBridge(`gesture ${gesture}`, (c) => c.triggerGesture(gesture, mood));
+      const result = await sendToBridge(`gesture ${gesture}`, (c) => c.triggerGesture(gesture, mood));
+      return aimNote && result.target === 'simulator' && result.ok
+        ? { ...result, message: `${result.message} ${aimNote}` }
+        : result;
     },
-    [sendToBridge]
+    [sendToBridge, abortLocalScan]
   );
 
   /**
-   * «Reconocer»: asks the bridge (real or mock) to sweep the arm and measure where the props are.
-   * Needs the bridge: the browser-only twin has no camera to simulate.
+   * «Reconocer»: with a bridge (robot or mock) it asks the bridge to sweep the arm and measure where
+   * the props are. Without one (or if it does not answer) the twin simulates the same sweep: same
+   * poses and durations, a simulated camera that only sees the props inside its cone, and the same
+   * merge of the views (scene-scan-sim.ts).
    */
   const startSceneScan = useCallback(
     async (scene: ScanScene): Promise<RobotActionResult> => {
-      if (!connectedRef.current && !authErrorRef.current) {
-        return {
-          ok: false,
-          target: 'simulator',
-          code: 'disabled',
-          message: 'Reconocer necesita el bridge (el robot o ./run.sh --mock): el gemelo solo no tiene cámara.',
-        };
+      if (connectedRef.current || authErrorRef.current) {
+        return sendToBridge(`scan_env ${scene}`, (c) => c.startSceneScan(scene));
       }
-      return sendToBridge(`scan_env ${scene}`, (c) => c.startSceneScan(scene));
+      if (scanTimersRef.current.length > 0) {
+        return { ok: false, target: 'simulator', code: 'scan_running', message: 'Ya hay un Reconocer en curso.' };
+      }
+      // Like the bridge, the sweep takes over the arm: a pending gesture stops here.
+      for (const t of choreoTimersRef.current) clearTimeout(t);
+      choreoTimersRef.current = [];
+      setTelemetry((prev) => ({
+        ...prev,
+        scan_env: runningScan(scene, Date.now()),
+        active_gesture: 'scan_env',
+        pointed_totem: null,
+        odometry: { ...prev.odometry, vx: 0, vy: 0, wz: 0 },
+      }));
+      const captures: CaptureDetection[][] = [];
+      const { keyframes, totalMs } = sweepTimeline();
+      const schedule = (atMs: number, fn: () => void) => {
+        scanTimersRef.current.push(setTimeout(fn, atMs));
+      };
+      for (const kf of keyframes) {
+        schedule(kf.atMs, () => {
+          if (kf.captureStep !== null) {
+            const step = kf.captureStep;
+            // Indexed by pause, so a repeated call never counts a view twice
+            captures[step - 1] = simCapture(scene, DEFAULT_SIM_SCENE, telemetryRef.current.odometry, kf.j1);
+            setTelemetry((prev) =>
+              prev.scan_env?.state === 'running' ? { ...prev, scan_env: { ...prev.scan_env, step } } : prev
+            );
+            return;
+          }
+          setTelemetry((prev) => {
+            const servos = { ...prev.servos };
+            for (const [id, pulse] of Object.entries(kf.servos)) servos[id] = clampServoForHardware(Number(id), pulse);
+            return { ...prev, servos };
+          });
+        });
+      }
+      schedule(totalMs, () => {
+        scanTimersRef.current = [];
+        setTelemetry((prev) => {
+          if (prev.scan_env?.state !== 'running') return prev;
+          const now = Date.now();
+          const odom = prev.odometry;
+          const done = refreshScan(
+            {
+              ...prev.scan_env,
+              state: 'done',
+              finished_at_ms: now,
+              detections: aggregate(scene, captures.filter(Boolean)),
+              odom_at_scan: { x_m: odom.x_m, y_m: odom.y_m, yaw_rad: odom.yaw_rad },
+              stale_reason: null,
+            },
+            odom,
+            now
+          );
+          return { ...prev, scan_env: done, active_gesture: prev.active_gesture === 'scan_env' ? 'home' : prev.active_gesture };
+        });
+      });
+      return {
+        ok: true,
+        target: 'simulator',
+        message: 'Reconocer simulado en el gemelo: el brazo barre y una cámara simulada busca los objetos.',
+      };
     },
     [sendToBridge]
   );
 
   const resetScene = useCallback(async () => {
+    for (const t of scanTimersRef.current) clearTimeout(t);
+    scanTimersRef.current = [];
     setTelemetry(FALLBACK_TELEMETRY);
     return sendToBridge('scene/reset', (c) => c.resetScene());
   }, [sendToBridge]);
@@ -369,9 +523,10 @@ export function useRobotTelemetry() {
    * or the last request was a 401: the HTTP route may still be reachable.
    */
   const emergencyStop = useCallback(async (): Promise<RobotActionResult> => {
-    // The local twin stops too (pending choreography steps and chassis velocity).
+    // The local twin stops too (pending choreography steps, a simulated «Reconocer» and chassis velocity).
     for (const t of choreoTimersRef.current) clearTimeout(t);
     choreoTimersRef.current = [];
+    abortLocalScan('estop');
     setTelemetry((prev) => ({ ...prev, odometry: { ...prev.odometry, vx: 0, vy: 0, wz: 0 } }));
 
     const client = bridgeRef.current;
@@ -398,7 +553,7 @@ export function useRobotTelemetry() {
       }
       return { ok: false, target: 'robot', code, message };
     }
-  }, []);
+  }, [abortLocalScan]);
 
   /** Releases a latched E-stop (`POST /estop/release`). */
   const releaseEstop = useCallback(async () => {

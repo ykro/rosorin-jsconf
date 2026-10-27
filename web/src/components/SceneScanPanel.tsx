@@ -7,7 +7,7 @@ import { scanProgress, scanResultRows } from '@/lib/scene-scan';
 export interface SceneScanPanelProps {
   scene: ScanScene;
   telemetry: TelemetryState;
-  /** The bridge (robot or mock) is connected: «Reconocer» needs it. */
+  /** The bridge (robot or mock) is connected; without it «Reconocer» is simulated in the twin. */
   bridgeConnected: boolean;
   estopLatched: boolean;
   onStart: (scene: ScanScene) => Promise<RobotActionResult>;
@@ -18,10 +18,17 @@ const WHAT: Record<ScanScene, string> = {
   bughunter: 'los tótems Cloud Run, Gemini Live y Firestore',
 };
 
+/** Which «Reconocer» runs: the robot's camera, the bridge's mock, or the browser-only twin. */
+export function scanModeLabel(bridgeConnected: boolean, lidarSource: TelemetryState['lidar_source']): string {
+  if (!bridgeConnected) return 'Simulación en el gemelo';
+  return lidarSource === 'mock' ? 'Bridge mock' : 'Robot · cámara 3D';
+}
+
 /**
  * «Reconocer»: the robot sweeps only its arm with the depth camera and measures where the props are;
- * the prop gestures then aim there. Progress and result sit next to the button. STOP (or Escape)
- * aborts the sweep at any time.
+ * the prop gestures then aim there. Without a bridge the twin simulates the same sweep with a
+ * simulated camera. Progress and result sit next to the button. STOP (or Escape) aborts the sweep
+ * at any time.
  */
 export function SceneScanPanel({ scene, telemetry, bridgeConnected, estopLatched, onStart }: SceneScanPanelProps) {
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +36,8 @@ export function SceneScanPanel({ scene, telemetry, bridgeConnected, estopLatched
   const scan = telemetry.scan_env;
   const progress = scanProgress(scan, scene);
   const rows = scanResultRows(scan, scene);
-  const disabled = starting || progress.running || !bridgeConnected || estopLatched;
+  const disabled = starting || progress.running || (bridgeConnected && estopLatched);
+  const mode = scanModeLabel(bridgeConnected, telemetry.lidar_source);
 
   const handleStart = async () => {
     setError(null);
@@ -54,7 +62,10 @@ export function SceneScanPanel({ scene, telemetry, bridgeConnected, estopLatched
           Reconocer
         </button>
         <div className="flex min-w-0 flex-1 flex-col gap-1" role="status" aria-live="polite">
-          <span className="text-xs font-bold text-[#202124]">{progress.label}</span>
+          <span className="flex items-center justify-between gap-2 text-xs font-bold text-[#202124]">
+            {progress.label}
+            <span className="font-medium text-[#5F6368]">{mode}</span>
+          </span>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#F1F3F4]">
             <div className="h-full rounded-full bg-[#1A73E8]" style={{ width: `${Math.round(progress.fraction * 100)}%` }} />
           </div>
@@ -63,11 +74,11 @@ export function SceneScanPanel({ scene, telemetry, bridgeConnected, estopLatched
       <p className="mt-2 text-xs text-[#5F6368]">
         {progress.running
           ? 'Solo se mueve el brazo, despacio. Para abortar: STOP o Escape.'
-          : !bridgeConnected
-            ? 'Conecta el bridge (el robot o ./run.sh --mock) para reconocer el entorno.'
-            : estopLatched
-              ? 'STOP activo: libéralo para reconocer el entorno.'
-              : `Mide con la cámara 3D dónde están ${WHAT[scene]} (solo el brazo, sin ruedas).`}
+          : bridgeConnected && estopLatched
+            ? 'STOP activo: libéralo para reconocer el entorno.'
+            : bridgeConnected
+              ? `Mide con la cámara 3D dónde están ${WHAT[scene]} (solo el brazo, sin ruedas).`
+              : `El gemelo barre el brazo y una cámara simulada busca ${WHAT[scene]}.`}
       </p>
       {progress.detail && <p className="mt-1 text-xs font-bold text-[#B06000]">{progress.detail}</p>}
       {error && (
