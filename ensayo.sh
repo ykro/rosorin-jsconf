@@ -168,6 +168,9 @@ except Exception:
     sys.exit(print(f"No puedo leer {w.ARM_SHADOW_FILE}") or 0)
 if "lidar_offset_deg" not in data:
     sys.exit(print("La sombra del brazo se calibró sin registrar la orientación del LiDAR") or 0)
+import calibrar_sombra as c
+if not str(data.get("method", "")).startswith(c.CALIBRATION_METHOD):
+    sys.exit(print("La sombra se calibró con el calibrador anterior (sin selección geométrica de poses)") or 0)
 if float(data["lidar_offset_deg"]) != float(w.LIDAR_ANGLE_OFFSET_DEG):
     sys.exit(print(f"La sombra se calibró con el LiDAR a {data['lidar_offset_deg']:g}° y ahora está a {w.LIDAR_ANGLE_OFFSET_DEG:g}°") or 0)
 sys.exit(1)

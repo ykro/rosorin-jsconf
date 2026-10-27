@@ -194,7 +194,6 @@ export default function BugHunterDemoPage() {
             onJogServo={jogServo}
             onMoveChassis={moveChassis}
             onSimulateLidar={simulateLidar}
-            onWebcamFrame={(b64) => liveSessionRef.current?.sendWebcamFrameBase64(b64)}
             onTriggerGesture={(g) => triggerGesture(g, 'manual')}
             onResetScene={resetScene}
           />

@@ -78,6 +78,13 @@ class ArmModelTests(unittest.TestCase):
         self.assertGreater(tip[0], 0.25)  # forward of the base
         self.assertGreater(cal.scan_clearance(self.HOME), 0.1)
 
+    def test_joint1_above_500_turns_left_like_the_twin(self):
+        # gatekeeper_approve (joint1 = 700) drops the key on the green tray, 18 cm to the LEFT (+y)
+        left = cal.arm_points((700, 350, 260, 330, 500, 220))[-1]
+        right = cal.arm_points((280, 350, 260, 330, 500, 220))[-1]
+        self.assertGreater(left[1], 0.1)
+        self.assertLess(right[1], -0.1)
+
     def test_sad_droop_crosses_the_scan_plane(self):
         # Measured in the rehearsal: front sector at 0.11 m during bumblebee_sad_droop
         self.assertLess(cal.scan_clearance(self.SAD_DROOP), 0.0)

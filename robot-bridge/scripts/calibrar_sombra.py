@@ -36,6 +36,8 @@ ANGLE_MARGIN_DEG = 2.0
 MAX_SAFE_BAND_M = 0.25  # a band reaching the 0.28 m brake would hide real obstacles
 SERVO_IDS = (1, 2, 3, 4, 5, 10)
 SCAN_WAIT_S = 10.0  # DDS discovery on the Jetson can take a few seconds
+# Written to arm-shadow.json; ensayo.sh treats a file from another method as stale.
+CALIBRATION_METHOD = "geometric-v1"  # the poses closest to the scan plane (URDF kinematics)
 MAX_POSES = 12  # the gestures use ~60 poses; only the ones that reach the scan plane matter
 # Two poses closer than this (pulses, gripper weighted 0.25: it barely changes the arm's footprint)
 # would measure the same shadow: only the lower one is kept.
@@ -110,8 +112,11 @@ def _axis_angle(axis, angle):
 
 
 def joint_angle(index: int, pulse: int) -> float:
-    """Pulse → joint angle in rad, as the 3D twin does (j2..j4 count down from 500)."""
-    return (500 - pulse) * PULSE_RAD if index in (2, 3, 4) else (pulse - 500) * PULSE_RAD
+    """
+    Pulse → joint angle in rad, as the 3D twin does: j1..j4 count down from 500 (j1's axis points
+    down, so a pulse above 500 turns the arm to the robot's left, +y), j5 counts up.
+    """
+    return (500 - pulse) * PULSE_RAD if index in (1, 2, 3, 4) else (pulse - 500) * PULSE_RAD
 
 
 def arm_points(pose: tuple) -> list:
@@ -420,6 +425,7 @@ def main() -> int:
         "half_angle_deg": band["half_angle_deg"],
         "echoes": band["echoes"],
         "poses": len(poses),
+        "method": CALIBRATION_METHOD if not args.todas else f"{CALIBRATION_METHOD}-all",
         "lidar_offset_deg": mount["offset_deg"],
         "measured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }

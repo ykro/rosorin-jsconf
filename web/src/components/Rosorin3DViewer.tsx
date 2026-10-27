@@ -5,7 +5,8 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { TelemetryState } from '@/lib/types';
-import { isSectorUncovered } from '@/lib/lidar';
+import { isSectorUncovered, lidarAlert, lidarMarkers, LIDAR_SECTOR_ANGLE_RAD } from '@/lib/lidar';
+import type { LidarSectorName } from '@/lib/types';
 import { shouldIgnoreShortcut } from '@/lib/keyboard';
 import { ViewerErrorBoundary } from './ViewerErrorBoundary';
 
@@ -26,7 +27,6 @@ export interface Rosorin3DViewerProps {
   onGestureTrigger?: (gesture: string) => void;
   onTriggerGesture?: (gesture: string) => void;
   onSimulateLidar?: (front_m: number) => void;
-  onWebcamFrame?: (jpegBase64: string) => void;
   onResetScene?: () => void;
 }
 
@@ -105,19 +105,15 @@ function Rosorin3DViewerScene({
   onGestureTrigger,
   onTriggerGesture,
   onSimulateLidar,
-  onWebcamFrame,
   onResetScene,
 }: Rosorin3DViewerProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
   const telemetryRef = useRef<TelemetryState>(telemetry);
   const [meshesLoaded, setMeshesLoaded] = useState(0);
   const [meshErrors, setMeshErrors] = useState<string[]>([]);
   const [lastKeyPressed, setLastKeyPressed] = useState<string>('');
-  const [webcamActive, setWebcamActive] = useState(false);
   const [localLidarM, setLocalLidarM] = useState<number | null>(null);
   const [webglUnavailable, setWebglUnavailable] = useState(false);
-  const webcamFrameCbRef = useRef(onWebcamFrame);
 
   const jog = onJogServo ?? onServoJog;
   const move = onMoveChassis ?? onChassisMove;
@@ -127,10 +123,6 @@ function Rosorin3DViewerScene({
     telemetryRef.current = telemetry;
   }, [telemetry]);
 
-  useEffect(() => {
-    webcamFrameCbRef.current = onWebcamFrame;
-  }, [onWebcamFrame]);
-
   const effectiveLidarM = localLidarM ?? telemetry.lidar?.front_m ?? 1.42;
   const lidarBlocked = effectiveLidarM < 0.28;
 
@@ -139,55 +131,6 @@ function Rosorin3DViewerScene({
     setLocalLidarM(nextDist);
     onSimulateLidar?.(nextDist);
   };
-
-  // Webcam lifecycle (Aurora 930 Pro 3D Camera on the wrist)
-  useEffect(() => {
-    if (!webcamActive) return;
-    const video = videoRef.current;
-
-    let cancelled = false;
-    let activeStream: MediaStream | null = null;
-    let frameTimer: ReturnType<typeof setInterval> | null = null;
-
-    navigator.mediaDevices
-      ?.getUserMedia({ video: { width: 320, height: 240 }, audio: false })
-      .then((stream) => {
-        if (cancelled || !video) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        activeStream = stream;
-        video.srcObject = stream;
-        video.play().catch((err) => console.warn('[webcam] play() falló:', err));
-
-        const canvas = document.createElement('canvas');
-        canvas.width = 320;
-        canvas.height = 240;
-        const ctx = canvas.getContext('2d');
-        frameTimer = setInterval(() => {
-          if (!ctx || !webcamFrameCbRef.current) return;
-          ctx.drawImage(video, 0, 0, 320, 240);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
-          const b64 = dataUrl.split(',')[1];
-          if (b64) webcamFrameCbRef.current(b64);
-        }, 1000);
-      })
-      .catch((err) => {
-        console.warn('[webcam] No se pudo abrir la cámara:', err);
-        setWebcamActive(false);
-      });
-
-    return () => {
-      cancelled = true;
-      if (frameTimer) clearInterval(frameTimer);
-      if (activeStream) {
-        activeStream.getTracks().forEach((t) => t.stop());
-      }
-      if (video) {
-        video.srcObject = null;
-      }
-    };
-  }, [webcamActive]);
 
   // Keyboard listener for moving arm, gripper, and chassis
   useEffect(() => {
@@ -321,11 +264,6 @@ function Rosorin3DViewerScene({
     onResetScene,
   ]);
 
-  const webcamActiveRef = useRef(false);
-  useEffect(() => {
-    webcamActiveRef.current = webcamActive;
-  }, [webcamActive]);
-
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
@@ -436,18 +374,32 @@ function Rosorin3DViewerScene({
     lidarBeam.position.set(0, 0, 0.002);
     baseFootprint.add(lidarBeam);
 
-    // Movable 3D Obstacle in front of robot to visualize LiDAR distance & safety stop
-    const obstacleGroup = new THREE.Group();
-    rosWorld.add(obstacleGroup);
-    const obstacleMat = new THREE.MeshStandardMaterial({
-      color: 0xdc2626,
-      roughness: 0.35,
-      metalness: 0.1,
+    // LiDAR readings, one marker per sector in the robot frame (children of baseFootprint, so they
+    // follow odometry and yaw): a red wall at the measured distance for an echo, a grey «ciego»
+    // wedge for a blind sector, nothing for an uncovered one (no LiDAR there). See lib/lidar.ts.
+    const LIDAR_ORIGIN_X = 0.048; // lidar_link in base_link
+    const echoMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.35, metalness: 0.1 });
+    const blindMat = new THREE.MeshBasicMaterial({
+      color: 0x6b7280,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.35,
     });
-    const obstacleBox = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.18, 0.16), obstacleMat);
-    obstacleBox.position.set(0, 0, 0.08);
-    obstacleBox.castShadow = true;
-    obstacleGroup.add(obstacleBox);
+    const sectorMarkers = {} as Record<LidarSectorName, { wall: THREE.Mesh; wedge: THREE.Mesh }>;
+    for (const sector of Object.keys(LIDAR_SECTOR_ANGLE_RAD) as LidarSectorName[]) {
+      const angle = LIDAR_SECTOR_ANGLE_RAD[sector];
+      // Thin along the sector direction, its face toward the robot
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.16, 0.12), echoMat);
+      wall.rotation.z = angle;
+      wall.castShadow = true;
+      wall.visible = false;
+      baseFootprint.add(wall);
+      const wedge = new THREE.Mesh(new THREE.CircleGeometry(0.25, 16, angle - Math.PI / 4, Math.PI / 2), blindMat);
+      wedge.position.set(LIDAR_ORIGIN_X, 0, 0.004);
+      wedge.visible = false;
+      baseFootprint.add(wedge);
+      sectorMarkers[sector] = { wall, wedge };
+    }
 
     // Exact URDF Kinematic Hierarchy from Hiwonder/ROSOrin-Pro
     const baseJoint = createUrdfJoint(baseFootprint, [0, 0, 0.025], [0, 0, 0], [0, 0, 1]);
@@ -495,20 +447,6 @@ function Rosorin3DViewerScene({
       [0, 0, 0],
       [0, 0, 1]
     );
-
-    // 3D Camera Frustum Cone projecting from the Aurora 930 Pro camera ONLY when Webcam is active
-    const camConeGeo = new THREE.ConeGeometry(0.055, 0.14, 4);
-    camConeGeo.rotateX(Math.PI / 2);
-    const camConeMat = new THREE.MeshBasicMaterial({
-      color: 0xff5500,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.45,
-    });
-    const camCone = new THREE.Mesh(camConeGeo, camConeMat);
-    camCone.position.set(0.07, 0, 0);
-    camCone.visible = false;
-    camJoint.pivot.add(camCone);
 
     const joint5 = createUrdfJoint(
       joint4.pivot,
@@ -829,8 +767,6 @@ function Rosorin3DViewerScene({
 
       const st = telemetryRef.current;
 
-      camCone.visible = webcamActiveRef.current;
-
       if (st.rgb) {
         ledColor.setRGB(st.rgb[0] / 255, st.rgb[1] / 255, st.rgb[2] / 255);
         ledRingMat.color.copy(ledColor);
@@ -857,12 +793,26 @@ function Rosorin3DViewerScene({
           : new THREE.RingGeometry(0.242, 0.252, 64);
       }
 
-      const frontDist = st.lidar?.front_m ?? 1.42;
-      const isAlert = frontDist < 0.28 || st.lidar?.obstacle_alert;
+      for (const { wall, wedge } of Object.values(sectorMarkers)) {
+        wall.visible = false;
+        wedge.visible = false;
+      }
+      for (const m of lidarMarkers(st.lidar)) {
+        const { wall, wedge } = sectorMarkers[m.sector];
+        if (m.kind === 'blind') {
+          wedge.visible = true;
+          continue;
+        }
+        wall.visible = true;
+        wall.position.set(
+          LIDAR_ORIGIN_X + Math.cos(m.angleRad) * m.distanceM,
+          Math.sin(m.angleRad) * m.distanceM,
+          0.06
+        );
+      }
+      const isAlert = lidarAlert(st.lidar);
       lidarRingMat.color.setHex(isAlert ? 0xdc2626 : 0x0284c7);
       lidarBeamMat.color.setHex(isAlert ? 0xdc2626 : 0x0284c7);
-      obstacleGroup.visible = frontDist < 0.85;
-      obstacleGroup.position.set(baseFootprint.position.x + frontDist, baseFootprint.position.y, 0);
 
       const p1 = st.servos?.['1'] ?? 500;
       const p2 = st.servos?.['2'] ?? 430;
@@ -1023,19 +973,6 @@ function Rosorin3DViewerScene({
               : `LiDAR: ${effectiveLidarM.toFixed(2)} m`}
           </button>
 
-          <button
-            type="button"
-            onClick={() => setWebcamActive((v) => !v)}
-            aria-pressed={webcamActive}
-            className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition-colors ${
-              webcamActive
-                ? 'border-[#1A73E8] bg-[#1A73E8] text-white'
-                : 'border-[#DADCE0] bg-[#F8F9FA] text-[#202124] hover:border-[#1A73E8]'
-            }`}
-          >
-            {webcamActive ? 'Webcam: Activa' : 'Webcam'}
-          </button>
-
           {onResetScene && (
             <button
               type="button"
@@ -1053,16 +990,6 @@ function Rosorin3DViewerScene({
         <div ref={mountRef} className="absolute inset-0" />
         {webglUnavailable && <WebglUnavailableNotice />}
       </div>
-
-      {/* Picture-in-Picture Live Webcam Feed (Aurora 930 Pro) */}
-      {webcamActive && (
-        <div className="absolute top-14 right-4 z-10 w-44 overflow-hidden rounded-xl border-2 border-[#1A73E8] bg-[#202124] shadow-lg">
-          <video ref={videoRef} muted playsInline className="h-32 w-full object-cover" />
-          <div className="bg-[#202124] px-2.5 py-1 text-xs font-semibold text-white">
-            Cámara 3D · 1 FPS
-          </div>
-        </div>
-      )}
 
       {/* 3. STRUCTURAL BOTTOM STATUS BAR */}
       {enableKeyboard && (

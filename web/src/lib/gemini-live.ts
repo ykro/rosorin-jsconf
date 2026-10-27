@@ -370,10 +370,6 @@ export class EmbodiedGeminiLiveSession {
     this.player.close();
   }
 
-  public async sendWebcamFrameBase64(jpegBase64: string) {
-    this.live.sendRealtimeInput({ video: { mimeType: 'image/jpeg', data: jpegBase64 } });
-  }
-
   private handleMessage(msg: LiveServerMessage) {
     const sc = msg.serverContent;
     if (sc?.interrupted) {
