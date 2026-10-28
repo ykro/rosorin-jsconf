@@ -215,6 +215,22 @@ const ROAST_ANGLES = [
   'Roast it from the perspective of a 6-DOF robot whose servos hurt just reading the stack.',
 ] as const;
 
+const GATEKEEPER_ANGLES = [
+  'Speak like a battle-hardened SRE guarding production on a Friday afternoon.',
+  'Speak from your physical body as a 6-DOF robot holding the physical deploy key in your parallel gripper.',
+  'Focus on the concrete production blast radius (or safety net) of this specific change.',
+  'Deliver the verdict like an uncompromising security & CI/CD auditor at JSConf MX.',
+  'Contrast the developer excuse against what the automated pipeline actually proves.',
+] as const;
+
+const BUGHUNTER_ANGLES = [
+  'Deliver the diagnosis like a forensic systems engineer reading live telemetry and stack traces.',
+  'Explain the failure from the perspective of a physical robot pointing its arm straight at the guilty microservice.',
+  'Focus on the exact resource bottleneck or protocol invariant that broke in production.',
+  'Highlight the domino effect of this bug on latency or availability and the immediate fix.',
+  'Speak like an on-call incident commander cutting through the noise in one sharp line.',
+] as const;
+
 export class EmbodiedGeminiLiveSession {
   private readonly bridge: RobotActionHandler;
   private readonly hudClient = new RobotBridgeClient();
@@ -589,10 +605,18 @@ export class EmbodiedGeminiLiveSession {
       reason_es: '',
     });
 
+    const take = ++this.roastTakeIndex;
+    const angle = GATEKEEPER_ANGLES[take % GATEKEEPER_ANGLES.length];
+    const clauses = justification
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const focusClause = clauses.length > 0 ? clauses[take % clauses.length] : justification;
+
     this.sendTurn(
-      `${this.activeDemoContext}\n\nThe app already executed release_deploy_key for this turn: do NOT call any tool now. Explain aloud in Spanish, in ONE short sentence (max 18 words), why you ${
+      `${this.activeDemoContext}\n\nThe app already executed release_deploy_key for this turn: do NOT call any tool now. Explain aloud in Spanish, in ONE or TWO punchy sentences (max 22 words), why you ${
         shouldApprove ? 'approve the PR and drop the key in the green tray' : 'reject the PR and drop the key in the red tray'
-      }.`
+      }. Spotlight this specific detail: "${focusClause}". Perspective: ${angle} Never repeat the exact phrasing or opening from earlier turns.`
     );
   }
 
@@ -616,8 +640,16 @@ export class EmbodiedGeminiLiveSession {
 
     await this.executeEmbodiedTool('point_at_service_totem', { service, diagnosis_es: '' });
 
+    const take = ++this.roastTakeIndex;
+    const angle = BUGHUNTER_ANGLES[take % BUGHUNTER_ANGLES.length];
+    const clauses = incidentLog
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const focusClause = clauses.length > 0 ? clauses[take % clauses.length] : incidentLog;
+
     this.sendTurn(
-      `${this.activeDemoContext}\n\nThe app already pointed at the totem for this turn: do NOT call any tool now. Explain the root cause aloud in Spanish, in ONE short sentence (max 18 words).`
+      `${this.activeDemoContext}\n\nThe app already pointed at the totem for this turn: do NOT call any tool now. Explain the root cause aloud in Spanish, in ONE or TWO sharp sentences (max 22 words). Spotlight this specific clue: "${focusClause}". Perspective: ${angle} Never repeat the exact phrasing or opening from earlier turns.`
     );
     return service;
   }
@@ -645,8 +677,11 @@ export class EmbodiedGeminiLiveSession {
 
     await this.executeEmbodiedTool('express_verdict', { gesture, mood, verdict_headline: '' });
 
+    const take = ++this.roastTakeIndex;
+    const angle = GATEKEEPER_ANGLES[take % GATEKEEPER_ANGLES.length];
+
     this.sendTurn(
-      `Current context: ${this.activeDemoContext || 'Live technical conversation.'}\n\nThe developer typed: "${text.slice(0, 500)}"\nThe app already executed the gesture "${gesture}" for this turn: do NOT call any tool now. Answer aloud in Spanish, direct and concise, in 1 or 2 short sentences (max 22 words in total).`
+      `Current context: ${this.activeDemoContext || 'Live technical conversation.'}\n\nThe developer typed: "${text.slice(0, 500)}"\nThe app already executed the gesture "${gesture}" for this turn: do NOT call any tool now. Answer aloud in Spanish, direct and concise, in 1 or 2 short sentences (max 22 words in total). Perspective: ${angle} Do not repeat sentences from earlier turns.`
     );
   }
 

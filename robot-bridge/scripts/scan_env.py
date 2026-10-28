@@ -74,9 +74,9 @@ LIDAR_ORIGIN_XY = (0.048156, 0.0000755)
 # Hue ranges in degrees (0-360). `min_s`/`min_v` are 0-1. The trays' fill is a pale tint (S < 0.1):
 # what the camera finds are the saturated border, drop circle and the big APROBADO/RECHAZADO word.
 COLOR_SPECS = {
-    "green": {"hues": ((75.0, 175.0),), "min_s": 0.20, "min_v": 0.16},
-    "red": {"hues": ((342.0, 360.0), (0.0, 18.0)), "min_s": 0.32, "min_v": 0.22},
-    "blue": {"hues": ((195.0, 245.0),), "min_s": 0.35, "min_v": 0.22},
+    "green": {"hues": ((80.0, 178.0),), "min_s": 0.14, "min_v": 0.32},
+    "red": {"hues": ((345.0, 360.0), (0.0, 12.0)), "min_s": 0.18, "min_v": 0.38},
+    "blue": {"hues": ((195.0, 245.0),), "min_s": 0.30, "min_v": 0.25},
     "yellow": {"hues": ((35.0, 62.0),), "min_s": 0.42, "min_v": 0.35},  # not the key's amber #B06000
 }
 # Height (base_link z) of the colored part of each prop, for the ray/plane fallback.

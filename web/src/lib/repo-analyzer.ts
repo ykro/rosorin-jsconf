@@ -364,7 +364,7 @@ export const PRESET_PRS: Record<string, GitHubPRAnalysis> = {
       'PR #289 (acme-cloud/edge-router · Escenario Simulado): Bypass de validación en middleware de pagos (-42 líneas de tests eliminadas)',
     testsPassing: false,
     justification:
-      'Se eliminaron 42 líneas de pruebas unitarias para subir un hotfix en viernes sin cobertura ni plan de rollback.',
+      'Se eliminaron 42 líneas de pruebas unitarias para subir un hotfix en viernes a las 4:55 PM; comentaron verifySignature() en el webhook de cobros; pusieron skipAuth: true temporal con un TODO para el lunes; cero cobertura y sin script de rollback.',
   },
   'https://github.com/acme-cloud/checkout-api/pull/645': {
     url: 'https://github.com/acme-cloud/checkout-api/pull/645',
@@ -374,7 +374,7 @@ export const PRESET_PRS: Record<string, GitHubPRAnalysis> = {
       'PR #645 (acme-cloud/checkout-api · Escenario Simulado): Parche de idempotencia con 18 tests E2E y canary 5%',
     testsPassing: true,
     justification:
-      'Todas las pruebas E2E están en verde, incluye despliegue canary al 5% y script automático de rollback.',
+      'Todas las 18 pruebas E2E de cobros están en verde; agrega llave de idempotencia en Redis para evitar cobros dobles; despliegue canary gradual al 5% del tráfico; incluye script automático de rollback si sube la latencia p99.',
   },
   'https://github.com/acme-cloud/rust-gateway/pull/234': {
     url: 'https://github.com/acme-cloud/rust-gateway/pull/234',
@@ -384,7 +384,7 @@ export const PRESET_PRS: Record<string, GitHubPRAnalysis> = {
       'PR #234 (acme-cloud/rust-gateway · Escenario Simulado): Endurecimiento de límites de velocidad con suite completa de tests en Rust',
     testsPassing: true,
     justification:
-      'Cobertura de pruebas al 100% en verde, validación de seguridad verificada y rollback limpio.',
+      'Cobertura de pruebas al 100% en verde con cargo test y fuzzing; rate limiter token-bucket en Rust sin asignaciones en el hot path; validación estricta de cabeceras y origen verificada; feature flag listo para rollback limpio en un segundo.',
   },
 };
 
@@ -498,21 +498,21 @@ export const PRESET_INCIDENTS: Record<string, GitHubIncidentAnalysis> = {
     label: 'acme-cloud/cloud-run-worker#542 · Cloud Run OOM',
     service: 'cloud_run',
     incidentLog:
-      'Incidente Simulado acme-cloud/cloud-run-worker#542 — ERROR 503 en Cloud Run: El contenedor superó el límite de 512MiB de memoria (OOMKilled) por fuga de descriptores WebSocket durante pico de tráfico.',
+      'Incidente Simulado acme-cloud/cloud-run-worker#542 — ERROR 503 en Cloud Run: El contenedor superó el límite de 512MiB de memoria (exit code 137 OOMKilled); fuga de descriptores WebSocket sin cerrar en reconexiones; el recolector de basura colapsó al llegar a 1,200 conexiones concurrentes.',
   },
   'https://github.com/acme-cloud/voice-stream/issues/142': {
     url: 'https://github.com/acme-cloud/voice-stream/issues/142',
     label: 'acme-cloud/voice-stream#142 · Gemini Live PCM',
     service: 'gemini_live',
     incidentLog:
-      'Incidente Simulado acme-cloud/voice-stream#142 — WARN en Gemini Live: La cola de audio PCM a 24kHz superó los 4800ms tras el barge-in del usuario porque no se vació el buffer en serverContent.interrupted.',
+      'Incidente Simulado acme-cloud/voice-stream#142 — WARN en Gemini Live: La cola de reproducción PCM a 24kHz acumuló 4800ms de retraso tras el barge-in; olvidaron vaciar el AudioBuffer cuando llegó serverContent.interrupted; el robot seguía hablando encima del usuario.',
   },
   'https://github.com/acme-cloud/firestore-orders/issues/798': {
     url: 'https://github.com/acme-cloud/firestore-orders/issues/798',
     label: 'acme-cloud/firestore-orders#798 · Firestore 400',
     service: 'firestore',
     incidentLog:
-      'Incidente Simulado acme-cloud/firestore-orders#798 — FirebaseError [code=failed-precondition] (HTTP 400) en Firestore: La consulta sobre (sessionId ASC, createdAt DESC) requiere un índice compuesto faltante.',
+      'Incidente Simulado acme-cloud/firestore-orders#798 — FirebaseError [code=failed-precondition] (HTTP 400) en Firestore: La consulta con filtro where("sessionId") y orderBy("createdAt", "desc") falló en producción; falta declarar el índice compuesto en firestore.indexes.json.',
   },
 };
 
