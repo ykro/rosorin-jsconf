@@ -164,6 +164,9 @@ export function useRobotTelemetry() {
         undefined,
         (t) => {
           lastFrameAtRef.current = Date.now();
+          if (!connectedRef.current && !authErrorRef.current) {
+            setLink(true, false);
+          }
           setTelemetry(t);
           const estopLatched = Boolean(t.estop_latched);
           const lidarStale = Boolean(t.lidar_stale);
@@ -193,7 +196,7 @@ export function useRobotTelemetry() {
     window.addEventListener(BRIDGE_AUTH_ERROR_EVENT, onAuthError);
 
     const watchdog = setInterval(() => {
-      if (connectedRef.current && Date.now() - lastFrameAtRef.current > 1500) {
+      if (connectedRef.current && Date.now() - lastFrameAtRef.current > 4000) {
         setLink(false, authErrorRef.current);
       }
     }, 500);

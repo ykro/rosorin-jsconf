@@ -81,6 +81,10 @@ rosorin_start_sensors() {
       echo "$ROSORIN_LOG_TAG $launch.launch.py ya está corriendo: no lo lanzo otra vez."
       continue
     fi
+    if [ "$launch" = "lidar" ]; then
+      # Evita que dos drivers sclidar/ldlidar lean /dev/lidar a la vez y corrompan ángulos/tramas
+      pkill -TERM -f "sclidar_ros2/sclidar|ldlidar|scan_to_scan_filter_chain" 2>/dev/null || true
+    fi
     echo "$ROSORIN_LOG_TAG Levantando $launch.launch.py (log en $log_dir/$launch.log)..."
     if [ "$shell" = "zsh" ]; then
       nohup zsh -c "source ~/.zshrc >/dev/null 2>&1; exec ros2 launch peripherals $launch.launch.py" >"$log_dir/$launch.log" 2>&1 < /dev/null &

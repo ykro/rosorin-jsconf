@@ -74,10 +74,10 @@ LIDAR_ORIGIN_XY = (0.048156, 0.0000755)
 # Hue ranges in degrees (0-360). `min_s`/`min_v` are 0-1. The trays' fill is a pale tint (S < 0.1):
 # what the camera finds are the saturated border, drop circle and the big APROBADO/RECHAZADO word.
 COLOR_SPECS = {
-    "green": {"hues": ((95.0, 165.0),), "min_s": 0.35, "min_v": 0.22},
-    "red": {"hues": ((345.0, 360.0), (0.0, 15.0)), "min_s": 0.40, "min_v": 0.25},
-    "blue": {"hues": ((200.0, 240.0),), "min_s": 0.40, "min_v": 0.25},
-    "yellow": {"hues": ((36.0, 56.0),), "min_s": 0.60, "min_v": 0.45},  # not the key's amber #B06000
+    "green": {"hues": ((75.0, 175.0),), "min_s": 0.20, "min_v": 0.16},
+    "red": {"hues": ((342.0, 360.0), (0.0, 18.0)), "min_s": 0.32, "min_v": 0.22},
+    "blue": {"hues": ((195.0, 245.0),), "min_s": 0.35, "min_v": 0.22},
+    "yellow": {"hues": ((35.0, 62.0),), "min_s": 0.42, "min_v": 0.35},  # not the key's amber #B06000
 }
 # Height (base_link z) of the colored part of each prop, for the ray/plane fallback.
 TRAY_PLANE_Z_M = FLOOR_Z_M
@@ -96,9 +96,11 @@ SCENES = {
 }
 
 SAMPLE_STRIDE = 2  # analyze every 2nd pixel in x and y (320 x 200 cells)
-CLOSE_RADIUS = 2  # dilation radius in cells: joins the dashed border, the word and the circle
-MIN_BLOB_CELLS = 30  # ~120 full-resolution pixels
-FULL_CONFIDENCE_CELLS = 400  # a blob this big counts as fully confident
+CLOSE_RADIUS = 2  # default dilation radius in cells
+TOTEM_CLOSE_RADIUS = 3  # joins the totem badge, icon and top band
+TRAY_CLOSE_RADIUS = 5  # larger closing radius for trays: joins the dashed border, drop circle and title
+MIN_BLOB_CELLS = 18  # ~72 full-resolution pixels (rejects small noise specks while keeping 45 cm props)
+FULL_CONFIDENCE_CELLS = 140  # a printed totem icon or tray border/title at ~40 cm is ~120-180 cells
 # The blob touches the left/right edge of the image: the prop is only partly in view and its bearing
 # is uncertain. (In the survey pose the near end of a tray is always below the frame: the bottom edge
 # is not penalized, and the mat center then reads ~2 cm too far, which barely changes its bearing.)
@@ -421,7 +423,8 @@ def detect_objects(scene: str, rgb, servos: dict, depth=None, lidar=None, stride
     sx, sy = stride, stride
     out = []
     for spec in specs:
-        blobs = find_blobs(cells, cols, rows, names.index(spec["color"]) + 1)
+        radius = TRAY_CLOSE_RADIUS if spec["kind"] == "tray" else TOTEM_CLOSE_RADIUS
+        blobs = find_blobs(cells, cols, rows, names.index(spec["color"]) + 1, radius=radius)
         if not blobs or blobs[0]["cells"] < MIN_BLOB_CELLS:
             continue
         blob = blobs[0]

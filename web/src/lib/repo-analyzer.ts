@@ -10,15 +10,18 @@ export const PRESET_REPOS: Record<string, RepoAnalysis> = {
     dependencyCount: 148,
     hasTests: true,
     findings: [
-      { label: 'issues abiertos', value: 'Más de 1,800 issues esperando respuesta', severity: 'roast' },
-      { label: 'useEffect loops', value: 'Responsable del 80% de los bugs en producción', severity: 'roast' },
+      { label: 'useEffect loops', value: 'Un array de dependencias mal puesto y tu navegador entra en órbita', severity: 'roast' },
+      { label: 'tipado interno', value: 'Sigue casado con Flow mientras todo el planeta escribe TypeScript', severity: 'roast' },
+      { label: 'React Compiler', value: 'Tuvieron que inventar un compilador porque nadie entendió cuándo usar useMemo', severity: 'roast' },
+      { label: 'Server Components', value: 'Diez años siendo SPA y ahora resulta que todo debía correr en el servidor', severity: 'roast' },
+      { label: 'issues abiertos', value: 'Más de 1,800 issues haciendo fila como trámite de gobierno', severity: 'roast' },
       { label: 'arquitectura Fiber', value: 'Reconciliador sólido con suite completa de tests', severity: 'good' },
     ],
     suggestedGesture: 'facepalm',
     roastScore: 54,
     roastHeadline: 'React tiene 234 mil estrellas, pero un solo useEffect mal puesto sigue congelando tu navegador.',
     roastPromptContext:
-      'Repo facebook/react: 234k stars, over 1,800 open issues, uses Flow instead of TypeScript internally, and developers still cause infinite loops with useEffect.',
+      'Repo facebook/react: uses Flow internally instead of TypeScript, infinite useEffect loops in production, invented React Compiler because developers abused useMemo/useCallback, Server Components identity crisis after a decade of client SPAs, 148 monorepo dependencies, and over 1,800 open issues.',
     origin: 'preset_rehearsal',
   },
   'vercel/next.js': {
@@ -30,15 +33,17 @@ export const PRESET_REPOS: Record<string, RepoAnalysis> = {
     dependencyCount: 210,
     hasTests: true,
     findings: [
-      { label: 'caché misterioso', value: '4 capas de caché que nadie sabe cómo invalidar', severity: 'roast' },
-      { label: 'Directivas', value: 'use client, use server, use cache en cada archivo', severity: 'warn' },
+      { label: 'caché misterioso', value: '4 capas de caché que ni con git clean se invalidan', severity: 'roast' },
+      { label: 'sopa de directivas', value: 'use client, use server y use cache como conjuros arriba de cada archivo', severity: 'roast' },
+      { label: 'dos routers', value: 'Pages Router y App Router conviviendo como divorciados en la misma casa', severity: 'roast' },
+      { label: 'node_modules', value: '210 dependencias para renderizar un div en el servidor', severity: 'warn' },
       { label: 'Turbopack en Rust', value: 'Compilación incremental de alto rendimiento', severity: 'good' },
     ],
     suggestedGesture: 'suspicious_inspect',
     roastScore: 62,
     roastHeadline: 'Next.js cambia de router cada dos años, pero al menos su compilador en Rust sí corre rápido.',
     roastPromptContext:
-      'Repo vercel/next.js: 130k stars, mixes Pages Router and App Router, complex caching layers, directive soup ("use client", "use server"), fast Rust Turbopack.',
+      'Repo vercel/next.js: changes router paradigm every two years (Pages Router vs App Router), 4 mysterious caching layers, directive soup ("use client", "use server", "use cache"), 210 dependencies, saved only by Rust Turbopack.',
     origin: 'preset_rehearsal',
   },
   'denoland/deno': {
@@ -50,14 +55,15 @@ export const PRESET_REPOS: Record<string, RepoAnalysis> = {
     dependencyCount: 42,
     hasTests: true,
     findings: [
-      { label: 'seguridad', value: 'Permisos explícitos por flag (--allow-net)', severity: 'good' },
-      { label: 'identidad', value: 'Prometió matar a package.json y terminó soportándolo', severity: 'roast' },
+      { label: 'identidad', value: 'Juró destruir a npm y package.json y terminó implementando soporte completo para ambos', severity: 'roast' },
+      { label: 'flags de permisos', value: 'Necesitas cinco flags --allow-* hasta para leer un archivo .env', severity: 'roast' },
+      { label: 'seguridad en Rust', value: 'Runtime en Rust y V8 con permisos explícitos por flag', severity: 'good' },
     ],
     suggestedGesture: 'chef_kiss',
     roastScore: 84,
     roastHeadline: 'Escrito en Rust y con TypeScript nativo: limpio, seguro y aprobado por mis 6 servos.',
     roastPromptContext:
-      'Repo denoland/deno: Built in Rust and V8 with native TypeScript support and explicit security permissions, though it eventually had to add npm and package.json compatibility.',
+      'Repo denoland/deno: Built in Rust and V8 with native TypeScript and strict --allow-* flags, swore to kill node_modules and package.json in 2018 and then quietly crawled back to full npm compatibility in Deno 2.',
     origin: 'preset_rehearsal',
   },
   'ykro/rosorin-jsconf': {

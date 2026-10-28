@@ -8,7 +8,7 @@ export function isSectorUncovered(lidar: LidarSectors | undefined | null, sector
 /** Brake distance of the bridge (LIDAR_BRAKE_M in robot-bridge/src/backend.rs). */
 export const LIDAR_BRAKE_M = 0.28;
 /** The twin only draws echoes closer than this; farther away the sector is open. */
-export const LIDAR_MARKER_MAX_M = 0.85;
+export const LIDAR_MARKER_MAX_M = 0.35;
 
 /** Direction of each sector's centre in the robot frame (REP-103: +x forward, +y left). */
 export const LIDAR_SECTOR_ANGLE_RAD: Record<LidarSectorName, number> = {

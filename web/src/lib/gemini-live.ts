@@ -207,6 +207,14 @@ const BARGE_IN_LEVEL = 0.36;
 const NOISE_FLOOR_LEVEL = 0.09;
 const POST_MOTION_GATE_MS = 1200;
 
+const ROAST_ANGLES = [
+  'Focus on a single concrete architectural contradiction or footgun and compare it to a physical hardware disaster.',
+  'Mock the developer experience and daily debugging pain of maintaining this codebase in production.',
+  'Zero in on the tooling, type system or dependency choices with dry, surgical sarcasm.',
+  'Contrast the hype in the README against the reality of the issues, caching or build complexity.',
+  'Roast it from the perspective of a 6-DOF robot whose servos hurt just reading the stack.',
+] as const;
+
 export class EmbodiedGeminiLiveSession {
   private readonly bridge: RobotActionHandler;
   private readonly hudClient = new RobotBridgeClient();
@@ -224,6 +232,7 @@ export class EmbodiedGeminiLiveSession {
   /** The user wants a live conversation (drives reconnection), even if the mic is unavailable. */
   private conversationActive = false;
   private activeDemoContext = '';
+  private roastTakeIndex = Math.floor(Math.random() * ROAST_ANGLES.length);
 
   private readonly systemPrompt: string;
 
@@ -541,8 +550,18 @@ export class EmbodiedGeminiLiveSession {
       verdict_headline: '',
     });
 
+    const take = ++this.roastTakeIndex;
+    const angle = ROAST_ANGLES[take % ROAST_ANGLES.length];
+    const focusFinding =
+      analysis.findings.length > 0
+        ? analysis.findings[take % analysis.findings.length]
+        : null;
+    const focusDirective = focusFinding
+      ? `Primary target for this take: "${focusFinding.label} (${focusFinding.value})". `
+      : '';
+
     this.sendTurn(
-      `${this.activeDemoContext}\n\nThe app already executed the gesture "${gesture}" for this turn: do NOT call any tool now. Deliver an acid, brutal technical roast of this repository in Spanish, one or two punchy sentences (max 25 words), based only on the data above.`
+      `${this.activeDemoContext}\n\nThe app already executed the gesture "${gesture}" for this turn: do NOT call any tool now. Deliver an acid, brutal technical roast of this repository in Spanish, one or two punchy sentences (max 25 words), based only on the data above. ${focusDirective}Comedic angle: ${angle} Never start by reciting the raw star count and open-issue count, and do NOT repeat any joke, opening or punchline from earlier turns.`
     );
   }
 

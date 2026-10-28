@@ -26,11 +26,11 @@ describe('lidarMarkers', () => {
   });
 
   it('puts each echo on its own side of the robot', () => {
-    const markers = lidarMarkers({ ...open, left_m: 0.5, right_m: 0.2 });
+    const markers = lidarMarkers({ ...open, left_m: 0.32, right_m: 0.2 });
     assert.deepEqual(
       markers.map((m) => [m.sector, m.kind, m.distanceM, m.braking]),
       [
-        ['left', 'echo', 0.5, false],
+        ['left', 'echo', 0.32, false],
         ['right', 'echo', 0.2, true],
       ]
     );

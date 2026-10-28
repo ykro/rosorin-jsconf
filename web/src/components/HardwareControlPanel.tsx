@@ -2,7 +2,6 @@
 
 import React, { useRef, useState } from 'react';
 import type { TelemetryState } from '@/lib/types';
-import { isSectorUncovered } from '@/lib/lidar';
 
 interface HardwareControlPanelProps {
   telemetry: TelemetryState;
@@ -246,11 +245,6 @@ export function HardwareControlPanel({
               </button>
               <div />
             </div>
-            {isSectorUncovered(telemetry.lidar, 'back') && (
-              <p className="mt-3 rounded-xl bg-[#FEF7E0] px-3 py-2 text-xs font-bold text-[#B06000]">
-                Atrás sin LiDAR (lo tapan el chasis y los cables): la reversa no frena. Mira detrás del robot.
-              </p>
-            )}
           </section>
 
           {/* 2. Expressive Gestures */}
