@@ -267,7 +267,47 @@ PY
   echo "[ensayo] AVISO: la web estática no respondió en :$WEB_PORT."
 }
 
+ROBOT_FACE_TMP=""
+ROBOT_FACE_PID=""
+
+# Abre el Rostro Cinético (/face) a pantalla completa en la pantalla de 7" del robot (DISPLAY=:0)
+# en cuanto el bridge responde en /health. Usa un archivo local temporal (600) que redirige a la URL
+# con #token=..., así el token nunca aparece en argv (ps).
+robot_open_face() {
+  ROBOT_FACE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/rosorin-face.XXXXXX")"
+  chmod 700 "$ROBOT_FACE_TMP"
+  (
+    for _ in $(seq 1 60); do
+      curl -s -m 1 -o /dev/null "http://127.0.0.1:$BRIDGE_PORT/health" && break
+      sleep 1
+    done
+    curl -s -m 1 -o /dev/null "http://127.0.0.1:$BRIDGE_PORT/health" || exit 0
+    local tok="" url page="$ROBOT_FACE_TMP/face.html"
+    [ -s "$ROOT_DIR/.bridge-token" ] && tok="$(tr -d '[:space:]' < "$ROOT_DIR/.bridge-token")"
+    url="http://127.0.0.1:$WEB_PORT/face?bridge=http://127.0.0.1:$BRIDGE_PORT${tok:+#token=$tok}"
+    (umask 077 && printf '<!doctype html><meta charset="utf-8"><script>location.replace("%s")</script>\n' "$url" > "$page")
+    export DISPLAY="${DISPLAY:-:0}"
+    if [ -f "/run/user/$(id -u)/gdm/Xauthority" ]; then
+      export XAUTHORITY="/run/user/$(id -u)/gdm/Xauthority"
+    elif [ -f "$HOME/.Xauthority" ]; then
+      export XAUTHORITY="$HOME/.Xauthority"
+    fi
+    if [ -x "/usr/local/bin/firefox" ]; then
+      setsid /usr/local/bin/firefox --kiosk "file://$page" >/dev/null 2>&1 </dev/null &
+    elif command -v firefox >/dev/null 2>&1; then
+      setsid firefox --kiosk "file://$page" >/dev/null 2>&1 </dev/null &
+    elif command -v chromium-browser >/dev/null 2>&1; then
+      setsid chromium-browser --kiosk --app="file://$page" --autoplay-policy=no-user-gesture-required >/dev/null 2>&1 </dev/null &
+    fi
+  ) &
+  ROBOT_FACE_PID=$!
+}
+
 stop_robot_web() {
+  [ -n "$ROBOT_FACE_PID" ] && kill -TERM "$ROBOT_FACE_PID" 2>/dev/null
+  ROBOT_FACE_PID=""
+  [ -n "$ROBOT_FACE_TMP" ] && rm -rf "$ROBOT_FACE_TMP"
+  ROBOT_FACE_TMP=""
   [ -n "$ROBOT_WEB_PID" ] && kill -TERM "$ROBOT_WEB_PID" 2>/dev/null
   ROBOT_WEB_PID=""
 }
@@ -304,6 +344,7 @@ run_robot_mode() {
     if robot_build_web; then
       trap stop_robot_web EXIT
       robot_start_web
+      robot_open_face
     else
       echo "[ensayo] AVISO: sin web en el robot. En la laptop usa --laptop-server."
       LAPTOP_SERVER=true

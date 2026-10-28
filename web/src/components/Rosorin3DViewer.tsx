@@ -78,10 +78,15 @@ function pulseToRadians(id: number, pulse: number): number {
 // Demo B: the key leaves the gripper only once it is open this far (pulseToRadians(10, ~450)).
 const GRIPPER_RELEASE_RAD = -0.16;
 const KEY_FLAT_HALF_M = 0.009; // the key lying flat: half of its 0.018 m thickness
-const TRAY_TOP_M = 0.012;
-// Same size as the printed tray mats (docs/generate_props_pdf.py: 186 × 108 mm), long side forward
-const TRAY_HALF_X_M = 0.093;
-const TRAY_HALF_Y_M = 0.054;
+const TRAY_TOP_M = 0.004;
+// Same size & orientation as the printed tray sheets (docs/generate_props_pdf.py: 186 × 108 mm),
+// placed landscape with the wide 186 mm side across Y facing the robot and 108 mm depth along X.
+const TRAY_HALF_X_M = 0.054;
+const TRAY_HALF_Y_M = 0.093;
+// Printed Demo C self-standing folded tent cards (docs/generate_props_pdf.py: 182 mm wide × 95 mm tall × ~52 mm deep)
+const TOTEM_DEPTH_X_M = 0.052;
+const TOTEM_WIDTH_Y_M = 0.182;
+const TOTEM_HEIGHT_Z_M = 0.095;
 
 /**
  * 3D twin of the robot. Wrapped in an error boundary: if the scene crashes (or
@@ -545,23 +550,88 @@ function Rosorin3DViewerScene({
     keyMesh.castShadow = true;
     heldKeyGroup.add(keyMesh);
 
-    // Demo B Trays on the Table
+    // Demo B Trays on the Table (matching docs/generate_props_pdf.py: 186 × 108 mm landscape sheet)
     const gatekeeperGroup = new THREE.Group();
     gatekeeperGroup.visible = sceneMode === 'gatekeeper';
     rosWorld.add(gatekeeperGroup);
 
+    const labelTextures: THREE.Texture[] = [];
+    const createTrayTexture = (title: string, sub: string, fillHex: string, borderHex: string) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 296;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // White paper card margin around the colored tray
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Colored pastel fill + dashed outer border
+        ctx.fillStyle = fillHex;
+        ctx.beginPath();
+        ctx.roundRect(14, 14, 484, 268, 22);
+        ctx.fill();
+        ctx.save();
+        ctx.setLineDash([16, 10]);
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = borderHex;
+        ctx.stroke();
+
+        // Central dashed drop circle
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(256, 122, 68, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = borderHex;
+        ctx.stroke();
+        ctx.restore();
+
+        // Solid bottom title pill
+        ctx.fillStyle = borderHex;
+        ctx.beginPath();
+        ctx.roundRect(54, 206, 404, 58, 14);
+        ctx.fill();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 28px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(title, 256, 228);
+        ctx.font = 'bold 14px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(sub, 256, 251);
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      // Rotate UV -90° so the 512 px width spans the 186 mm Y axis and faces the robot (-X)
+      tex.center.set(0.5, 0.5);
+      tex.rotation = -Math.PI / 2;
+      tex.needsUpdate = true;
+      labelTextures.push(tex);
+      return tex;
+    };
+
     const approveTray = new THREE.Mesh(
       new THREE.BoxGeometry(2 * TRAY_HALF_X_M, 2 * TRAY_HALF_Y_M, TRAY_TOP_M),
-      new THREE.MeshStandardMaterial({ color: 0x059669, roughness: 0.4 })
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        map: createTrayTexture('APROBADO', 'SOLTAR LLAVE AQUÍ', '#9CE0B0', '#1E8E3E'),
+        roughness: 0.45,
+      })
     );
+    approveTray.userData.accentColor = 0x1e8e3e;
     // 18 cm to the left / right of the robot, as the printed props say
     approveTray.position.set(0.18, 0.19, TRAY_TOP_M / 2);
     gatekeeperGroup.add(approveTray);
 
     const rejectTray = new THREE.Mesh(
       new THREE.BoxGeometry(2 * TRAY_HALF_X_M, 2 * TRAY_HALF_Y_M, TRAY_TOP_M),
-      new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.4 })
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        map: createTrayTexture('RECHAZADO', 'DESCARTAR PR', '#F8A9A2', '#D93025'),
+        roughness: 0.45,
+      })
     );
+    rejectTray.userData.accentColor = 0xd93025;
     rejectTray.position.set(0.18, -0.19, TRAY_TOP_M / 2);
     gatekeeperGroup.add(rejectTray);
 
@@ -584,11 +654,15 @@ function Rosorin3DViewerScene({
       gatekeeperGroup.getWorldQuaternion(keyParentQuat);
       droppedKeyMesh.position.copy(keyWorldPos);
       droppedKeyMesh.quaternion.copy(keyParentQuat.invert().multiply(keyWorldQuat));
-      const onTray = [approveTray, rejectTray].some(
-        (tray) =>
-          Math.abs(keyWorldPos.x - tray.position.x) <= TRAY_HALF_X_M &&
-          Math.abs(keyWorldPos.y - tray.position.y) <= TRAY_HALF_Y_M
-      );
+      const onTray = [approveTray, rejectTray].some((tray) => {
+        const dx = keyWorldPos.x - tray.position.x;
+        const dy = keyWorldPos.y - tray.position.y;
+        const c = Math.cos(-tray.rotation.z);
+        const s = Math.sin(-tray.rotation.z);
+        const localX = dx * c - dy * s;
+        const localY = dx * s + dy * c;
+        return Math.abs(localX) <= TRAY_HALF_X_M && Math.abs(localY) <= TRAY_HALF_Y_M;
+      });
       keyDrop.restZ = (onTray ? TRAY_TOP_M : 0) + KEY_FLAT_HALF_M;
       // Lands flat (thin side down), keeping the heading it had in the gripper
       keyAxisX.set(1, 0, 0).applyQuaternion(droppedKeyMesh.quaternion);
@@ -599,12 +673,60 @@ function Rosorin3DViewerScene({
       keyDrop.phase = 'falling';
     };
 
-    // Demo C 3 Physical Service Totems on the Stage Table + 3D Backboard Labels
+    // Demo C 3 Physical Service Totems on the Stage Table (matching docs/generate_props_pdf.py:
+    // 182 mm wide × 95 mm tall landscape folded tent cards) + 3D Backboard Labels
     const bughunterGroup = new THREE.Group();
     bughunterGroup.visible = sceneMode === 'bughunter';
     rosWorld.add(bughunterGroup);
 
-    const labelTextures: THREE.Texture[] = [];
+    const createTotemCardTexture = (code: string, title: string, sub: string, accentHex: string) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 268;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // White folded tent card face
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = '#DADCE0';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+
+        // Top colored header pill (DEMO C · TÓTEM DE SERVICIO)
+        ctx.fillStyle = accentHex;
+        ctx.beginPath();
+        ctx.roundRect(18, 14, 476, 36, 10);
+        ctx.fill();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 16px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('DEMO C · TÓTEM DE SERVICIO', 256, 32);
+
+        // Colored square icon badge (CR / GL / FS)
+        ctx.fillStyle = accentHex;
+        ctx.beginPath();
+        ctx.roundRect(194, 62, 124, 108, 20);
+        ctx.fill();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 56px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(code, 256, 118);
+
+        // Service name & subtitle
+        ctx.fillStyle = '#202124';
+        ctx.font = 'bold 42px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(title, 256, 206);
+        ctx.fillStyle = '#5F6368';
+        ctx.font = '20px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(sub, 256, 242);
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.needsUpdate = true;
+      labelTextures.push(tex);
+      return tex;
+    };
+
     const createTotemLabelSprite = (title: string, accentHex: string) => {
       const canvas = document.createElement('canvas');
       canvas.width = 512;
@@ -640,28 +762,30 @@ function Rosorin3DViewerScene({
     };
 
     const totemSpecs = [
-      { id: 'cloud_run', label: 'CLOUD RUN', y: 0.22, color: 0x2563eb, hex: '#2563EB' },
-      { id: 'gemini_live', label: 'GEMINI LIVE', y: 0.0, color: 0x0d9488, hex: '#0D9488' },
-      { id: 'firestore', label: 'FIRESTORE', y: -0.22, color: 0xff5500, hex: '#FF5500' },
+      { id: 'cloud_run', code: 'CR', label: 'CLOUD RUN', sub: 'API Gateway · Contenedores', y: 0.22, color: 0x1a73e8, hex: '#1A73E8' },
+      { id: 'gemini_live', code: 'GL', label: 'GEMINI LIVE', sub: 'Worker Multimodal · Voz y Visión', y: 0.0, color: 0x1e8e3e, hex: '#1E8E3E' },
+      { id: 'firestore', code: 'FS', label: 'FIRESTORE', sub: 'Base de Datos · Estado y Sesiones', y: -0.22, color: 0xf9ab00, hex: '#F9AB00' },
     ];
     const totemMeshes: Record<string, THREE.Mesh> = {};
     const totemLabels: Record<string, THREE.Sprite> = {};
     for (const spec of totemSpecs) {
       const m = new THREE.Mesh(
-        new THREE.BoxGeometry(0.028, 0.095, 0.145),
+        new THREE.BoxGeometry(TOTEM_DEPTH_X_M, TOTEM_WIDTH_Y_M, TOTEM_HEIGHT_Z_M),
         new THREE.MeshStandardMaterial({
-          color: spec.color,
-          roughness: 0.3,
-          metalness: 0.1,
+          color: 0xffffff,
+          map: createTotemCardTexture(spec.code, spec.label, spec.sub, spec.hex),
+          roughness: 0.4,
+          metalness: 0.05,
         })
       );
-      m.position.set(0.34, spec.y, 0.0725);
+      m.userData.accentColor = spec.color;
+      m.position.set(0.34, spec.y, TOTEM_HEIGHT_Z_M / 2);
       m.castShadow = true;
       bughunterGroup.add(m);
       totemMeshes[spec.id] = m;
 
       const labelSprite = createTotemLabelSprite(spec.label, spec.hex);
-      labelSprite.position.set(0.33, spec.y, 0.172);
+      labelSprite.position.set(0.33, spec.y, TOTEM_HEIGHT_Z_M + 0.025);
       bughunterGroup.add(labelSprite);
       totemLabels[spec.id] = labelSprite;
     }
@@ -713,7 +837,7 @@ function Rosorin3DViewerScene({
     for (const id of Object.keys(propMeshes) as ScanPropId[]) {
       const tray = id.endsWith('_tray');
       const ring = new THREE.Mesh(
-        tray ? new THREE.RingGeometry(0.112, 0.124, 56) : new THREE.RingGeometry(0.064, 0.074, 40),
+        tray ? new THREE.RingGeometry(0.104, 0.116, 56) : new THREE.RingGeometry(0.098, 0.11, 48),
         new THREE.MeshBasicMaterial({ color: 0x1a73e8, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false })
       );
       ring.visible = false;
@@ -721,7 +845,7 @@ function Rosorin3DViewerScene({
       const group = PROP_SCENE[id] === 'gatekeeper' ? gatekeeperGroup : bughunterGroup;
       group.add(ring);
       group.add(tag.sprite);
-      propMarkers[id] = { ring, tag, tagZ: tray ? 0.075 : 0.215 };
+      propMarkers[id] = { ring, tag, tagZ: tray ? 0.055 : TOTEM_HEIGHT_Z_M + 0.068 };
       // Ghost-capable: opacity is set per frame (solid 1, «sin reconocer» translucent)
       for (const m of [propMeshes[id].material as THREE.MeshStandardMaterial]) m.transparent = true;
     }
@@ -939,13 +1063,13 @@ function Rosorin3DViewerScene({
         const p = placements[id];
         const mesh = propMeshes[id];
         const tray = id.endsWith('_tray');
-        // A totem that is not at the fixed layout turns to face the robot's start
-        const facing = !tray && (p.measured || st.sim_scene) ? Math.atan2(p.y, p.x) : 0;
-        mesh.position.set(p.x, p.y, tray ? TRAY_TOP_M / 2 : 0.0725);
+        // Both trays and totems turn their wide front face toward the robot when measured or simulated
+        const facing = p.measured || st.sim_scene ? Math.atan2(p.y, p.x) : 0;
+        mesh.position.set(p.x, p.y, tray ? TRAY_TOP_M / 2 : TOTEM_HEIGHT_Z_M / 2);
         mesh.rotation.z = facing;
         if (!tray) {
           const label = totemLabels[id];
-          label?.position.set(p.x - 0.01 * Math.cos(facing), p.y - 0.01 * Math.sin(facing), 0.172);
+          label?.position.set(p.x - 0.01 * Math.cos(facing), p.y - 0.01 * Math.sin(facing), TOTEM_HEIGHT_Z_M + 0.025);
           if (label) (label.material as THREE.SpriteMaterial).opacity = p.solid ? 1 : 0.4;
         }
         const mat = mesh.material as THREE.MeshStandardMaterial;
@@ -959,8 +1083,8 @@ function Rosorin3DViewerScene({
           p.solid &&
           inCameraCone(odomPose, p1, p.x, p.y).inside;
         if (tray) {
-          mat.emissive.copy(mat.color);
-          mat.emissiveIntensity = propHighlight[id] ? 0.6 : 0;
+          mat.emissive.setHex(mesh.userData.accentColor ?? 0x1a73e8);
+          mat.emissiveIntensity = propHighlight[id] ? 0.45 : 0;
         }
         const marker = propMarkers[id];
         marker.ring.visible = p.detected;
@@ -1007,9 +1131,9 @@ function Rosorin3DViewerScene({
         for (const [id, mesh] of Object.entries(totemMeshes)) {
           const mat = mesh.material as THREE.MeshStandardMaterial;
           if (pointed === id || propHighlight[id as ScanPropId]) {
-            mat.emissive.copy(mat.color);
-            mat.emissiveIntensity = 0.55;
-            mesh.scale.set(1.12, 1.12, 1.08);
+            mat.emissive.setHex(mesh.userData.accentColor ?? 0x1a73e8);
+            mat.emissiveIntensity = 0.45;
+            mesh.scale.set(1.08, 1.08, 1.06);
           } else {
             mat.emissive.setHex(0x000000);
             mat.emissiveIntensity = 0;

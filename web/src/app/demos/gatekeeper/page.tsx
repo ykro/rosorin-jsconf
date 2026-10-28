@@ -61,7 +61,7 @@ export default function GatekeeperDemoPage() {
   const { sessionRef: liveSessionRef, consoleProps, setVerdictHeadline } = useEmbodiedLiveSession(robot);
 
   const gripperPulse = telemetry.servos?.['10'] ?? 680;
-  const isPinzaOpenForKey = gripperPulse >= 380 && gripperPulse <= 540;
+  const isPinzaOpen = gripperPulse < 580;
 
   useEffect(() => {
     void triggerGesture('gatekeeper_hold', 'guarding');
@@ -129,14 +129,14 @@ export default function GatekeeperDemoPage() {
             </button>
             <button
               type="button"
-              onClick={isPinzaOpenForKey ? handleCloseGripper : handleOpenGripper}
+              onClick={isPinzaOpen ? handleCloseGripper : handleOpenGripper}
               className={`rounded-xl border px-3.5 py-2 text-xs font-bold transition-colors ${
-                isPinzaOpenForKey
+                isPinzaOpen
                   ? 'border-[#1E8E3E] bg-[#E6F4EA] text-[#1E8E3E]'
                   : 'border-[#DADCE0] bg-[#F8F9FA] text-[#202124] hover:border-[#1A73E8] hover:text-[#1A73E8]'
               }`}
             >
-              {isPinzaOpenForKey ? 'Cerrar Pinza' : 'Abrir Pinza'}
+              {isPinzaOpen ? 'Cerrar Pinza' : 'Abrir Pinza'}
             </button>
           </div>
         </div>

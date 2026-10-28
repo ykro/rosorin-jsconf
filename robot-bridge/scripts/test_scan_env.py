@@ -20,7 +20,7 @@ import scan_env as se  # noqa: E402
 import ros2_worker as worker  # noqa: E402
 
 # The survey pose the bridge uses (SURVEY_POSE in robot-bridge/src/scan_env.rs) at a given joint1.
-SURVEY = {"2": 520, "3": 200, "4": 180}
+SURVEY = {"2": 520, "3": 215, "4": 195}
 
 
 def survey(j1: int) -> dict:
@@ -105,12 +105,12 @@ class GeometryTests(unittest.TestCase):
         import calibrar_sombra as cal
 
         for j1 in range(280, 721, 44):  # every pause of the sweep (SCAN_J1_MIN..SCAN_J1_MAX)
-            self.assertGreater(cal.scan_clearance((j1, 520, 200, 180, 500, 500)), 0.08)
-            points = cal.arm_points((j1, 520, 200, 180, 500, 500))[1:]
+            self.assertGreater(cal.scan_clearance((j1, 520, 215, 195, 500, 500)), 0.08)
+            points = cal.arm_points((j1, 520, 215, 195, 500, 500))[1:]
             self.assertGreater(min(p[2] for p in points), 0.18)
 
     def test_floor_point_round_trips_through_the_ray(self):
-        for j1, point in ((500, (0.27, 0.0, se.FLOOR_Z_M)), (700, (0.18, 0.19, se.FLOOR_Z_M)), (300, (0.2, -0.17, se.FLOOR_Z_M))):
+        for j1, point in ((500, (0.35, 0.0, se.FLOOR_Z_M)), (700, (0.24, 0.22, se.FLOOR_Z_M)), (300, (0.25, -0.20, se.FLOOR_Z_M))):
             (u, v), _ = project(point, survey(j1))
             self.assertTrue(0 <= u < 640 and 0 <= v < 400, (u, v))
             origin, direction = se.pixel_ray(u, v, survey(j1))
@@ -193,21 +193,21 @@ class DetectTests(unittest.TestCase):
         servos = survey(j1)
         img = blank_image()
         # Red RECHAZADO tray on the LEFT this time (swapped from the default layout)
-        paint_floor_rect(img, servos, 0.18, 0.19, 0.093, 0.054, se.FLOOR_Z_M, RED)
+        paint_floor_rect(img, servos, 0.24, 0.22, 0.054, 0.093, se.FLOOR_Z_M, RED)
         found = se.detect_objects("gatekeeper", img, servos)
         ids = [d["id"] for d in found]
         self.assertEqual(ids, ["reject_tray"])
         d = found[0]
         self.assertEqual(d["method"], "plane")
-        self.assertAlmostEqual(d["x_m"], 0.18, delta=0.03)
-        self.assertAlmostEqual(d["y_m"], 0.19, delta=0.03)
+        self.assertAlmostEqual(d["x_m"], 0.24, delta=0.03)
+        self.assertAlmostEqual(d["y_m"], 0.22, delta=0.03)
         self.assertGreater(d["bearing_deg"], 30)
         self.assertGreater(d["confidence"], 0.5)
 
     def test_partly_visible_tray_is_less_confident(self):
         servos = survey(500)  # the tray is at the left edge of the image
         img = blank_image()
-        paint_floor_rect(img, servos, 0.18, 0.19, 0.093, 0.054, se.FLOOR_Z_M, GREEN)
+        paint_floor_rect(img, servos, 0.24, 0.22, 0.054, 0.093, se.FLOOR_Z_M, GREEN)
         found = se.detect_objects("gatekeeper", img, servos)
         self.assertEqual([d["id"] for d in found], ["approve_tray"])
         full = se.detect_objects("gatekeeper", self._tray_image(720, GREEN), survey(720))[0]
@@ -215,7 +215,7 @@ class DetectTests(unittest.TestCase):
 
     def _tray_image(self, j1, color):
         img = blank_image()
-        paint_floor_rect(img, survey(j1), 0.18, 0.19, 0.093, 0.054, se.FLOOR_Z_M, color)
+        paint_floor_rect(img, survey(j1), 0.24, 0.22, 0.054, 0.093, se.FLOOR_Z_M, color)
         return img
 
     def test_tiny_blob_is_not_a_tray(self):
@@ -227,13 +227,13 @@ class DetectTests(unittest.TestCase):
         servos = survey(500)
         img = blank_image()
         z = se.TOTEM_PLANE_Z_M
-        for color, y in ((BLUE, 0.09), (GREEN, 0.0), (YELLOW, -0.09)):
-            paint_floor_rect(img, servos, 0.30, y, 0.012, 0.025, z, color)
+        for color, y in ((BLUE, 0.11), (GREEN, 0.0), (YELLOW, -0.11)):
+            paint_floor_rect(img, servos, 0.36, y, 0.015, 0.028, z, color)
         found = {d["id"]: d for d in se.detect_objects("bughunter", img, servos)}
         self.assertEqual(set(found), {"cloud_run", "gemini_live", "firestore"})
-        self.assertAlmostEqual(found["cloud_run"]["y_m"], 0.09, delta=0.02)
-        self.assertAlmostEqual(found["gemini_live"]["y_m"], 0.0, delta=0.02)
-        self.assertAlmostEqual(found["firestore"]["y_m"], -0.09, delta=0.02)
+        self.assertAlmostEqual(found["cloud_run"]["y_m"], 0.11, delta=0.025)
+        self.assertAlmostEqual(found["gemini_live"]["y_m"], 0.0, delta=0.025)
+        self.assertAlmostEqual(found["firestore"]["y_m"], -0.11, delta=0.025)
         self.assertGreater(found["cloud_run"]["bearing_deg"], 0)
         self.assertLess(found["firestore"]["bearing_deg"], 0)
         # Green means a tray only in the gatekeeper scene
@@ -281,7 +281,7 @@ class ScannerThreadTests(unittest.TestCase):
     def test_request_returns_at_once_and_answers_after_a_fresh_frame(self):
         servos = survey(720)
         img = blank_image()
-        paint_floor_rect(img, servos, 0.18, 0.19, 0.093, 0.054, se.FLOOR_Z_M, GREEN)
+        paint_floor_rect(img, servos, 0.24, 0.22, 0.054, 0.093, se.FLOOR_Z_M, GREEN)
         self.scanner.on_rgb(img)  # older than the request: must not be used
         t0 = time.monotonic()
         self.scanner.request({"op": "scan_env_capture", "id": 7, "scene": "gatekeeper", "servos": servos})

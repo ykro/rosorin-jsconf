@@ -77,7 +77,7 @@ LIDAR_ORIGIN_XY = (0.048156, 0.0000755)
 COLOR_SPECS = {
     "green": {"hues": ((80.0, 178.0),), "min_s": 0.13, "min_v": 0.32},
     "red": {"hues": ((335.0, 360.0), (0.0, 15.0)), "min_s": 0.12, "min_v": 0.42},
-    "blue": {"hues": ((190.0, 250.0),), "min_s": 0.18, "min_v": 0.32},
+    "blue": {"hues": ((195.0, 248.0),), "min_s": 0.30, "min_v": 0.30},
     "yellow": {"hues": ((34.0, 65.0),), "min_s": 0.24, "min_v": 0.45},  # not the key's amber #B06000
 }
 PAPER_MAX_S = 0.18
@@ -105,7 +105,8 @@ CLOSE_RADIUS = 2  # default dilation radius in cells
 TOTEM_CLOSE_RADIUS = 3  # joins the totem badge, icon and top band
 TRAY_CLOSE_RADIUS = 5  # larger closing radius for trays: joins the dashed border, drop circle and title
 MIN_BLOB_CELLS = 18  # ~72 full-resolution pixels (rejects small noise specks while keeping 45 cm props)
-FULL_CONFIDENCE_CELLS = 140  # a printed totem icon or tray border/title at ~40 cm is ~120-180 cells
+FULL_CONFIDENCE_CELLS = 140  # tray border/title at ~40 cm
+TOTEM_FULL_CONFIDENCE_CELLS = 65  # printed totem badge + top pill at ~45 cm
 # The blob touches the left/right edge of the image: the prop is only partly in view and its bearing
 # is uncertain. (In the survey pose the near end of a tray is always below the frame: the bottom edge
 # is not penalized, and the mat center then reads ~2 cm too far, which barely changes its bearing.)
@@ -494,7 +495,8 @@ def detect_objects(scene: str, rgb, servos: dict, depth=None, lidar=None, stride
             point = intersect_plane_z(origin, direction, plane)
         if point is None:
             continue
-        confidence = 0.35 + 0.65 * min(1.0, blob["cells"] / FULL_CONFIDENCE_CELLS)
+        full_cells = FULL_CONFIDENCE_CELLS if spec["kind"] == "tray" else TOTEM_FULL_CONFIDENCE_CELLS
+        confidence = 0.35 + 0.65 * min(1.0, blob["cells"] / full_cells)
         if blob["touches_side"]:
             confidence *= SIDE_PENALTY
         # Off-center views see the prop in stronger perspective and clipped: trust them less, so the

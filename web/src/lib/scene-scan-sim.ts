@@ -17,8 +17,8 @@ export const SCAN_J1_MAX = 720;
 /** Servos 2-4 of the survey pose / home (servos 5 and 10 are never touched). */
 export const SURVEY_POSE: ReadonlyArray<[number, number]> = [
   [2, 520],
-  [3, 200],
-  [4, 180],
+  [3, 215],
+  [4, 195],
 ];
 export const HOME_POSE: ReadonlyArray<[number, number]> = [
   [2, 430],

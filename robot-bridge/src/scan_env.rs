@@ -22,11 +22,10 @@ pub const SCAN_STEPS: usize = 11;
 /// joint1 range of the sweep (right → left). ±53° around the front; the camera adds ±37° of view.
 pub const SCAN_J1_MIN: u16 = 280;
 pub const SCAN_J1_MAX: u16 = 720;
-/// Survey pose for servos 2-4: camera ~30 cm above the table, pitched ~54° down, arm skeleton
-/// ≥ 8 cm above the LiDAR scan plane and in front of the turret (URDF forward kinematics, see
-/// scripts/test_scan_env.py). Close to the first step of `facepalm` (520, 200, 220). Servos 5
-/// and 10 are never sent: the gripper keeps whatever it holds.
-pub const SURVEY_POSE: [(u8, u16); 3] = [(2, 520), (3, 200), (4, 180)];
+/// Survey pose for servos 2-4: camera ~29 cm above the table, pitched ~47° down, arm skeleton
+/// ≥ 9 cm above the LiDAR scan plane and in front of the turret (URDF forward kinematics, see
+/// scripts/test_scan_env.py). Servos 5 and 10 are never sent: the gripper keeps whatever it holds.
+pub const SURVEY_POSE: [(u8, u16); 3] = [(2, 520), (3, 215), (4, 195)];
 /// Home pose for servos 2-4 at the end (same as the `home` gesture).
 pub const HOME_POSE: [(u8, u16); 3] = [(2, 430), (3, 310), (4, 380)];
 /// Gentle arm durations: ≤ ~150 pulses/s to the survey pose, ~70 pulses/s between steps.
@@ -607,7 +606,8 @@ pub const SAMPLE_STRIDE: usize = 2;
 pub const TOTEM_CLOSE_RADIUS: usize = 3;
 pub const TRAY_CLOSE_RADIUS: usize = 5;
 pub const MIN_BLOB_CELLS: usize = 18;
-pub const FULL_CONFIDENCE_CELLS: f32 = 140.0;
+pub const TRAY_FULL_CONFIDENCE_CELLS: f32 = 140.0;
+pub const TOTEM_FULL_CONFIDENCE_CELLS: f32 = 65.0;
 pub const SIDE_PENALTY: f32 = 0.75;
 pub const CENTERING_WEIGHT: f32 = 0.4;
 pub const LIDAR_CONFIRM_HALF_ANGLE_DEG: f64 = 5.0;
@@ -645,9 +645,9 @@ pub const COLOR_SPECS: [ColorSpec; 4] = [
     },
     ColorSpec {
         name: "blue",
-        hues: &[(190.0, 250.0)],
-        min_s: 0.18,
-        min_v: 0.32,
+        hues: &[(195.0, 248.0)],
+        min_s: 0.30,
+        min_v: 0.30,
     },
     ColorSpec {
         name: "yellow",
@@ -1294,7 +1294,12 @@ pub fn detect_objects(
         let Some(pt) = point else {
             continue;
         };
-        let mut confidence = 0.35 + 0.65 * (blob.cells as f32 / FULL_CONFIDENCE_CELLS).min(1.0);
+        let full_cells = if spec.is_tray {
+            TRAY_FULL_CONFIDENCE_CELLS
+        } else {
+            TOTEM_FULL_CONFIDENCE_CELLS
+        };
+        let mut confidence = 0.35 + 0.65 * (blob.cells as f32 / full_cells).min(1.0);
         if blob.touches_side {
             confidence *= SIDE_PENALTY;
         }
@@ -1719,14 +1724,14 @@ mod tests {
         );
 
         // 2) Now place the real printed RECHAZADO tray (white paper card + red border/title)
-        let ((u, v), _) = project_point([0.18, 0.19, DEFAULT_FLOOR_Z_M], &servos);
+        let ((u, v), _) = project_point([0.24, 0.22, DEFAULT_FLOOR_Z_M], &servos);
         let (cu, cv) = (u as u32, v as u32);
         paint_box(&mut img, cu - 45, cv - 35, cu + 45, cv + 35, [242, 242, 245]); // white paper card
         paint_box(&mut img, cu - 30, cv - 20, cu + 30, cv + 20, [0x25, 0x30, 0xD9]); // red ink #D93025
         let found = detect_objects(ScanScene::Gatekeeper, &img, &servos, None, None, 2).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, "reject_tray");
-        assert!((found[0].x_m - 0.18).abs() < 0.03);
-        assert!((found[0].y_m - 0.19).abs() < 0.03);
+        assert!((found[0].x_m - 0.24).abs() < 0.03);
+        assert!((found[0].y_m - 0.22).abs() < 0.03);
     }
 }
