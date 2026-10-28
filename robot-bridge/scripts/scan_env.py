@@ -24,6 +24,7 @@ Everything here is pure Python (no numpy, no rclpy) so it runs in CI and on the 
 Thresholds were chosen from the printed colors (docs/generate_props_pdf.py) and synthetic images:
 validate them on the real robot under stage light (`SCAN_ENV_DEBUG_DIR` dumps each capture).
 """
+import base64
 import json
 import math
 import os
@@ -74,11 +75,15 @@ LIDAR_ORIGIN_XY = (0.048156, 0.0000755)
 # Hue ranges in degrees (0-360). `min_s`/`min_v` are 0-1. The trays' fill is a pale tint (S < 0.1):
 # what the camera finds are the saturated border, drop circle and the big APROBADO/RECHAZADO word.
 COLOR_SPECS = {
-    "green": {"hues": ((80.0, 178.0),), "min_s": 0.14, "min_v": 0.32},
-    "red": {"hues": ((345.0, 360.0), (0.0, 12.0)), "min_s": 0.18, "min_v": 0.38},
-    "blue": {"hues": ((195.0, 245.0),), "min_s": 0.30, "min_v": 0.25},
-    "yellow": {"hues": ((35.0, 62.0),), "min_s": 0.42, "min_v": 0.35},  # not the key's amber #B06000
+    "green": {"hues": ((80.0, 178.0),), "min_s": 0.13, "min_v": 0.32},
+    "red": {"hues": ((335.0, 360.0), (0.0, 15.0)), "min_s": 0.12, "min_v": 0.42},
+    "blue": {"hues": ((190.0, 250.0),), "min_s": 0.18, "min_v": 0.32},
+    "yellow": {"hues": ((34.0, 65.0),), "min_s": 0.24, "min_v": 0.45},  # not the key's amber #B06000
 }
+PAPER_MAX_S = 0.18
+PAPER_MIN_V = 0.65
+PAPER_PAD_CELLS = 6
+MIN_PAPER_RATIO = 0.18
 # Height (base_link z) of the colored part of each prop, for the ray/plane fallback.
 TRAY_PLANE_Z_M = FLOOR_Z_M
 TOTEM_PLANE_Z_M = FLOOR_Z_M + 0.08  # the totems' color band and icon sit ~5-11 cm above the table
@@ -259,10 +264,11 @@ def _channel_order(encoding: str) -> tuple:
     raise ValueError(f"unsupported RGB encoding {encoding}")
 
 
-def color_grid(image, names, stride: int = SAMPLE_STRIDE) -> tuple:
+def color_grid_with_paper(image, names, stride: int = SAMPLE_STRIDE) -> tuple:
     """
-    Subsamples `image` (width, height, step, encoding, data) and labels each cell with the first
-    color of `names` it matches. Returns (cells: bytearray of color index + 1 or 0, cols, rows).
+    Subsamples `image` (width, height, step, encoding, data), labels each cell with the first color
+    of `names` it matches, and records a paper-backdrop mask (`S <= PAPER_MAX_S and V >= PAPER_MIN_V`).
+    Returns (cells, paper, cols, rows).
     """
     (ri, gi, bi), px = _channel_order(image.encoding)
     data = image.data
@@ -270,15 +276,48 @@ def color_grid(image, names, stride: int = SAMPLE_STRIDE) -> tuple:
     cols = (image.width + stride - 1) // stride
     rows = (image.height + stride - 1) // stride
     cells = bytearray(cols * rows)
+    paper = bytearray(cols * rows)
     index = {name: i + 1 for i, name in enumerate(names)}
     for row in range(rows):
         base = row * stride * step
         for col in range(cols):
             o = base + col * stride * px
-            name = classify_color(*rgb_to_hsv(data[o + ri], data[o + gi], data[o + bi]), names)
+            h, s, v = rgb_to_hsv(data[o + ri], data[o + gi], data[o + bi])
+            idx = row * cols + col
+            if s <= PAPER_MAX_S and v >= PAPER_MIN_V:
+                paper[idx] = 1
+            name = classify_color(h, s, v, names)
             if name:
-                cells[row * cols + col] = index[name]
+                cells[idx] = index[name]
+    return cells, paper, cols, rows
+
+
+def color_grid(image, names, stride: int = SAMPLE_STRIDE) -> tuple:
+    """
+    Subsamples `image` (width, height, step, encoding, data) and labels each cell with the first
+    color of `names` it matches. Returns (cells: bytearray of color index + 1 or 0, cols, rows).
+    """
+    cells, _paper, cols, rows = color_grid_with_paper(image, names, stride)
     return cells, cols, rows
+
+
+def _paper_ratio(cells: bytearray, paper: bytearray, cols: int, rows: int, color_index: int, bbox: tuple) -> float:
+    c0, r0, c1, r1 = bbox
+    c_lo = max(0, c0 - PAPER_PAD_CELLS)
+    c_hi = min(cols, c1 + PAPER_PAD_CELLS + 1)
+    r_lo = max(0, r0 - PAPER_PAD_CELLS)
+    r_hi = min(rows, r1 + PAPER_PAD_CELLS + 1)
+    non_self = 0
+    paper_count = 0
+    for r in range(r_lo, r_hi):
+        off = r * cols
+        for c in range(c_lo, c_hi):
+            idx = off + c
+            if cells[idx] != color_index:
+                non_self += 1
+                if paper[idx]:
+                    paper_count += 1
+    return (paper_count / non_self) if non_self else 0.0
 
 
 def _dilate(mask: bytearray, cols: int, rows: int, radius: int) -> bytearray:
@@ -419,15 +458,21 @@ def detect_objects(scene: str, rgb, servos: dict, depth=None, lidar=None, stride
     for spec in specs:
         if spec["color"] not in names:
             names.append(spec["color"])
-    cells, cols, rows = color_grid(rgb, names, stride)
+    cells, paper, cols, rows = color_grid_with_paper(rgb, names, stride)
     sx, sy = stride, stride
     out = []
     for spec in specs:
+        color_idx = names.index(spec["color"]) + 1
         radius = TRAY_CLOSE_RADIUS if spec["kind"] == "tray" else TOTEM_CLOSE_RADIUS
-        blobs = find_blobs(cells, cols, rows, names.index(spec["color"]) + 1, radius=radius)
-        if not blobs or blobs[0]["cells"] < MIN_BLOB_CELLS:
+        blobs = find_blobs(cells, cols, rows, color_idx, radius=radius)
+        valid = [
+            b for b in blobs
+            if b["cells"] >= MIN_BLOB_CELLS
+            and _paper_ratio(cells, paper, cols, rows, color_idx, b["bbox"]) >= MIN_PAPER_RATIO
+        ]
+        if not valid:
             continue
-        blob = blobs[0]
+        blob = valid[0]
         if spec["kind"] == "tray":
             # The border outlines the mat: its box center is the mat center (the word sits low).
             c0, r0, c1, r1 = blob["bbox"]
@@ -482,17 +527,31 @@ FRAME_WAIT_S = 1.2  # wait this long for an RGB frame newer than the request (th
 DEPTH_WAIT_S = 0.3
 
 
+def _pack_raw_image(img) -> dict:
+    return {
+        "width": int(img.width),
+        "height": int(img.height),
+        "step": int(getattr(img, "step", 0) or 0),
+        "encoding": str(getattr(img, "encoding", "bgr8") or "bgr8"),
+        "is_bigendian": bool(getattr(img, "is_bigendian", 0)),
+        "b64": base64.b64encode(bytes(img.data)).decode("ascii"),
+    }
+
+
 class SceneScanner:
     """
     Keeps the newest RGB and depth frames and LiDAR rays (cheap: references only, from the ROS
     callbacks) and answers `scan_env_capture` requests on its own thread. `request()` is what the
     stdin thread calls: it only enqueues, so the heartbeat pong is never delayed by vision.
+    When `rust_vision=True` (used by `ros2_worker.py`), `process()` forwards the raw frames and
+    LiDAR rays to `rosorin-bridge` so all color segmentation and 3D projection run natively in Rust.
     """
 
-    def __init__(self, emit, lidar_rays=None, clock=time.monotonic):
+    def __init__(self, emit, lidar_rays=None, clock=time.monotonic, rust_vision: bool = False):
         self.emit = emit
         self.lidar_rays = lidar_rays  # LaserScan -> [(robot_angle_rad, range_m)] (mount corrected)
         self.clock = clock
+        self.rust_vision = rust_vision
         self.lock = threading.Lock()
         self.cond = threading.Condition(self.lock)
         self.rgb = None  # (msg, received_at)
@@ -557,6 +616,19 @@ class SceneScanner:
         rgb = _as_bytes_image(rgb)
         depth = _as_bytes_image(depth) if depth is not None else None
         started = self.clock()
+        if self.rust_vision and not self.debug_dir:
+            return {
+                "event": "scan_env_result",
+                "id": job["id"],
+                "ok": True,
+                "scene": job["scene"],
+                "servos": {str(k): int(v) for k, v in job["servos"].items()},
+                "rgb": _pack_raw_image(rgb),
+                "depth_frame": _pack_raw_image(depth) if depth is not None else None,
+                "lidar": [[round(a, 5), round(r, 4) if math.isfinite(r) else None] for a, r in lidar] if lidar else None,
+                "depth": depth is not None,
+                "vision_ms": round((self.clock() - started) * 1000),
+            }
         detections = detect_objects(job["scene"], rgb, job["servos"], depth, lidar)
         if self.debug_dir:
             self._dump(job, rgb, detections)

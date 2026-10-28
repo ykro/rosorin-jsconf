@@ -178,8 +178,8 @@ def scan_rays(msg) -> list:
     return rays
 
 
-# Frames for «Reconocer entorno» (fed by the telemetry node's callbacks).
-SCANNER = scan_env.SceneScanner(emit, lidar_rays=scan_rays)
+# Frames for «Reconocer entorno» (fed by the telemetry node's callbacks; vision runs in Rust).
+SCANNER = scan_env.SceneScanner(emit, lidar_rays=scan_rays, rust_vision=True)
 
 
 def ensure_rclpy():

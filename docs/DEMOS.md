@@ -44,7 +44,7 @@ Todas funcionan sin robot: si no hay bridge conectado, solo se mueve el gemelo y
 - **Botones de preparación:**
   - **Centrar Robot:** chasis y brazo a `home`.
   - **Reconocer:** mide dónde están las bandejas verde y roja (ver Controles comunes).
-  - **Sujetar Llave:** pose `gatekeeper_hold` con la pinza cerrada (680).
+  - **Abrir Pinza / Cerrar Pinza:** entreabre la pinza (servo 10 en 470, solo lo necesario para colocar la llave de papel) o la cierra en la pose `gatekeeper_hold` (680).
 - **PRs de ejemplo** (escenarios simulados de una organización ficticia, `acme-cloud`; los datos están en `PRESET_PRS` de `repo-analyzer.ts`):
   1. `acme-cloud/edge-router#289`: rechazar. Saltarse la validación del middleware de pagos y borrar 42 líneas de tests para un *hotfix* de viernes, sin rollback.
   2. `acme-cloud/checkout-api#645`: aprobar. Parche de idempotencia con 18 tests E2E y canary al 5 %.

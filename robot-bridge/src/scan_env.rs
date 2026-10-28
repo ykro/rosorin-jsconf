@@ -2,16 +2,19 @@
 //!
 //! The wheels never move. The arm goes to a survey pose that looks down at the table (the Aurora 930
 //! camera is on the gripper), joint1 sweeps slowly from right to left in `SCAN_STEPS` pauses and
-//! the arm returns home. At each pause the camera is asked for a capture: `ros2_worker.py` answers
-//! with the props it sees (scan_env.py), the mock with the simulated scene. The views are merged in
-//! [`aggregate`] and kept in memory (`TelemetryState::scan_env`) until the bridge restarts, the robot
-//! moves or they expire; the prop gestures then aim joint1 at them ([`aim_for`]).
+//! the arm returns home. At each pause the camera is asked for a capture: `ros2_worker.py` sends the
+//! raw RGB/depth frame and LiDAR rays and this module runs the color segmentation, white-paper
+//! backdrop filtering, URDF forward kinematics and 3D projection natively in Rust (the mock uses the
+//! simulated scene). The views are merged in [`aggregate`] and kept in memory
+//! (`TelemetryState::scan_env`) until the bridge restarts, the robot moves or they expire; the prop
+//! gestures then aim joint1 at them ([`aim_for`]).
 //!
 //! The sweep runs through the same gate as every other motion: STOP (E-stop), any other motion
 //! command or a dead worker aborts it, and every pulse goes through `clamp_servo_pulse`.
 
 use crate::protocol::clamp_servo_pulse;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// Pauses of the sweep (one capture each).
@@ -552,6 +555,840 @@ pub fn mock_capture(
         .collect()
 }
 
+// ---------------------------------------------------------------------------------------------
+// Native Rust vision + 3D camera/URDF projection (Aurora 930 Pro + 6-DOF arm)
+// ---------------------------------------------------------------------------------------------
+
+pub const RGB_SIZE: (u32, u32) = (640, 400);
+pub const RGB_K: [f64; 4] = [415.853, 416.574, 322.145, 192.159]; // fx, fy, cx, cy
+pub const RGB_D: [f64; 5] = [0.01089, -0.04936, -0.000637, -0.000128, 0.03041];
+pub const DEPTH_SIZE: (u32, u32) = (640, 400);
+pub const DEPTH_K: [f64; 4] = [423.027, 423.807, 319.225, 197.19];
+pub const DEPTH_D: [f64; 5] = [0.06046, -0.10973, 0.000397, -0.000298, 0.05538];
+pub const DEPTH_MIN_M: f64 = 0.30;
+pub const DEPTH_MAX_M: f64 = 2.5;
+pub const DEFAULT_FLOOR_Z_M: f64 = -0.025;
+pub const LIDAR_ORIGIN_XY: (f64, f64) = (0.048_156, 0.000_075_5);
+pub const PULSE_RAD: f64 = (240.0 * std::f64::consts::PI / 180.0) / 1000.0;
+
+type Vec3 = [f64; 3];
+type Mat3 = [[f64; 3]; 3];
+
+/// ROSOrin Pro URDF joints 1..4: `(xyz, rpy, axis)` in `base_link` (x forward, z up).
+pub const ARM_CHAIN_4: [(Vec3, Vec3, Vec3); 4] = [
+    (
+        [0.04662, 0.0000754, 0.16044],
+        [0.0087266, 0.0, 0.0],
+        [-0.0000545, -0.0087266, -0.99996],
+    ),
+    (
+        [0.000012, 0.018766, 0.030345],
+        [0.0, 0.0, 0.0],
+        [0.0, 0.99996, -0.0087265],
+    ),
+    (
+        [0.00025563, 0.00074282, 0.08513],
+        [0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+    ),
+    (
+        [-0.00056892, 0.00074297, 0.085147],
+        [0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+    ),
+];
+pub const CAMERA_CONNECT: (Vec3, Vec3) = (
+    [-0.036369, -0.0181, 0.046638],
+    [-1.5621, -1.5621, std::f64::consts::FRAC_PI_2],
+);
+pub const CAMERA_LINK: (Vec3, Vec3) = ([0.022511, -0.0010257, 0.0051917], [0.0, 0.0, 0.0]);
+
+pub const SAMPLE_STRIDE: usize = 2;
+pub const TOTEM_CLOSE_RADIUS: usize = 3;
+pub const TRAY_CLOSE_RADIUS: usize = 5;
+pub const MIN_BLOB_CELLS: usize = 18;
+pub const FULL_CONFIDENCE_CELLS: f32 = 140.0;
+pub const SIDE_PENALTY: f32 = 0.75;
+pub const CENTERING_WEIGHT: f32 = 0.4;
+pub const LIDAR_CONFIRM_HALF_ANGLE_DEG: f64 = 5.0;
+pub const LIDAR_CONFIRM_TOLERANCE_M: f64 = 0.12;
+
+/// Every printed prop (both Demo B trays and Demo C totems) is colored ink surrounded by a bright
+/// white/pastel paper card (`S <= 0.18, V >= 0.65`). Requiring at least `MIN_PAPER_RATIO` of the
+/// non-colored cells inside the padded bounding box to be paper eliminates false positives from
+/// wood floors, curtains, furniture and window reflections in both Demo B and Demo C.
+pub const PAPER_MAX_S: f32 = 0.18;
+pub const PAPER_MIN_V: f32 = 0.65;
+pub const PAPER_PAD_CELLS: usize = 6;
+pub const MIN_PAPER_RATIO: f32 = 0.18;
+
+#[derive(Debug, Clone, Copy)]
+pub struct ColorSpec {
+    pub name: &'static str,
+    pub hues: &'static [(f32, f32)],
+    pub min_s: f32,
+    pub min_v: f32,
+}
+
+pub const COLOR_SPECS: [ColorSpec; 4] = [
+    ColorSpec {
+        name: "green",
+        hues: &[(80.0, 178.0)],
+        min_s: 0.13,
+        min_v: 0.32,
+    },
+    ColorSpec {
+        name: "red",
+        hues: &[(335.0, 360.0), (0.0, 15.0)],
+        min_s: 0.12,
+        min_v: 0.42,
+    },
+    ColorSpec {
+        name: "blue",
+        hues: &[(190.0, 250.0)],
+        min_s: 0.18,
+        min_v: 0.32,
+    },
+    ColorSpec {
+        name: "yellow",
+        hues: &[(34.0, 65.0)],
+        min_s: 0.24,
+        min_v: 0.45,
+    },
+];
+
+#[derive(Debug, Clone, Copy)]
+struct PropSpec {
+    id: &'static str,
+    color: &'static str,
+    is_tray: bool,
+}
+
+const GATEKEEPER_SPECS: [PropSpec; 2] = [
+    PropSpec {
+        id: "approve_tray",
+        color: "green",
+        is_tray: true,
+    },
+    PropSpec {
+        id: "reject_tray",
+        color: "red",
+        is_tray: true,
+    },
+];
+
+const BUGHUNTER_SPECS: [PropSpec; 3] = [
+    PropSpec {
+        id: "cloud_run",
+        color: "blue",
+        is_tray: false,
+    },
+    PropSpec {
+        id: "gemini_live",
+        color: "green",
+        is_tray: false,
+    },
+    PropSpec {
+        id: "firestore",
+        color: "yellow",
+        is_tray: false,
+    },
+];
+
+fn scene_specs(scene: ScanScene) -> &'static [PropSpec] {
+    match scene {
+        ScanScene::Gatekeeper => &GATEKEEPER_SPECS,
+        ScanScene::Bughunter => &BUGHUNTER_SPECS,
+    }
+}
+
+pub fn floor_z_m() -> f64 {
+    let extra = std::env::var("SCAN_ENV_PROPS_HEIGHT_M")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    DEFAULT_FLOOR_Z_M + extra
+}
+
+/// Raw RGB or depth image buffer from the camera.
+#[derive(Debug, Clone)]
+pub struct RawImage {
+    pub width: u32,
+    pub height: u32,
+    pub step: usize,
+    pub encoding: String,
+    pub is_bigendian: bool,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Blob {
+    pub cells: usize,
+    pub centroid: (f64, f64),
+    pub bbox: (usize, usize, usize, usize),
+    pub touches_side: bool,
+    pub touches_bottom: bool,
+    pub paper_ratio: f32,
+}
+
+fn mat_mul(a: &Mat3, b: &Mat3) -> Mat3 {
+    let mut out = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            out[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+        }
+    }
+    out
+}
+
+fn mat_vec(a: &Mat3, v: Vec3) -> Vec3 {
+    [
+        a[0][0] * v[0] + a[0][1] * v[1] + a[0][2] * v[2],
+        a[1][0] * v[0] + a[1][1] * v[1] + a[1][2] * v[2],
+        a[2][0] * v[0] + a[2][1] * v[1] + a[2][2] * v[2],
+    ]
+}
+
+fn rpy_matrix(roll: f64, pitch: f64, yaw: f64) -> Mat3 {
+    let (sr, cr) = roll.sin_cos();
+    let (sp, cp) = pitch.sin_cos();
+    let (sy, cy) = yaw.sin_cos();
+    let rx = [[1.0, 0.0, 0.0], [0.0, cr, -sr], [0.0, sr, cr]];
+    let ry = [[cp, 0.0, sp], [0.0, 1.0, 0.0], [-sp, 0.0, cp]];
+    let rz = [[cy, -sy, 0.0], [sy, cy, 0.0], [0.0, 0.0, 1.0]];
+    mat_mul(&rz, &mat_mul(&ry, &rx))
+}
+
+fn axis_angle_matrix(axis: Vec3, angle: f64) -> Mat3 {
+    let n = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+    let (x, y, z) = (axis[0] / n, axis[1] / n, axis[2] / n);
+    let (s, c) = angle.sin_cos();
+    let omc = 1.0 - c;
+    [
+        [c + x * x * omc, x * y * omc - z * s, x * z * omc + y * s],
+        [y * x * omc + z * s, c + y * y * omc, y * z * omc - x * s],
+        [z * x * omc - y * s, z * y * omc + x * s, c + z * z * omc],
+    ]
+}
+
+fn joint_angle_rad(index: u8, pulse: u16) -> f64 {
+    if (1..=4).contains(&index) {
+        (500.0 - pulse as f64) * PULSE_RAD
+    } else {
+        (pulse as f64 - 500.0) * PULSE_RAD
+    }
+}
+
+/// Pixel → normalized image coordinates `(x/z, y/z)`, inverting `plumb_bob` distortion iteratively.
+pub fn undistort_pixel(u: f64, v: f64, k: &[f64; 4], d: &[f64; 5], iterations: usize) -> (f64, f64) {
+    let [fx, fy, cx, cy] = *k;
+    let [k1, k2, p1, p2, k3] = *d;
+    let xd = (u - cx) / fx;
+    let yd = (v - cy) / fy;
+    let (mut x, mut y) = (xd, yd);
+    for _ in 0..iterations {
+        let r2 = x * x + y * y;
+        let radial = 1.0 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2;
+        let dx = 2.0 * p1 * x * y + p2 * (r2 + 2.0 * x * x);
+        let dy = p1 * (r2 + 2.0 * y * y) + 2.0 * p2 * x * y;
+        x = (xd - dx) / radial;
+        y = (yd - dy) / radial;
+    }
+    (x, y)
+}
+
+/// Normalized coordinates → pixel with `plumb_bob` distortion.
+pub fn distort_normalized(x: f64, y: f64, k: &[f64; 4], d: &[f64; 5]) -> (f64, f64) {
+    let [fx, fy, cx, cy] = *k;
+    let [k1, k2, p1, p2, k3] = *d;
+    let r2 = x * x + y * y;
+    let radial = 1.0 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2;
+    let xd = x * radial + 2.0 * p1 * x * y + p2 * (r2 + 2.0 * x * x);
+    let yd = y * radial + p1 * (r2 + 2.0 * y * y) + 2.0 * p2 * x * y;
+    (fx * xd + cx, fy * yd + cy)
+}
+
+/// `camera_link` pose `(origin, rotation_3x3)` in `base_link` from joints 1..4 pulses.
+pub fn camera_pose(servos: &BTreeMap<u8, u16>) -> (Vec3, Mat3) {
+    let mut rot: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut pos: Vec3 = [0.0, 0.0, 0.0];
+    for (idx, &(xyz, rpy, axis)) in ARM_CHAIN_4.iter().enumerate() {
+        let id = (idx + 1) as u8;
+        let pulse = servos.get(&id).copied().unwrap_or(500);
+        let d = mat_vec(&rot, xyz);
+        pos = [pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]];
+        let step_rot = mat_mul(
+            &rpy_matrix(rpy[0], rpy[1], rpy[2]),
+            &axis_angle_matrix(axis, joint_angle_rad(id, pulse)),
+        );
+        rot = mat_mul(&rot, &step_rot);
+    }
+    for (xyz, rpy) in [CAMERA_CONNECT, CAMERA_LINK] {
+        let d = mat_vec(&rot, xyz);
+        pos = [pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]];
+        rot = mat_mul(&rot, &rpy_matrix(rpy[0], rpy[1], rpy[2]));
+    }
+    (pos, rot)
+}
+
+/// Optical frame (`z` forward, `x` right, `y` down) → `camera_link` (`x` forward, `y` left, `z` up) → `base_link`.
+pub fn optical_to_base(rot: &Mat3, vec_optical: Vec3) -> Vec3 {
+    let [xo, yo, zo] = vec_optical;
+    mat_vec(rot, [zo, -xo, -yo])
+}
+
+/// `(origin, direction)` in `base_link` of the RGB ray through pixel `(u, v)`.
+pub fn pixel_ray(u: f64, v: f64, servos: &BTreeMap<u8, u16>) -> (Vec3, Vec3) {
+    let (origin, rot) = camera_pose(servos);
+    let (x, y) = undistort_pixel(u, v, &RGB_K, &RGB_D, 8);
+    (origin, optical_to_base(&rot, [x, y, 1.0]))
+}
+
+/// Point where the ray meets the horizontal plane `z = z_plane`, or `None` if parallel/behind.
+pub fn intersect_plane_z(origin: Vec3, direction: Vec3, z_plane: f64) -> Option<Vec3> {
+    if direction[2].abs() < 1e-6 {
+        return None;
+    }
+    let t = (z_plane - origin[2]) / direction[2];
+    if t <= 0.0 {
+        return None;
+    }
+    Some([
+        origin[0] + t * direction[0],
+        origin[1] + t * direction[1],
+        origin[2] + t * direction[2],
+    ])
+}
+
+/// 3D point in `base_link` of RGB pixel `(u, v)` at `depth_m` along the optical axis.
+pub fn pixel_depth_to_base(u: f64, v: f64, depth_m: f64, servos: &BTreeMap<u8, u16>) -> Vec3 {
+    let (origin, rot) = camera_pose(servos);
+    let (x, y) = undistort_pixel(u, v, &RGB_K, &RGB_D, 8);
+    let d = optical_to_base(&rot, [x * depth_m, y * depth_m, depth_m]);
+    [origin[0] + d[0], origin[1] + d[1], origin[2] + d[2]]
+}
+
+/// RGB pixel → depth pixel looking along the same ray.
+pub fn rgb_to_depth_pixel(
+    u: f64,
+    v: f64,
+    rgb_size: (u32, u32),
+    depth_size: (u32, u32),
+) -> (f64, f64) {
+    let (x, y) = undistort_pixel(
+        u * RGB_SIZE.0 as f64 / rgb_size.0 as f64,
+        v * RGB_SIZE.1 as f64 / rgb_size.1 as f64,
+        &RGB_K,
+        &RGB_D,
+        8,
+    );
+    let (ud, vd) = distort_normalized(x, y, &DEPTH_K, &DEPTH_D);
+    (
+        ud * depth_size.0 as f64 / DEPTH_SIZE.0 as f64,
+        vd * depth_size.1 as f64 / DEPTH_SIZE.1 as f64,
+    )
+}
+
+/// `0..=255` RGB → `(hue 0..360, saturation 0..1, value 0..1)`.
+pub fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let mx = r.max(g).max(b);
+    let mn = r.min(g).min(b);
+    if mx == 0 {
+        return (0.0, 0.0, 0.0);
+    }
+    let delta = (mx - mn) as f32;
+    let s = delta / (mx as f32);
+    let v = (mx as f32) / 255.0;
+    if mx == mn {
+        return (0.0, s, v);
+    }
+    let (rf, gf, bf) = (r as f32, g as f32, b as f32);
+    let h = if mx == r {
+        60.0 * (((gf - bf) / delta).rem_euclid(6.0))
+    } else if mx == g {
+        60.0 * ((bf - rf) / delta + 2.0)
+    } else {
+        60.0 * ((rf - gf) / delta + 4.0)
+    };
+    (h, s, v)
+}
+
+pub fn classify_color<'a>(h: f32, s: f32, v: f32, names: &[&'a str]) -> &'a str {
+    for &name in names {
+        let Some(spec) = COLOR_SPECS.iter().find(|c| c.name == name) else {
+            continue;
+        };
+        if s < spec.min_s || v < spec.min_v {
+            continue;
+        }
+        if spec.hues.iter().any(|&(lo, hi)| (lo..=hi).contains(&h)) {
+            return name;
+        }
+    }
+    ""
+}
+
+fn channel_order(encoding: &str) -> Option<((usize, usize, usize), usize)> {
+    match encoding.trim().to_ascii_lowercase().as_str() {
+        "rgb8" => Some(((0, 1, 2), 3)),
+        "rgba8" => Some(((0, 1, 2), 4)),
+        "" | "bgr8" => Some(((2, 1, 0), 3)),
+        "bgra8" => Some(((2, 1, 0), 4)),
+        _ => None,
+    }
+}
+
+/// Subsamples `image` at `stride` and labels each cell with its matched color index (`1..=names.len()`,
+/// `0` otherwise) plus a boolean paper-backdrop mask (`true` when `S <= PAPER_MAX_S && V >= PAPER_MIN_V`).
+pub fn color_grid(
+    image: &RawImage,
+    names: &[&str],
+    stride: usize,
+) -> Option<(Vec<u8>, Vec<bool>, usize, usize)> {
+    let ((ri, gi, bi), px) = channel_order(&image.encoding)?;
+    let stride = stride.max(1);
+    let w = image.width as usize;
+    let h = image.height as usize;
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let step = if image.step > 0 { image.step } else { w * px };
+    let cols = w.div_ceil(stride);
+    let rows = h.div_ceil(stride);
+    let mut cells = vec![0u8; cols * rows];
+    let mut paper = vec![false; cols * rows];
+    for row in 0..rows {
+        let base = row * stride * step;
+        for col in 0..cols {
+            let o = base + col * stride * px;
+            if o + px > image.data.len() {
+                continue;
+            }
+            let (hue, s, v) = rgb_to_hsv(image.data[o + ri], image.data[o + gi], image.data[o + bi]);
+            let idx = row * cols + col;
+            if s <= PAPER_MAX_S && v >= PAPER_MIN_V {
+                paper[idx] = true;
+            }
+            let matched = classify_color(hue, s, v, names);
+            if !matched.is_empty() {
+                if let Some(pos) = names.iter().position(|&n| n == matched) {
+                    cells[idx] = (pos + 1) as u8;
+                }
+            }
+        }
+    }
+    Some((cells, paper, cols, rows))
+}
+
+fn dilate(mask: &[u8], cols: usize, rows: usize, radius: usize) -> Vec<u8> {
+    if radius == 0 {
+        return mask.to_vec();
+    }
+    let mut tmp = vec![0u8; mask.len()];
+    for r in 0..rows {
+        let off = r * cols;
+        for c in 0..cols {
+            if mask[off + c] != 0 {
+                let lo = c.saturating_sub(radius);
+                let hi = (c + radius + 1).min(cols);
+                tmp[off + lo..off + hi].fill(1);
+            }
+        }
+    }
+    let mut out = vec![0u8; mask.len()];
+    for r in 0..rows {
+        let off = r * cols;
+        let lo = r.saturating_sub(radius);
+        let hi = (r + radius + 1).min(rows);
+        for c in 0..cols {
+            if tmp[off + c] != 0 {
+                for rr in lo..hi {
+                    out[rr * cols + c] = 1;
+                }
+            }
+        }
+    }
+    out
+}
+
+fn compute_paper_ratio(
+    cells: &[u8],
+    paper: &[bool],
+    cols: usize,
+    rows: usize,
+    color_index: u8,
+    bbox: (usize, usize, usize, usize),
+) -> f32 {
+    let (c0, r0, c1, r1) = bbox;
+    let c_lo = c0.saturating_sub(PAPER_PAD_CELLS);
+    let c_hi = (c1 + PAPER_PAD_CELLS + 1).min(cols);
+    let r_lo = r0.saturating_sub(PAPER_PAD_CELLS);
+    let r_hi = (r1 + PAPER_PAD_CELLS + 1).min(rows);
+    let mut non_self = 0usize;
+    let mut paper_count = 0usize;
+    for r in r_lo..r_hi {
+        let off = r * cols;
+        for c in c_lo..c_hi {
+            let idx = off + c;
+            if cells[idx] != color_index {
+                non_self += 1;
+                if paper[idx] {
+                    paper_count += 1;
+                }
+            }
+        }
+    }
+    if non_self == 0 {
+        0.0
+    } else {
+        paper_count as f32 / non_self as f32
+    }
+}
+
+/// Connected blobs of `color_index` after a square closing dilation of `radius`.
+pub fn find_blobs(
+    cells: &[u8],
+    paper: &[bool],
+    cols: usize,
+    rows: usize,
+    color_index: u8,
+    radius: usize,
+) -> Vec<Blob> {
+    let mask: Vec<u8> = cells
+        .iter()
+        .map(|&v| u8::from(v == color_index))
+        .collect();
+    let grown = dilate(&mask, cols, rows, radius);
+    let mut seen = vec![false; cells.len()];
+    let mut blobs = Vec::new();
+    let mut stack = Vec::new();
+    for start in 0..cells.len() {
+        if grown[start] == 0 || seen[start] {
+            continue;
+        }
+        stack.push(start);
+        seen[start] = true;
+        let mut count = 0usize;
+        let mut sx = 0usize;
+        let mut sy = 0usize;
+        let (mut c0, mut r0, mut c1, mut r1) = (cols, rows, 0usize, 0usize);
+        while let Some(i) = stack.pop() {
+            let (r, c) = (i / cols, i % cols);
+            if mask[i] != 0 {
+                count += 1;
+                sx += c;
+                sy += r;
+                c0 = c0.min(c);
+                r0 = r0.min(r);
+                c1 = c1.max(c);
+                r1 = r1.max(r);
+            }
+            let neighbors = [
+                (c > 0).then(|| i - 1),
+                (c + 1 < cols).then(|| i + 1),
+                (r > 0).then(|| i - cols),
+                (r + 1 < rows).then(|| i + cols),
+            ];
+            for next in neighbors.into_iter().flatten() {
+                if grown[next] != 0 && !seen[next] {
+                    seen[next] = true;
+                    stack.push(next);
+                }
+            }
+        }
+        if count > 0 {
+            let bbox = (c0, r0, c1, r1);
+            let paper_ratio = compute_paper_ratio(cells, paper, cols, rows, color_index, bbox);
+            blobs.push(Blob {
+                cells: count,
+                centroid: (sx as f64 / count as f64, sy as f64 / count as f64),
+                bbox,
+                touches_side: c0 == 0 || c1 + 1 == cols,
+                touches_bottom: r1 + 1 == rows,
+                paper_ratio,
+            });
+        }
+    }
+    blobs.sort_by_key(|a| std::cmp::Reverse(a.cells));
+    blobs
+}
+
+/// Median depth (m) of valid pixels around `(u, v)` in a `mono16`/`16UC1` (mm) or `32FC1` (m) image.
+pub fn depth_at(depth_image: &RawImage, u: f64, v: f64, half_window: i32) -> Option<f64> {
+    let (w, h) = (depth_image.width as i32, depth_image.height as i32);
+    let (cu, cv) = (u.round() as i32, v.round() as i32);
+    if cu < 0 || cu >= w || cv < 0 || cv >= h {
+        return None;
+    }
+    let enc = depth_image.encoding.trim().to_ascii_lowercase();
+    let mut values = Vec::new();
+    let y0 = (cv - half_window).max(0) as usize;
+    let y1 = (cv + half_window + 1).min(h) as usize;
+    let x0 = (cu - half_window).max(0) as usize;
+    let x1 = (cu + half_window + 1).min(w) as usize;
+
+    if enc.is_empty() || enc == "mono16" || enc == "16uc1" {
+        let step = if depth_image.step > 0 {
+            depth_image.step
+        } else {
+            depth_image.width as usize * 2
+        };
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let o = y * step + x * 2;
+                if o + 2 > depth_image.data.len() {
+                    continue;
+                }
+                let mm = if depth_image.is_bigendian {
+                    u16::from_be_bytes([depth_image.data[o], depth_image.data[o + 1]])
+                } else {
+                    u16::from_le_bytes([depth_image.data[o], depth_image.data[o + 1]])
+                };
+                if mm > 0 {
+                    let m = mm as f64 / 1000.0;
+                    if (DEPTH_MIN_M..=DEPTH_MAX_M).contains(&m) {
+                        values.push(m);
+                    }
+                }
+            }
+        }
+    } else if enc == "32fc1" {
+        let step = if depth_image.step > 0 {
+            depth_image.step
+        } else {
+            depth_image.width as usize * 4
+        };
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let o = y * step + x * 4;
+                if o + 4 > depth_image.data.len() {
+                    continue;
+                }
+                let bytes = [
+                    depth_image.data[o],
+                    depth_image.data[o + 1],
+                    depth_image.data[o + 2],
+                    depth_image.data[o + 3],
+                ];
+                let m = if depth_image.is_bigendian {
+                    f32::from_be_bytes(bytes) as f64
+                } else {
+                    f32::from_le_bytes(bytes) as f64
+                };
+                if m.is_finite() && (DEPTH_MIN_M..=DEPTH_MAX_M).contains(&m) {
+                    values.push(m);
+                }
+            }
+        }
+    } else {
+        return None;
+    }
+
+    if values.len() < 3 {
+        return None;
+    }
+    values.sort_by(|a, b| a.total_cmp(b));
+    Some(values[values.len() / 2])
+}
+
+/// Checks whether the LiDAR scan has an echo near `(x, y)` in `base_link`.
+pub fn lidar_confirms(lidar: Option<&[(f64, f64)]>, x: f64, y: f64) -> Option<bool> {
+    let rays = lidar?;
+    if rays.is_empty() {
+        return None;
+    }
+    let (dx, dy) = (x - LIDAR_ORIGIN_XY.0, y - LIDAR_ORIGIN_XY.1);
+    let expected = dx.hypot(dy);
+    let target = dy.atan2(dx);
+    let half = LIDAR_CONFIRM_HALF_ANGLE_DEG.to_radians();
+    let mut in_cone = Vec::new();
+    for &(a, r) in rays {
+        let diff = (a - target).sin().atan2((a - target).cos()).abs();
+        if diff <= half {
+            in_cone.push(r);
+        }
+    }
+    if in_cone.is_empty() {
+        return None;
+    }
+    Some(
+        in_cone
+            .into_iter()
+            .any(|r| r.is_finite() && (r - expected).abs() <= LIDAR_CONFIRM_TOLERANCE_M),
+    )
+}
+
+/// Finds the props of `scene` in one RGB frame (plus optional depth frame and LiDAR rays) taken with
+/// the arm at `servos`. Rejects any color blob that is not backed by white/pastel paper
+/// (`paper_ratio >= MIN_PAPER_RATIO`).
+pub fn detect_objects(
+    scene: ScanScene,
+    rgb: &RawImage,
+    servos: &BTreeMap<u8, u16>,
+    depth: Option<&RawImage>,
+    lidar: Option<&[(f64, f64)]>,
+    stride: usize,
+) -> Option<Vec<CaptureDetection>> {
+    let specs = scene_specs(scene);
+    let mut names: Vec<&str> = Vec::new();
+    for spec in specs {
+        if !names.contains(&spec.color) {
+            names.push(spec.color);
+        }
+    }
+    let stride = stride.max(1);
+    let (cells, paper, cols, rows) = color_grid(rgb, &names, stride)?;
+    let sx = stride as f64;
+    let sy = stride as f64;
+    let floor_z = floor_z_m();
+    let mut out = Vec::new();
+
+    for spec in specs {
+        let color_idx = (names.iter().position(|&n| n == spec.color)? + 1) as u8;
+        let radius = if spec.is_tray {
+            TRAY_CLOSE_RADIUS
+        } else {
+            TOTEM_CLOSE_RADIUS
+        };
+        let blobs = find_blobs(&cells, &paper, cols, rows, color_idx, radius);
+        let Some(blob) = blobs
+            .into_iter()
+            .find(|b| b.cells >= MIN_BLOB_CELLS && b.paper_ratio >= MIN_PAPER_RATIO)
+        else {
+            continue;
+        };
+        let (cu, cv) = if spec.is_tray {
+            let (c0, r0, c1, r1) = blob.bbox;
+            ((c0 + c1) as f64 / 2.0, (r0 + r1) as f64 / 2.0)
+        } else {
+            blob.centroid
+        };
+        let (u, v) = (cu * sx + sx / 2.0, cv * sy + sy / 2.0);
+        let mut point = None;
+        let mut method = "plane";
+        if let Some(d_img) = depth {
+            let (du, dv) = rgb_to_depth_pixel(u, v, (rgb.width, rgb.height), (d_img.width, d_img.height));
+            if let Some(z) = depth_at(d_img, du, dv, 4) {
+                point = Some(pixel_depth_to_base(
+                    u * RGB_SIZE.0 as f64 / rgb.width as f64,
+                    v * RGB_SIZE.1 as f64 / rgb.height as f64,
+                    z,
+                    servos,
+                ));
+                method = "depth";
+            }
+        }
+        if point.is_none() {
+            let (origin, direction) = pixel_ray(
+                u * RGB_SIZE.0 as f64 / rgb.width as f64,
+                v * RGB_SIZE.1 as f64 / rgb.height as f64,
+                servos,
+            );
+            let plane = if spec.is_tray {
+                floor_z
+            } else {
+                floor_z + 0.08
+            };
+            point = intersect_plane_z(origin, direction, plane);
+        }
+        let Some(pt) = point else {
+            continue;
+        };
+        let mut confidence = 0.35 + 0.65 * (blob.cells as f32 / FULL_CONFIDENCE_CELLS).min(1.0);
+        if blob.touches_side {
+            confidence *= SIDE_PENALTY;
+        }
+        let half_w = (rgb.width as f32) / 2.0;
+        if half_w > 0.0 {
+            confidence *= 1.0 - CENTERING_WEIGHT * ((u as f32 - half_w).abs() / half_w).min(1.0);
+        }
+        let confirmed = if !spec.is_tray {
+            lidar_confirms(lidar, pt[0], pt[1])
+        } else {
+            None
+        };
+        if confirmed == Some(true) {
+            confidence = (confidence + 0.1).min(1.0);
+        }
+        out.push(CaptureDetection {
+            id: spec.id.to_string(),
+            x_m: round_to(pt[0] as f32, 4),
+            y_m: round_to(pt[1] as f32, 4),
+            z_m: round_to(pt[2] as f32, 4),
+            confidence: round_to(confidence, 3),
+            method: method.to_string(),
+            lidar_confirmed: confirmed,
+        });
+    }
+    Some(out)
+}
+
+fn unpack_raw_image(v: &serde_json::Value) -> Option<RawImage> {
+    use base64::Engine as _;
+    let width = v.get("width")?.as_u64()? as u32;
+    let height = v.get("height")?.as_u64()? as u32;
+    let step = v.get("step").and_then(|n| n.as_u64()).unwrap_or(0) as usize;
+    let encoding = v
+        .get("encoding")
+        .and_then(|s| s.as_str())
+        .unwrap_or("bgr8")
+        .to_string();
+    let is_bigendian = v
+        .get("is_bigendian")
+        .and_then(|b| b.as_bool())
+        .unwrap_or(false);
+    let b64 = v.get("b64")?.as_str()?;
+    let data = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+    Some(RawImage {
+        width,
+        height,
+        step,
+        encoding,
+        is_bigendian,
+        data,
+    })
+}
+
+/// Decodes a worker `scan_env_result` JSON payload containing a raw `"rgb"` frame and runs
+/// [`detect_objects`] natively in Rust.
+pub fn detect_from_worker_json(v: &serde_json::Value) -> Option<Vec<CaptureDetection>> {
+    let scene_str = v.get("scene")?.as_str()?;
+    let scene = match scene_str {
+        "gatekeeper" => ScanScene::Gatekeeper,
+        "bughunter" => ScanScene::Bughunter,
+        _ => return None,
+    };
+    let rgb = unpack_raw_image(v.get("rgb")?)?;
+    let depth = v.get("depth_frame").and_then(unpack_raw_image);
+    let mut servos = BTreeMap::new();
+    if let Some(obj) = v.get("servos").and_then(|s| s.as_object()) {
+        for (k, val) in obj {
+            if let (Ok(id), Some(pos)) = (k.parse::<u8>(), val.as_u64()) {
+                servos.insert(id, pos as u16);
+            }
+        }
+    }
+    let lidar: Option<Vec<(f64, f64)>> = v
+        .get("lidar")
+        .and_then(|l| l.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|pair| {
+                    let p = pair.as_array()?;
+                    let a = p.first()?.as_f64()?;
+                    let r = p.get(1).and_then(|x| x.as_f64()).unwrap_or(f64::INFINITY);
+                    Some((a, r))
+                })
+                .collect()
+        });
+    let stride = v
+        .get("stride")
+        .and_then(|n| n.as_u64())
+        .map(|n| n as usize)
+        .unwrap_or(SAMPLE_STRIDE);
+    detect_objects(scene, &rgb, &servos, depth.as_ref(), lidar.as_deref(), stride)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -800,5 +1637,96 @@ mod tests {
         let d = AimInfo::default_side("approve_tray", 700, "no_scan");
         assert!(d.describe().contains("objetivo fijo"));
         assert!(is_known_object("firestore") && !is_known_object("lamp"));
+    }
+
+    fn survey_servos(j1: u16) -> BTreeMap<u8, u16> {
+        let mut m = BTreeMap::new();
+        m.insert(1, j1);
+        for &(id, pos) in &SURVEY_POSE {
+            m.insert(id, pos);
+        }
+        m
+    }
+
+    fn project_point(point: Vec3, servos: &BTreeMap<u8, u16>) -> ((f64, f64), f64) {
+        let (origin, rot) = camera_pose(servos);
+        let d = [
+            point[0] - origin[0],
+            point[1] - origin[1],
+            point[2] - origin[2],
+        ];
+        let cx = d[0] * rot[0][0] + d[1] * rot[1][0] + d[2] * rot[2][0];
+        let cy = d[0] * rot[0][1] + d[1] * rot[1][1] + d[2] * rot[2][1];
+        let cz = d[0] * rot[0][2] + d[1] * rot[1][2] + d[2] * rot[2][2];
+        let (xo, yo, zo) = (-cy, -cz, cx);
+        (distort_normalized(xo / zo, yo / zo, &RGB_K, &RGB_D), zo)
+    }
+
+    fn blank_raw_image(width: u32, height: u32, bgr: [u8; 3]) -> RawImage {
+        let mut data = Vec::with_capacity((width * height * 3) as usize);
+        for _ in 0..(width * height) {
+            data.extend_from_slice(&bgr);
+        }
+        RawImage {
+            width,
+            height,
+            step: (width * 3) as usize,
+            encoding: "bgr8".into(),
+            is_bigendian: false,
+            data,
+        }
+    }
+
+    fn paint_box(img: &mut RawImage, u0: u32, v0: u32, u1: u32, v1: u32, bgr: [u8; 3]) {
+        for v in v0.min(img.height)..v1.min(img.height) {
+            for u in u0.min(img.width)..u1.min(img.width) {
+                let o = (v as usize) * img.step + (u as usize) * 3;
+                img.data[o..o + 3].copy_from_slice(&bgr);
+            }
+        }
+    }
+
+    #[test]
+    fn test_rust_camera_geometry_and_floor_projection() {
+        for (u, v) in [(10.0, 10.0), (320.0, 200.0), (600.0, 380.0)] {
+            let (x, y) = undistort_pixel(u, v, &RGB_K, &RGB_D, 8);
+            let (uu, vv) = distort_normalized(x, y, &RGB_K, &RGB_D);
+            assert!((uu - u).abs() < 1e-3 && (vv - v).abs() < 1e-3);
+        }
+        let servos = survey_servos(720);
+        let target = [0.18, 0.19, DEFAULT_FLOOR_Z_M];
+        let ((u, v), _) = project_point(target, &servos);
+        let (origin, dir) = pixel_ray(u, v, &servos);
+        let hit = intersect_plane_z(origin, dir, DEFAULT_FLOOR_Z_M).unwrap();
+        for (a, b) in hit.iter().zip(target.iter()) {
+            assert!((a - b).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn test_rust_vision_rejects_wood_floor_reflection_and_finds_real_tray_and_totems() {
+        let servos = survey_servos(720);
+        // Background is warm reddish-brown wood floor (R=130, G=95, B=70 -> BGR=[70, 95, 130])
+        let mut img = blank_raw_image(640, 400, [70, 95, 130]);
+        // 1) A huge false-positive orange-red curtain reflection directly on the wood floor
+        // (R=112, G=70, B=65 -> Hue ~6°, S=0.42, V=0.44, NO white paper around it):
+        paint_box(&mut img, 40, 60, 220, 220, [65, 70, 112]);
+        assert!(
+            detect_objects(ScanScene::Gatekeeper, &img, &servos, None, None, 2)
+                .unwrap()
+                .is_empty(),
+            "curtain reflection on wood floor without white paper backdrop must be rejected"
+        );
+
+        // 2) Now place the real printed RECHAZADO tray (white paper card + red border/title)
+        let ((u, v), _) = project_point([0.18, 0.19, DEFAULT_FLOOR_Z_M], &servos);
+        let (cu, cv) = (u as u32, v as u32);
+        paint_box(&mut img, cu - 45, cv - 35, cu + 45, cv + 35, [242, 242, 245]); // white paper card
+        paint_box(&mut img, cu - 30, cv - 20, cu + 30, cv + 20, [0x25, 0x30, 0xD9]); // red ink #D93025
+        let found = detect_objects(ScanScene::Gatekeeper, &img, &servos, None, None, 2).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "reject_tray");
+        assert!((found[0].x_m - 0.18).abs() < 0.03);
+        assert!((found[0].y_m - 0.19).abs() < 0.03);
     }
 }

@@ -2244,10 +2244,13 @@ fn handle_worker_line(
                 return;
             };
             let ok = v.get("ok").and_then(|b| b.as_bool()).unwrap_or(false);
-            let detections: Vec<CaptureDetection> = v
-                .get("detections")
-                .and_then(|d| serde_json::from_value(d.clone()).ok())
-                .unwrap_or_default();
+            let detections: Vec<CaptureDetection> = if v.get("rgb").is_some() {
+                scan_env::detect_from_worker_json(&v).unwrap_or_default()
+            } else {
+                v.get("detections")
+                    .and_then(|d| serde_json::from_value(d.clone()).ok())
+                    .unwrap_or_default()
+            };
             let error = if ok {
                 None
             } else {

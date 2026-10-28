@@ -38,14 +38,30 @@ const FOLLOW_UP_QUESTIONS = [
   'Ya agregué los tests de integración y un canary del 5%, ¿me entregas la llave?',
 ];
 
+// Half-open pulse for Servo 10: just enough gap (~10 mm) to slip the folded paper key between
+// the fingers without opening wide (220) or crossing the < 320 drop threshold.
+const KEY_INSERT_PULSE = 470;
+
 export default function GatekeeperDemoPage() {
   const robot = useRobotTelemetry();
-  const { telemetry, jogServo, moveChassis, simulateLidar, triggerGesture, resetScene, startSceneScan } = robot;
+  const {
+    telemetry,
+    jogServo,
+    setServoPulse,
+    moveChassis,
+    simulateLidar,
+    triggerGesture,
+    resetScene,
+    startSceneScan,
+  } = robot;
   const isLite = useLiteMode();
   const [prUrlInput, setPrUrlInput] = useState(PRESET_PR_LINKS[0].url);
   const [evaluating, setEvaluating] = useState(false);
   const [keyHint, setKeyHint] = useState('');
   const { sessionRef: liveSessionRef, consoleProps, setVerdictHeadline } = useEmbodiedLiveSession(robot);
+
+  const gripperPulse = telemetry.servos?.['10'] ?? 680;
+  const isPinzaOpenForKey = gripperPulse >= 380 && gripperPulse <= 540;
 
   useEffect(() => {
     void triggerGesture('gatekeeper_hold', 'guarding');
@@ -67,14 +83,24 @@ export default function GatekeeperDemoPage() {
     }
   };
 
-  const handleHoldAgain = async () => {
+  const handleOpenGripper = async () => {
+    setKeyHint('');
+    const j1 = telemetry.servos?.['1'] ?? 500;
+    if (Math.abs(j1 - 500) > 20) {
+      await triggerGesture('home', 'attentive');
+    }
+    await setServoPulse(10, KEY_INSERT_PULSE, 350);
+    setVerdictHeadline('Pinza entreabierta: coloca la llave de papel y pulsa Cerrar Pinza.');
+  };
+
+  const handleCloseGripper = async () => {
     setKeyHint('');
     await triggerGesture('gatekeeper_hold', 'guarding');
     setVerdictHeadline('Llave sujeta nuevamente en la pinza.');
   };
 
   // A new case starts clean: in mock or in the twin the key goes back to the gripper (what
-  // «Sujetar Llave» does); the real robot's key has to be put back by hand.
+  // «Cerrar Pinza» does); the real robot's key has to be put back by hand.
   const handleSelectCase = (url: string) => {
     if (url === prUrlInput) return;
     setPrUrlInput(url);
@@ -103,10 +129,14 @@ export default function GatekeeperDemoPage() {
             </button>
             <button
               type="button"
-              onClick={handleHoldAgain}
-              className="rounded-xl border border-[#DADCE0] bg-[#F8F9FA] px-3.5 py-2 text-xs font-bold text-[#202124] hover:border-[#1A73E8] hover:text-[#1A73E8]"
+              onClick={isPinzaOpenForKey ? handleCloseGripper : handleOpenGripper}
+              className={`rounded-xl border px-3.5 py-2 text-xs font-bold transition-colors ${
+                isPinzaOpenForKey
+                  ? 'border-[#1E8E3E] bg-[#E6F4EA] text-[#1E8E3E]'
+                  : 'border-[#DADCE0] bg-[#F8F9FA] text-[#202124] hover:border-[#1A73E8] hover:text-[#1A73E8]'
+              }`}
             >
-              Sujetar Llave
+              {isPinzaOpenForKey ? 'Cerrar Pinza' : 'Abrir Pinza'}
             </button>
           </div>
         </div>

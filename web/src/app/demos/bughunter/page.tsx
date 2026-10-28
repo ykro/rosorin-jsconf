@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { TopNav } from '@/components/TopNav';
 import { GeminiLiveConsole } from '@/components/GeminiLiveConsole';
@@ -72,7 +72,21 @@ export default function BugHunterDemoPage() {
     else if (gesture === 'point_gemini_live') setIdentifiedTotem('gemini_live');
     else if (gesture === 'point_firestore') setIdentifiedTotem('firestore');
   }, []);
-  const { sessionRef: liveSessionRef, consoleProps } = useEmbodiedLiveSession(robot, onVerdictGesture);
+  const { sessionRef: liveSessionRef, consoleProps, setVerdictHeadline } = useEmbodiedLiveSession(
+    robot,
+    onVerdictGesture
+  );
+
+  useEffect(() => {
+    void triggerGesture('home', 'attentive');
+  }, [triggerGesture]);
+
+  const handleSelectIncident = (url: string) => {
+    if (url === incidentInput) return;
+    setIncidentInput(url);
+    setIdentifiedTotem(null);
+    setVerdictHeadline('');
+  };
 
   const handleHunt = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -145,7 +159,7 @@ export default function BugHunterDemoPage() {
             <button
               key={item.url}
               type="button"
-              onClick={() => setIncidentInput(item.url)}
+              onClick={() => handleSelectIncident(item.url)}
               className={`rounded-xl border px-3.5 py-2 text-xs font-bold transition-colors ${
                 incidentInput === item.url
                   ? 'border-[#1A73E8] bg-[#E8F0FE] text-[#1A73E8]'

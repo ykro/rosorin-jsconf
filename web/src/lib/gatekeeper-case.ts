@@ -5,7 +5,7 @@
  */
 export type CaseSwitchAction = 'hold' | 'hint' | 'none';
 
-export const PUT_KEY_BACK_HINT = 'Vuelve a poner la llave en la pinza y pulsa Sujetar Llave.';
+export const PUT_KEY_BACK_HINT = 'Abre la pinza, coloca la llave de papel y pulsa Cerrar Pinza.';
 
 export function caseSwitchAction(
   bridgeConnected: boolean,
