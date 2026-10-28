@@ -169,7 +169,7 @@ class ColorTests(unittest.TestCase):
 
     def test_paper_wood_and_pale_tints_are_ignored(self):
         names = ("green", "red", "blue", "yellow")
-        for hexcolor in ("FFFFFF", "F1F3F4", "E6F4EA", "FCE8E6", "C8A27A", "202124", "808080", "B06000"):
+        for hexcolor in ("FFFFFF", "F1F3F4", "E6F4EA", "FCE8E6", "C8A27A", "202124", "808080", "8D6E63"):
             r, g, b = (int(hexcolor[i:i + 2], 16) for i in (0, 2, 4))
             self.assertEqual(se.classify_color(*se.rgb_to_hsv(r, g, b), names), "", hexcolor)
 

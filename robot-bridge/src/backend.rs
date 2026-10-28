@@ -1663,6 +1663,7 @@ impl RobotController {
             let mut st = lock(&self.state);
             st.scan_env = ScanEnvStatus::running(scene, now_ms());
             st.active_gesture = "scan_env".into();
+            st.mood = "scanning".into();
             st.pointed_totem = None;
             st.hud_headline = "RECONOCIENDO ENTORNO".into();
             st.hud_subtext = format!("Cámara 3D · barrido del brazo en {} pasos", scan_env::SCAN_STEPS);
@@ -1745,6 +1746,13 @@ impl RobotController {
                 st.scan_env.moved = false;
                 if st.active_gesture == "scan_env" {
                     st.active_gesture = "home".into();
+                }
+                if st.mood == "scanning" {
+                    st.mood = match scene {
+                        ScanScene::Gatekeeper => "guarding",
+                        ScanScene::Bughunter => "demo_bughunter",
+                    }
+                    .into();
                 }
                 st.hud_headline = "ENTORNO RECONOCIDO".into();
                 st.hud_subtext = format!("{} objeto(s) medidos", st.scan_env.detections.len());

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { TopNav } from '@/components/TopNav';
 import { GeminiLiveConsole } from '@/components/GeminiLiveConsole';
@@ -42,6 +42,15 @@ export default function RepoRoasterDemoPage() {
   const { sessionRef: liveSessionRef, consoleProps } = useEmbodiedLiveSession(robot, undefined, {
     systemPrompt: ROASTER_SYSTEM_PROMPT,
   });
+
+  useEffect(() => {
+    void triggerGesture('home', 'demo_roaster');
+    void robot.client?.updateHud({
+      headline: 'DEMO A · CODE ROASTER',
+      subtext: 'Listo para analizar tu repositorio',
+      mood: 'demo_roaster',
+    });
+  }, [triggerGesture, robot.client, robot.bridge.connected]);
 
   const handleAnalyzeAndRoast = async () => {
     if (!repoInput.trim()) return;

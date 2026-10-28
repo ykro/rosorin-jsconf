@@ -52,6 +52,9 @@ pub const J1_AXIS_X_M: f32 = 0.04662;
 pub const PULSE_DEG: f32 = 0.24;
 /// Views of one prop farther than this from its best view are outliers.
 pub const INLIER_RADIUS_M: f32 = 0.08;
+/// Minimum physical center-to-center distance between two distinct props on the floor (each totem
+/// is 18.2 cm wide and each tray is 18.6 cm wide, so two props cannot overlap).
+pub const MIN_PROP_SEPARATION_M: f32 = 0.165;
 /// Only the best views are averaged (the centered ones: less perspective and clipping).
 pub const TOP_VIEWS: usize = 3;
 /// Mock camera: half of the horizontal field of view (fx = 416 px for 640 px ≈ ±37.6°).
@@ -326,8 +329,10 @@ fn wrap_deg(a: f32) -> f32 {
 /// Merges the views of the sweep into one detection per prop: the best view (highest confidence),
 /// the views within `INLIER_RADIUS_M` of it, and the confidence-weighted mean of the `TOP_VIEWS`
 /// best of those. Confidence = their mean × (0.5 + 0.5 · min(1, views / 2)): one lone view counts half.
+/// Physical non-overlap: props are resolved in descending confidence order so two 18.2 cm totems
+/// (or 18.6 cm trays) never occupy the same floor spot (`MIN_PROP_SEPARATION_M`).
 pub fn aggregate(scene: ScanScene, captures: &[Vec<CaptureDetection>]) -> Vec<Detection> {
-    let mut out = Vec::new();
+    let mut grouped: Vec<(&'static str, Vec<&CaptureDetection>)> = Vec::new();
     for &id in scene.objects() {
         let mut views: Vec<&CaptureDetection> = captures
             .iter()
@@ -345,7 +350,22 @@ pub fn aggregate(scene: ScanScene, captures: &[Vec<CaptureDetection>]) -> Vec<De
             continue;
         }
         views.sort_by(|a, b| b.confidence.total_cmp(&a.confidence));
-        let best = views[0];
+        grouped.push((id, views));
+    }
+    // Highest-confidence prop claims its spot first
+    grouped.sort_by(|a, b| b.1[0].confidence.total_cmp(&a.1[0].confidence));
+
+    let mut placed: Vec<Detection> = Vec::new();
+    for (id, views) in grouped {
+        let best = views
+            .iter()
+            .copied()
+            .find(|cand| {
+                placed
+                    .iter()
+                    .all(|p| (cand.x_m - p.x_m).hypot(cand.y_m - p.y_m) >= MIN_PROP_SEPARATION_M)
+            })
+            .unwrap_or(views[0]);
         let inliers: Vec<&CaptureDetection> = views
             .iter()
             .copied()
@@ -356,7 +376,31 @@ pub fn aggregate(scene: ScanScene, captures: &[Vec<CaptureDetection>]) -> Vec<De
         let mean = |f: fn(&CaptureDetection) -> f32| {
             top.iter().map(|d| f(d) * d.confidence).sum::<f32>() / wsum
         };
-        let (x, y, z) = (mean(|d| d.x_m), mean(|d| d.y_m), mean(|d| d.z_m));
+        let (mut x, mut y, z) = (mean(|d| d.x_m), mean(|d| d.y_m), mean(|d| d.z_m));
+        for p in &placed {
+            let dx = x - p.x_m;
+            let dy = y - p.y_m;
+            let dist = dx.hypot(dy);
+            if dist < MIN_PROP_SEPARATION_M {
+                let sign = if dy.abs() > 1e-4 {
+                    dy.signum()
+                } else if y <= p.y_m {
+                    -1.0
+                } else {
+                    1.0
+                };
+                let needed_dy = (MIN_PROP_SEPARATION_M * MIN_PROP_SEPARATION_M - dx * dx)
+                    .max(0.0)
+                    .sqrt()
+                    .max(MIN_PROP_SEPARATION_M * 0.85);
+                y = p.y_m + sign * needed_dy;
+                let r = x.hypot(y);
+                let orig_r = mean(|d| d.x_m).hypot(mean(|d| d.y_m));
+                if r > 1e-3 && orig_r > 0.15 {
+                    x = (orig_r * orig_r - y * y).max(0.14 * 0.14).sqrt();
+                }
+            }
+        }
         let coverage = (inliers.len() as f32 / 2.0).min(1.0);
         let confidence = (wsum / top.len() as f32 * (0.5 + 0.5 * coverage)).clamp(0.0, 1.0);
         let lidar_confirmed = if inliers.iter().any(|d| d.lidar_confirmed == Some(true)) {
@@ -366,7 +410,7 @@ pub fn aggregate(scene: ScanScene, captures: &[Vec<CaptureDetection>]) -> Vec<De
         } else {
             None
         };
-        out.push(Detection {
+        placed.push(Detection {
             id: id.to_string(),
             label: object_label(id).to_string(),
             x_m: round_to(x, 4),
@@ -381,7 +425,15 @@ pub fn aggregate(scene: ScanScene, captures: &[Vec<CaptureDetection>]) -> Vec<De
             joint1_target: joint1_for_point(x, y),
         });
     }
-    out
+    // Preserve scene object order in output
+    placed.sort_by_key(|d| {
+        scene
+            .objects()
+            .iter()
+            .position(|&o| o == d.id)
+            .unwrap_or(usize::MAX)
+    });
+    placed
 }
 
 fn round_to(v: f32, decimals: i32) -> f32 {
@@ -607,18 +659,19 @@ pub const TOTEM_CLOSE_RADIUS: usize = 3;
 pub const TRAY_CLOSE_RADIUS: usize = 5;
 pub const MIN_BLOB_CELLS: usize = 18;
 pub const TRAY_FULL_CONFIDENCE_CELLS: f32 = 140.0;
-pub const TOTEM_FULL_CONFIDENCE_CELLS: f32 = 65.0;
-pub const SIDE_PENALTY: f32 = 0.75;
-pub const CENTERING_WEIGHT: f32 = 0.4;
+pub const TOTEM_FULL_CONFIDENCE_CELLS: f32 = 55.0;
+pub const SIDE_PENALTY: f32 = 0.72;
+pub const CENTERING_WEIGHT: f32 = 0.52;
 pub const LIDAR_CONFIRM_HALF_ANGLE_DEG: f64 = 5.0;
 pub const LIDAR_CONFIRM_TOLERANCE_M: f64 = 0.12;
 
 /// Every printed prop (both Demo B trays and Demo C totems) is colored ink surrounded by a bright
-/// white/pastel paper card (`S <= 0.18, V >= 0.65`). Requiring at least `MIN_PAPER_RATIO` of the
-/// non-colored cells inside the padded bounding box to be paper eliminates false positives from
-/// wood floors, curtains, furniture and window reflections in both Demo B and Demo C.
+/// white/pastel paper card (`S <= 0.18, V >= 0.52`, or cool skylight-tinted white paper
+/// `Hue 185°..255°, S <= 0.28, V >= 0.55`). Requiring at least `MIN_PAPER_RATIO` of the non-colored
+/// cells inside the padded bounding box to be paper eliminates false positives from wood floors,
+/// curtains, furniture and window reflections in both Demo B and Demo C.
 pub const PAPER_MAX_S: f32 = 0.18;
-pub const PAPER_MIN_V: f32 = 0.65;
+pub const PAPER_MIN_V: f32 = 0.52;
 pub const PAPER_PAD_CELLS: usize = 6;
 pub const MIN_PAPER_RATIO: f32 = 0.18;
 
@@ -635,7 +688,7 @@ pub const COLOR_SPECS: [ColorSpec; 4] = [
         name: "green",
         hues: &[(80.0, 178.0)],
         min_s: 0.13,
-        min_v: 0.32,
+        min_v: 0.22,
     },
     ColorSpec {
         name: "red",
@@ -646,14 +699,14 @@ pub const COLOR_SPECS: [ColorSpec; 4] = [
     ColorSpec {
         name: "blue",
         hues: &[(195.0, 248.0)],
-        min_s: 0.30,
-        min_v: 0.30,
+        min_s: 0.40,
+        min_v: 0.28,
     },
     ColorSpec {
         name: "yellow",
-        hues: &[(34.0, 65.0)],
-        min_s: 0.24,
-        min_v: 0.45,
+        hues: &[(18.0, 65.0)],
+        min_s: 0.46,
+        min_v: 0.25,
     },
 ];
 
@@ -966,7 +1019,9 @@ pub fn color_grid(
             }
             let (hue, s, v) = rgb_to_hsv(image.data[o + ri], image.data[o + gi], image.data[o + bi]);
             let idx = row * cols + col;
-            if s <= PAPER_MAX_S && v >= PAPER_MIN_V {
+            let neutral_paper = s <= PAPER_MAX_S && v >= PAPER_MIN_V;
+            let cool_skylight_paper = s <= 0.28 && v >= 0.55 && (185.0..=255.0).contains(&hue);
+            if neutral_paper || cool_skylight_paper {
                 paper[idx] = true;
             }
             let matched = classify_color(hue, s, v, names);
@@ -1251,47 +1306,55 @@ pub fn detect_objects(
             TOTEM_CLOSE_RADIUS
         };
         let blobs = find_blobs(&cells, &paper, cols, rows, color_idx, radius);
-        let Some(blob) = blobs
-            .into_iter()
-            .find(|b| b.cells >= MIN_BLOB_CELLS && b.paper_ratio >= MIN_PAPER_RATIO)
-        else {
-            continue;
-        };
-        let (cu, cv) = if spec.is_tray {
-            let (c0, r0, c1, r1) = blob.bbox;
-            ((c0 + c1) as f64 / 2.0, (r0 + r1) as f64 / 2.0)
-        } else {
-            blob.centroid
-        };
-        let (u, v) = (cu * sx + sx / 2.0, cv * sy + sy / 2.0);
-        let mut point = None;
-        let mut method = "plane";
-        if let Some(d_img) = depth {
-            let (du, dv) = rgb_to_depth_pixel(u, v, (rgb.width, rgb.height), (d_img.width, d_img.height));
-            if let Some(z) = depth_at(d_img, du, dv, 4) {
-                point = Some(pixel_depth_to_base(
+        let mut chosen = None;
+        for blob in blobs {
+            if blob.cells < MIN_BLOB_CELLS || blob.paper_ratio < MIN_PAPER_RATIO {
+                continue;
+            }
+            let (cu, cv) = if spec.is_tray {
+                let (c0, r0, c1, r1) = blob.bbox;
+                ((c0 + c1) as f64 / 2.0, (r0 + r1) as f64 / 2.0)
+            } else {
+                blob.centroid
+            };
+            let (u, v) = (cu * sx + sx / 2.0, cv * sy + sy / 2.0);
+            let mut point = None;
+            let mut method = "plane";
+            if let Some(d_img) = depth {
+                let (du, dv) = rgb_to_depth_pixel(u, v, (rgb.width, rgb.height), (d_img.width, d_img.height));
+                if let Some(z) = depth_at(d_img, du, dv, 4) {
+                    point = Some(pixel_depth_to_base(
+                        u * RGB_SIZE.0 as f64 / rgb.width as f64,
+                        v * RGB_SIZE.1 as f64 / rgb.height as f64,
+                        z,
+                        servos,
+                    ));
+                    method = "depth";
+                }
+            }
+            if point.is_none() {
+                let (origin, direction) = pixel_ray(
                     u * RGB_SIZE.0 as f64 / rgb.width as f64,
                     v * RGB_SIZE.1 as f64 / rgb.height as f64,
-                    z,
                     servos,
-                ));
-                method = "depth";
+                );
+                let plane = if spec.is_tray {
+                    floor_z
+                } else {
+                    floor_z + 0.048
+                };
+                point = intersect_plane_z(origin, direction, plane);
+            }
+            let Some(pt) = point else {
+                continue;
+            };
+            let dist = pt[0].hypot(pt[1]);
+            if pt[0] >= 0.12 && (0.15..=0.88).contains(&dist) {
+                chosen = Some((blob, u, pt, method));
+                break;
             }
         }
-        if point.is_none() {
-            let (origin, direction) = pixel_ray(
-                u * RGB_SIZE.0 as f64 / rgb.width as f64,
-                v * RGB_SIZE.1 as f64 / rgb.height as f64,
-                servos,
-            );
-            let plane = if spec.is_tray {
-                floor_z
-            } else {
-                floor_z + 0.08
-            };
-            point = intersect_plane_z(origin, direction, plane);
-        }
-        let Some(pt) = point else {
+        let Some((blob, u, pt, method)) = chosen else {
             continue;
         };
         let full_cells = if spec.is_tray {

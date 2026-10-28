@@ -563,7 +563,7 @@ export class EmbodiedGeminiLiveSession {
     await this.executeEmbodiedTool('express_verdict', {
       gesture,
       mood: analysis.roastScore < 60 ? 'roasting' : 'impressed',
-      verdict_headline: '',
+      verdict_headline: `Roasteando ${analysis.repo}`,
     });
 
     const take = ++this.roastTakeIndex;
@@ -602,7 +602,7 @@ export class EmbodiedGeminiLiveSession {
 
     await this.executeEmbodiedTool('release_deploy_key', {
       decision: shouldApprove ? 'approve' : 'reject',
-      reason_es: '',
+      reason_es: shouldApprove ? 'Deploy aprobado en bandeja verde' : 'Deploy rechazado en bandeja roja',
     });
 
     const take = ++this.roastTakeIndex;
@@ -638,7 +638,10 @@ export class EmbodiedGeminiLiveSession {
 
     if (!(await this.ensureLiveForTurn(apiKey))) return null;
 
-    await this.executeEmbodiedTool('point_at_service_totem', { service, diagnosis_es: '' });
+    await this.executeEmbodiedTool('point_at_service_totem', {
+      service,
+      diagnosis_es: `Señalando tótem ${service.replace('_', ' ')}`,
+    });
 
     const take = ++this.roastTakeIndex;
     const angle = BUGHUNTER_ANGLES[take % BUGHUNTER_ANGLES.length];
@@ -675,7 +678,11 @@ export class EmbodiedGeminiLiveSession {
       mood = 'explaining';
     }
 
-    await this.executeEmbodiedTool('express_verdict', { gesture, mood, verdict_headline: '' });
+    await this.executeEmbodiedTool('express_verdict', {
+      gesture,
+      mood,
+      verdict_headline: text.slice(0, 80),
+    });
 
     const take = ++this.roastTakeIndex;
     const angle = GATEKEEPER_ANGLES[take % GATEKEEPER_ANGLES.length];

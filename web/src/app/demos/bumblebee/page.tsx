@@ -91,6 +91,15 @@ export default function BumblebeeDemoPage() {
   const sessionRef = useRef<BumblebeeRadioSession | null>(null);
 
   useEffect(() => {
+    void triggerGesture('home', 'demo_bumblebee');
+    void robot.client?.updateHud({
+      headline: 'DEMO D · RADIO BUMBLEBEE',
+      subtext: 'Sintonizando frecuencia FM',
+      mood: 'demo_bumblebee',
+    });
+  }, [triggerGesture, robot.client, robot.bridge.connected]);
+
+  useEffect(() => {
     fetch('/songs/catalog.json')
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);

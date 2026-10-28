@@ -24,15 +24,6 @@ export default function RobotFacePage() {
   const isSpeaking = Boolean(telemetry.speaking);
   const isListening = Boolean(telemetry.listening);
 
-  // Mouth animation only while speaking (no 60 ms re-render loop when idle).
-  useEffect(() => {
-    if (!isSpeaking) return;
-    const anim = setInterval(() => {
-      setTalkPhase((p) => (p + 1) % 60);
-    }, 80);
-    return () => clearInterval(anim);
-  }, [isSpeaking]);
-
   // Track Servo 1 (base yaw: 120..880, center 500) and Servo 4 (wrist pitch: center 380)
   const servo1 = telemetry.servos['1'] ?? 500;
   const servo4 = telemetry.servos['4'] ?? 380;
@@ -44,14 +35,58 @@ export default function RobotFacePage() {
   const mood = (telemetry.mood || 'attentive').toLowerCase();
   const obstacleAlert =
     telemetry.lidar?.obstacle_alert || (telemetry.lidar?.front_m ?? 1.5) < 0.25;
+  const isScanning =
+    telemetry.scan_env?.state === 'running' ||
+    gesture === 'scan_env' ||
+    mood.includes('scanning');
+  const isChassisMoving =
+    Math.abs(telemetry.odometry?.vx ?? 0) > 0.01 ||
+    Math.abs(telemetry.odometry?.vy ?? 0) > 0.01 ||
+    Math.abs(telemetry.odometry?.wz ?? 0) > 0.02 ||
+    mood.includes('moving');
+  const isArmActive = gesture !== 'home' && gesture !== 'stopped';
+  const isAnimatedState = isSpeaking || isScanning || isChassisMoving || isArmActive;
 
-  type Expression = 'friendly' | 'happy' | 'roasting' | 'focused';
+  // Animation loop while speaking, recognizing, moving chassis, or executing an arm gesture
+  useEffect(() => {
+    if (!isAnimatedState) return;
+    const anim = setInterval(() => {
+      setTalkPhase((p) => (p + 1) % 120);
+    }, 80);
+    return () => clearInterval(anim);
+  }, [isAnimatedState]);
+
+  type Expression = 'friendly' | 'happy' | 'roasting' | 'focused' | 'scanning';
   let expression: Expression = 'friendly';
   let primaryColor = '#4285F4'; // Google Blue
 
   if (obstacleAlert) {
     expression = 'roasting';
     primaryColor = '#EA4335'; // Google Red
+  } else if (isScanning) {
+    expression = 'scanning';
+    primaryColor = '#00E5FF'; // Radar Cyan
+  } else if (
+    gesture === 'point_cloud_run' ||
+    mood.includes('cloud_run') ||
+    telemetry.pointed_totem === 'cloud_run'
+  ) {
+    expression = 'focused';
+    primaryColor = '#4285F4'; // Cloud Run Blue
+  } else if (
+    gesture === 'point_gemini_live' ||
+    mood.includes('gemini_live') ||
+    telemetry.pointed_totem === 'gemini_live'
+  ) {
+    expression = 'focused';
+    primaryColor = '#34A853'; // Gemini Live Green
+  } else if (
+    gesture === 'point_firestore' ||
+    mood.includes('firestore') ||
+    telemetry.pointed_totem === 'firestore'
+  ) {
+    expression = 'focused';
+    primaryColor = '#FBBC04'; // Firestore Amber
   } else if (
     gesture === 'gatekeeper_approve' ||
     gesture === 'chef_kiss' ||
@@ -78,15 +113,24 @@ export default function RobotFacePage() {
     gesture === 'bumblebee_sad_droop' ||
     mood.includes('reject') ||
     mood.includes('roast') ||
+    mood.includes('demo_roaster') ||
     mood.includes('angry') ||
     mood.includes('sad')
   ) {
     expression = 'roasting';
-    primaryColor = '#EA4335'; // Google Red
+    primaryColor = mood.includes('demo_roaster') ? '#FF5500' : '#EA4335';
+  } else if (
+    mood.includes('demo_bughunter') ||
+    mood.includes('explaining') ||
+    gesture === 'suspicious_inspect'
+  ) {
+    expression = 'focused';
+    primaryColor = '#A855F7'; // Bug Hunter Cyber Purple
+  } else if (mood.includes('demo_bumblebee')) {
+    expression = 'happy';
+    primaryColor = '#FBBC04'; // Bumblebee Gold
   } else if (
     gesture === 'gatekeeper_hold' ||
-    gesture === 'suspicious_inspect' ||
-    gesture === 'point_firestore' ||
     gesture === 'bumblebee_sassy' ||
     mood.includes('guard') ||
     mood.includes('skeptic') ||
@@ -95,13 +139,24 @@ export default function RobotFacePage() {
   ) {
     expression = 'focused';
     primaryColor = '#FBBC04'; // Google Yellow
-  } else if (gesture === 'point_gemini_live') {
+  } else if (isChassisMoving) {
     expression = 'focused';
-    primaryColor = '#34A853';
-  } else if (gesture === 'point_cloud_run') {
-    expression = 'focused';
-    primaryColor = '#4285F4';
+    primaryColor = '#00E5FF';
   }
+
+  // While speaking or moving, modulate eyebrows and eye expression dynamically with talkPhase
+  const browWave = isSpeaking
+    ? Math.sin(talkPhase * 0.45) * 15
+    : isChassisMoving || isArmActive
+      ? Math.sin(talkPhase * 0.35) * 9
+      : 0;
+  const browAsym = isSpeaking ? Math.cos(talkPhase * 0.28) * 11 : 0;
+  const eyePulse = isSpeaking ? Math.sin(talkPhase * 0.5) * 8 : 0;
+  const scanBeamOffset = ((talkPhase * 9) % 136) - 68;
+  const scanStepText =
+    isScanning && telemetry.scan_env?.steps
+      ? `RECONOCIENDO ENTORNO · PASO ${telemetry.scan_env.step}/${telemetry.scan_env.steps}`
+      : telemetry.hud_headline || '';
 
   const handleTap = () => {
     if (isSpeaking) {
@@ -159,14 +214,14 @@ export default function RobotFacePage() {
         {expression === 'friendly' && (
           <>
             <path
-              d={`M ${220 + gazeX * 0.3} ${115 + gazeY * 0.3} Q ${310 + gazeX * 0.3} ${92 + gazeY * 0.3} ${400 + gazeX * 0.3} ${115 + gazeY * 0.3}`}
+              d={`M ${220 + gazeX * 0.3} ${115 + gazeY * 0.3 + browWave - browAsym} Q ${310 + gazeX * 0.3} ${92 + gazeY * 0.3 - Math.abs(browWave)} ${400 + gazeX * 0.3} ${115 + gazeY * 0.3 + browAsym}`}
               fill="none"
               stroke={primaryColor}
               strokeWidth="12"
               strokeLinecap="round"
             />
             <path
-              d={`M ${600 + gazeX * 0.3} ${115 + gazeY * 0.3} Q ${690 + gazeX * 0.3} ${92 + gazeY * 0.3} ${780 + gazeX * 0.3} ${115 + gazeY * 0.3}`}
+              d={`M ${600 + gazeX * 0.3} ${115 + gazeY * 0.3 - browAsym} Q ${690 + gazeX * 0.3} ${92 + gazeY * 0.3 - Math.abs(browWave)} ${780 + gazeX * 0.3} ${115 + gazeY * 0.3 + browWave + browAsym}`}
               fill="none"
               stroke={primaryColor}
               strokeWidth="12"
@@ -178,14 +233,14 @@ export default function RobotFacePage() {
         {expression === 'happy' && (
           <>
             <path
-              d={`M ${215 + gazeX * 0.3} ${105 + gazeY * 0.3} Q ${310 + gazeX * 0.3} ${70 + gazeY * 0.3} ${405 + gazeX * 0.3} ${105 + gazeY * 0.3}`}
+              d={`M ${215 + gazeX * 0.3} ${105 + gazeY * 0.3 + browWave * 0.7} Q ${310 + gazeX * 0.3} ${70 + gazeY * 0.3 - Math.abs(browWave)} ${405 + gazeX * 0.3} ${105 + gazeY * 0.3 - browWave * 0.5}`}
               fill="none"
               stroke={primaryColor}
               strokeWidth="14"
               strokeLinecap="round"
             />
             <path
-              d={`M ${595 + gazeX * 0.3} ${105 + gazeY * 0.3} Q ${690 + gazeX * 0.3} ${70 + gazeY * 0.3} ${785 + gazeX * 0.3} ${105 + gazeY * 0.3}`}
+              d={`M ${595 + gazeX * 0.3} ${105 + gazeY * 0.3 - browWave * 0.5} Q ${690 + gazeX * 0.3} ${70 + gazeY * 0.3 - Math.abs(browWave)} ${785 + gazeX * 0.3} ${105 + gazeY * 0.3 + browWave * 0.7}`}
               fill="none"
               stroke={primaryColor}
               strokeWidth="14"
@@ -199,18 +254,18 @@ export default function RobotFacePage() {
             {/* Furrowed V-brows */}
             <line
               x1={210 + gazeX * 0.3}
-              y1={95 + gazeY * 0.3}
+              y1={95 + gazeY * 0.3 - Math.abs(browWave) * 0.6}
               x2={410 + gazeX * 0.3}
-              y2={138 + gazeY * 0.3}
+              y2={138 + gazeY * 0.3 + browWave * 0.8}
               stroke={primaryColor}
               strokeWidth="16"
               strokeLinecap="round"
             />
             <line
               x1={790 + gazeX * 0.3}
-              y1={95 + gazeY * 0.3}
+              y1={95 + gazeY * 0.3 - Math.abs(browWave) * 0.6}
               x2={590 + gazeX * 0.3}
-              y2={138 + gazeY * 0.3}
+              y2={138 + gazeY * 0.3 + browWave * 0.8}
               stroke={primaryColor}
               strokeWidth="16"
               strokeLinecap="round"
@@ -218,20 +273,20 @@ export default function RobotFacePage() {
           </>
         )}
 
-        {expression === 'focused' && (
+        {(expression === 'focused' || expression === 'scanning') && (
           <>
             {/* One raised skeptical brow, one flat scanner brow */}
             <line
               x1={210 + gazeX * 0.3}
-              y1={122 + gazeY * 0.3}
+              y1={122 + gazeY * 0.3 + browWave * 0.7}
               x2={410 + gazeX * 0.3}
-              y2={118 + gazeY * 0.3}
+              y2={118 + gazeY * 0.3 - browAsym * 0.6}
               stroke={primaryColor}
               strokeWidth="14"
               strokeLinecap="round"
             />
             <path
-              d={`M ${590 + gazeX * 0.3} ${118 + gazeY * 0.3} Q ${690 + gazeX * 0.3} ${72 + gazeY * 0.3} ${790 + gazeX * 0.3} ${108 + gazeY * 0.3}`}
+              d={`M ${590 + gazeX * 0.3} ${118 + gazeY * 0.3 + browAsym * 0.6} Q ${690 + gazeX * 0.3} ${72 + gazeY * 0.3 - Math.abs(browWave)} ${790 + gazeX * 0.3} ${108 + gazeY * 0.3 - browWave * 0.7}`}
               fill="none"
               stroke={primaryColor}
               strokeWidth="14"
@@ -255,8 +310,8 @@ export default function RobotFacePage() {
             );
           }
 
-          if (expression === 'happy') {
-            // Smiling arched anime/robot eyes (^ ^)
+          if (expression === 'happy' && !isSpeaking) {
+            // Smiling arched anime/robot eyes (^ ^) when happy and not mid-speech
             return (
               <g key={idx} transform={`translate(${gazeX}, ${gazeY})`}>
                 <path
@@ -270,6 +325,14 @@ export default function RobotFacePage() {
             );
           }
 
+          const baseRy =
+            expression === 'scanning'
+              ? 82
+              : expression === 'focused'
+                ? 86
+                : 108;
+          const ry = Math.max(68, baseRy + eyePulse);
+
           return (
             <g key={idx}>
               {/* Outer Sclera / Eye Socket */}
@@ -277,17 +340,30 @@ export default function RobotFacePage() {
                 cx={cx + gazeX * 0.35}
                 cy={255 + gazeY * 0.35}
                 rx="112"
-                ry={expression === 'focused' ? 86 : 108}
+                ry={ry}
                 fill="#141B26"
                 stroke={primaryColor}
                 strokeWidth="10"
               />
 
+              {/* Voice-reactive halo ring inside eye when speaking */}
+              {isSpeaking && (
+                <circle
+                  cx={cx + gazeX}
+                  cy={255 + gazeY}
+                  r={66 + talkOpen * 0.38}
+                  fill="none"
+                  stroke={primaryColor}
+                  strokeWidth="4"
+                  opacity="0.55"
+                />
+              )}
+
               {/* Glowing Iris */}
               <circle
                 cx={cx + gazeX}
                 cy={255 + gazeY}
-                r={expression === 'focused' ? 54 : 64}
+                r={expression === 'focused' || expression === 'scanning' ? 54 : 64}
                 fill={primaryColor}
               />
 
@@ -295,9 +371,35 @@ export default function RobotFacePage() {
               <circle
                 cx={cx + gazeX * 1.15}
                 cy={255 + gazeY * 1.15}
-                r="28"
+                r={expression === 'scanning' ? 22 : 28}
                 fill="#0B0F17"
               />
+
+              {/* Radar Reticle & Laser Scan Beam during «Reconocer» */}
+              {expression === 'scanning' && (
+                <>
+                  <circle
+                    cx={cx + gazeX * 1.15}
+                    cy={255 + gazeY * 1.15}
+                    r="38"
+                    fill="none"
+                    stroke="#FFFFFF"
+                    strokeWidth="3"
+                    strokeDasharray="10 8"
+                    opacity="0.85"
+                  />
+                  <line
+                    x1={cx - 88 + gazeX * 0.5}
+                    y1={255 + gazeY * 0.5 + scanBeamOffset}
+                    x2={cx + 88 + gazeX * 0.5}
+                    y2={255 + gazeY * 0.5 + scanBeamOffset}
+                    stroke="#FFFFFF"
+                    strokeWidth="4"
+                    strokeLinecap="round"
+                    opacity="0.85"
+                  />
+                </>
+              )}
 
               {/* Primary + Secondary White Catchlights (gives life to the eyes) */}
               <circle
@@ -343,6 +445,24 @@ export default function RobotFacePage() {
               />
             )}
           </g>
+        ) : expression === 'scanning' ? (
+          /* Radar / Telemetry Equalizer Mouth while Recognizing */
+          <g transform={`translate(${gazeX * 0.25}, ${gazeY * 0.25})`}>
+            {[-72, -36, 0, 36, 72].map((dx, i) => {
+              const barH = 14 + Math.abs(Math.sin((talkPhase + i * 7) * 0.45)) * 28;
+              return (
+                <rect
+                  key={i}
+                  x={500 + dx - 9}
+                  y={460 - barH / 2}
+                  width="18"
+                  height={barH}
+                  rx="8"
+                  fill={primaryColor}
+                />
+              );
+            })}
+          </g>
         ) : expression === 'happy' ? (
           /* Big Happy Open Smile */
           <path
@@ -382,9 +502,39 @@ export default function RobotFacePage() {
           />
         )}
 
-        {/* Subtle Listening Indicator Dot at bottom when mic is active */}
-        {isListening && !isSpeaking && (
-          <circle cx="500" cy="560" r="8" fill="#34A853" />
+        {/* Bottom HUD Status Pill (shows active demo, verdict or Reconocer step) */}
+        {scanStepText && (
+          <g>
+            <rect
+              x="250"
+              y="534"
+              width="500"
+              height="42"
+              rx="21"
+              fill="#141B26"
+              stroke={primaryColor}
+              strokeWidth="3"
+              opacity="0.92"
+            />
+            <circle
+              cx="282"
+              cy="555"
+              r="7"
+              fill={isListening && !isSpeaking ? '#34A853' : primaryColor}
+            />
+            <text
+              x="505"
+              y="556"
+              fill="#FFFFFF"
+              fontSize="19"
+              fontWeight="bold"
+              fontFamily="Inter, -apple-system, BlinkMacSystemFont, sans-serif"
+              textAnchor="middle"
+              dominantBaseline="middle"
+            >
+              {scanStepText.slice(0, 42)}
+            </text>
+          </g>
         )}
       </svg>
     </div>

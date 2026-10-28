@@ -65,7 +65,12 @@ export default function GatekeeperDemoPage() {
 
   useEffect(() => {
     void triggerGesture('gatekeeper_hold', 'guarding');
-  }, [triggerGesture]);
+    void robot.client?.updateHud({
+      headline: 'DEMO B · GATEKEEPER CI/CD',
+      subtext: 'Custodiando la llave de producción',
+      mood: 'guarding',
+    });
+  }, [triggerGesture, robot.client, robot.bridge.connected]);
 
   const handleEvaluatePr = async (e?: React.FormEvent) => {
     e?.preventDefault();

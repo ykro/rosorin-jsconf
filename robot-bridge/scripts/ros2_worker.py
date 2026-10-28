@@ -472,8 +472,15 @@ def create_telemetry_node():
         os.environ.setdefault("ROS_LOCALHOST_ONLY", "1")
         ensure_rclpy()
         from rclpy.node import Node
-        from rclpy.qos import qos_profile_sensor_data
+        from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
         from sensor_msgs.msg import Image, LaserScan
+
+        # depth=1 for camera topics so DDS never queues a 5-frame backlog while the arm sweeps
+        camera_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
 
         try:
             import cv2
@@ -511,18 +518,18 @@ def create_telemetry_node():
                 except Exception as e:
                     sys.stderr.write(f"[ros2_worker] camera encode error: {e}\n")
 
-            # Best-effort QoS matches both reliable and best-effort sensor publishers
+            # Best-effort depth=1 QoS drops stale camera frames instead of buffering a 5-frame backlog
             node.create_subscription(
-                Image, "/depth_cam/rgb0/image_raw", on_image, qos_profile_sensor_data
+                Image, "/depth_cam/rgb0/image_raw", on_image, camera_qos
             )
             sys.stderr.write("[ros2_worker] Subscribed to /depth_cam/rgb0/image_raw (Aurora 930)\n")
         else:
             # Without cv2 there is no JPEG preview, but «Reconocer entorno» still needs the frames.
             node.create_subscription(
-                Image, "/depth_cam/rgb0/image_raw", SCANNER.on_rgb, qos_profile_sensor_data
+                Image, "/depth_cam/rgb0/image_raw", SCANNER.on_rgb, camera_qos
             )
         node.create_subscription(
-            Image, "/depth_cam/depth0/image_raw", SCANNER.on_depth, qos_profile_sensor_data
+            Image, "/depth_cam/depth0/image_raw", SCANNER.on_depth, camera_qos
         )
 
         def on_scan(msg: LaserScan):

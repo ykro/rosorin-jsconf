@@ -682,43 +682,51 @@ function Rosorin3DViewerScene({
     const createTotemCardTexture = (code: string, title: string, sub: string, accentHex: string) => {
       const canvas = document.createElement('canvas');
       canvas.width = 512;
-      canvas.height = 268;
+      canvas.height = 512;
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        // On BoxGeometry's -X face (facing the robot in Z-up ROS coordinates), canvas +y runs
+        // left-to-right (+Y -> -Y) and canvas -x runs top-to-bottom (+Z -> -Z). Rotating +90°
+        // around (512, 0) maps (cx, cy) in 512×512 card space upright onto the totem face.
+        ctx.save();
+        ctx.translate(512, 0);
+        ctx.rotate(Math.PI / 2);
+
         // White folded tent card face
         ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, 512, 512);
         ctx.strokeStyle = '#DADCE0';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+        ctx.lineWidth = 6;
+        ctx.strokeRect(6, 6, 500, 500);
 
         // Top colored header pill (DEMO C · TÓTEM DE SERVICIO)
         ctx.fillStyle = accentHex;
         ctx.beginPath();
-        ctx.roundRect(18, 14, 476, 36, 10);
+        ctx.roundRect(22, 24, 468, 64, 14);
         ctx.fill();
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 16px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.font = 'bold 24px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('DEMO C · TÓTEM DE SERVICIO', 256, 32);
+        ctx.fillText('DEMO C · TÓTEM DE SERVICIO', 256, 56);
 
         // Colored square icon badge (CR / GL / FS)
         ctx.fillStyle = accentHex;
         ctx.beginPath();
-        ctx.roundRect(194, 62, 124, 108, 20);
+        ctx.roundRect(186, 118, 140, 196, 26);
         ctx.fill();
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 56px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillText(code, 256, 118);
+        ctx.font = 'bold 74px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(code, 256, 220);
 
         // Service name & subtitle
         ctx.fillStyle = '#202124';
-        ctx.font = 'bold 42px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillText(title, 256, 206);
+        ctx.font = 'bold 54px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(title, 256, 386);
         ctx.fillStyle = '#5F6368';
-        ctx.font = '20px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillText(sub, 256, 242);
+        ctx.font = 'bold 26px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(sub, 256, 456);
+        ctx.restore();
       }
       const tex = new THREE.CanvasTexture(canvas);
       tex.colorSpace = THREE.SRGBColorSpace;

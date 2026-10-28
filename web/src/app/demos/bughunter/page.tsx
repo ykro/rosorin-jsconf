@@ -78,8 +78,13 @@ export default function BugHunterDemoPage() {
   );
 
   useEffect(() => {
-    void triggerGesture('home', 'attentive');
-  }, [triggerGesture]);
+    void triggerGesture('home', 'demo_bughunter');
+    void robot.client?.updateHud({
+      headline: 'DEMO C · BUG HUNTER',
+      subtext: 'Listo para diagnosticar incidentes',
+      mood: 'demo_bughunter',
+    });
+  }, [triggerGesture, robot.client, robot.bridge.connected]);
 
   const handleSelectIncident = (url: string) => {
     if (url === incidentInput) return;

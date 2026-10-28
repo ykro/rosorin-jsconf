@@ -75,18 +75,18 @@ LIDAR_ORIGIN_XY = (0.048156, 0.0000755)
 # Hue ranges in degrees (0-360). `min_s`/`min_v` are 0-1. The trays' fill is a pale tint (S < 0.1):
 # what the camera finds are the saturated border, drop circle and the big APROBADO/RECHAZADO word.
 COLOR_SPECS = {
-    "green": {"hues": ((80.0, 178.0),), "min_s": 0.13, "min_v": 0.32},
+    "green": {"hues": ((80.0, 178.0),), "min_s": 0.13, "min_v": 0.22},
     "red": {"hues": ((335.0, 360.0), (0.0, 15.0)), "min_s": 0.12, "min_v": 0.42},
-    "blue": {"hues": ((195.0, 248.0),), "min_s": 0.30, "min_v": 0.30},
-    "yellow": {"hues": ((34.0, 65.0),), "min_s": 0.24, "min_v": 0.45},  # not the key's amber #B06000
+    "blue": {"hues": ((195.0, 248.0),), "min_s": 0.40, "min_v": 0.28},
+    "yellow": {"hues": ((18.0, 65.0),), "min_s": 0.46, "min_v": 0.25},
 }
 PAPER_MAX_S = 0.18
-PAPER_MIN_V = 0.65
+PAPER_MIN_V = 0.52
 PAPER_PAD_CELLS = 6
 MIN_PAPER_RATIO = 0.18
 # Height (base_link z) of the colored part of each prop, for the ray/plane fallback.
 TRAY_PLANE_Z_M = FLOOR_Z_M
-TOTEM_PLANE_Z_M = FLOOR_Z_M + 0.08  # the totems' color band and icon sit ~5-11 cm above the table
+TOTEM_PLANE_Z_M = FLOOR_Z_M + 0.048  # center of the 9.5 cm folded tent card face
 
 SCENES = {
     "gatekeeper": (
@@ -285,7 +285,7 @@ def color_grid_with_paper(image, names, stride: int = SAMPLE_STRIDE) -> tuple:
             o = base + col * stride * px
             h, s, v = rgb_to_hsv(data[o + ri], data[o + gi], data[o + bi])
             idx = row * cols + col
-            if s <= PAPER_MAX_S and v >= PAPER_MIN_V:
+            if (s <= PAPER_MAX_S and v >= PAPER_MIN_V) or (s <= 0.28 and v >= 0.55 and 185.0 <= h <= 255.0):
                 paper[idx] = 1
             name = classify_color(h, s, v, names)
             if name:
